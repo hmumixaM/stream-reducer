@@ -51,14 +51,35 @@ The OpenRouter key is also expected in your shell (`.zshrc`) as
 
 ## Deploy (Docker)
 
+`docker compose` pulls a prebuilt multi-arch image
+(`maximumh/stream-reduce:latest`, linux/amd64 + linux/arm64) — no building on
+the host (handy for a slow NAS). The repo is private, so log in first:
+
 ```bash
-cp .env.example .env   # then edit secrets
-docker compose build
+docker login                       # Docker Hub creds (one-time)
+cp .env.example .env               # then edit secrets
+docker compose pull                # fetch the prebuilt image
 docker compose up -d
 ```
 
 Open http://localhost:8010 (the published host port; set `WEB_PORT` in `.env`
-to change it — the container always serves on 8000).
+to change it — the container always serves on 8000). Pin a specific image tag
+with `SR_IMAGE=maximumh/stream-reduce:<sha>` in `.env` if you don't want
+`:latest`.
+
+### Building & publishing the image
+
+Build for both architectures and push from a dev machine (not the NAS):
+
+```bash
+docker buildx build --builder multiarch \
+  --platform linux/amd64,linux/arm64 \
+  -t maximumh/stream-reduce:latest \
+  -t maximumh/stream-reduce:"$(git rev-parse --short HEAD)" \
+  --push .
+```
+
+Then on the NAS: `docker compose pull && docker compose up -d`.
 
 Services: `web` (API + UI + scheduler), `worker` (pipeline jobs), `redis`.
 To also run a local RSSHub instance:

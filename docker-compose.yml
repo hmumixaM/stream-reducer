@@ -7,8 +7,10 @@ services:
       - redis-data:/data
 
   web:
-    build: .
-    image: stream-reduce:latest
+    # Prebuilt multi-arch image (linux/amd64 + linux/arm64) from Docker Hub.
+    # Pin a tag with SR_IMAGE if you don't want :latest.
+    image: ${SR_IMAGE:-maximumh/stream-reduce:latest}
+    pull_policy: always
     restart: unless-stopped
     env_file: .env
     environment:
@@ -27,8 +29,8 @@ services:
       - redis
 
   worker:
-    build: .
-    image: stream-reduce:latest
+    image: ${SR_IMAGE:-maximumh/stream-reduce:latest}
+    pull_policy: always
     restart: unless-stopped
     command: ["python", "-m", "worker.run"]
     env_file: .env
