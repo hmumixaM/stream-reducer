@@ -1,6 +1,6 @@
 # stream-reduce
 
-**Website:** https://hedgefundprod.github.io/stream-reduce/
+**Website:** https://hmumixam.github.io/stream-reduce/
 
 Self-hosted media summarizer. Turns videos and podcasts into source-traceable
 summaries and keeps them in a searchable library.
