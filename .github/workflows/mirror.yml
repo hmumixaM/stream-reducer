@@ -1,0 +1,93 @@
+name: Deploy public mirror to Cloudflare Pages
+
+# Builds the read-only mirror SPA (VITE_MIRROR=1), exports the latest content
+# from the NAS API, and deploys the static bundle to Cloudflare Pages.
+#
+# The NAS lives on a Tailscale network and its sshd disallows TCP forwarding, so
+# the runner joins the tailnet and exports content by running `curl` on the NAS
+# over SSH (same path as `mirror/sync.py`), then Wrangler deploys mirror/dist.
+#
+# One-time setup — add these under Settings → Secrets and variables → Actions:
+#   CLOUDFLARE_API_TOKEN   – token with "Account → Cloudflare Pages → Edit"
+#   CLOUDFLARE_ACCOUNT_ID  – your Cloudflare account id
+#   TS_OAUTH_CLIENT_ID     – Tailscale OAuth client id (scopes: auth_keys)
+#   TS_OAUTH_SECRET        – Tailscale OAuth client secret
+#   NAS_SSH_HOST           – user@host on the tailnet, e.g. maximumh@nas (MagicDNS) or maximumh@100.x.y.z
+#   NAS_PASSWORD           – SSH password for that account
+# Also: create a Tailscale ACL tag (tag:ci) owned by the OAuth client and allow
+# it to reach the NAS on tcp:22.
+
+on:
+  workflow_dispatch:
+  # Refresh the public copy daily (content changes on the NAS, not in git).
+  schedule:
+    - cron: "0 9 * * *"
+  # Redeploy when the mirror UI or exporter code changes.
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "mirror/**"
+      - ".github/workflows/mirror.yml"
+
+concurrency:
+  group: mirror
+  cancel-in-progress: true
+
+env:
+  PROJECT_NAME: stream-reduce-mirror
+  # Run bundled JS actions on Node.js 24 (Node 20 is deprecated on runners).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build SPA + export content bundle
+        env:
+          NAS_PASSWORD: ${{ secrets.NAS_PASSWORD }}
+        run: >-
+          uv run --no-project --with httpx python -m mirror.sync
+          --no-deploy
+          --nas-host "${{ secrets.NAS_SSH_HOST }}"
+
+      - name: Ensure Cloudflare Pages project exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 pages project create "$PROJECT_NAME" --production-branch=main || true
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy mirror/dist --project-name=${{ env.PROJECT_NAME }} --branch=main

@@ -180,8 +180,28 @@ uv run python -m mirror.sync --no-deploy     # dry run: build + export only
 uv run python -m mirror.sync --base-url http://localhost:8010 --no-tunnel
 ```
 
-Re-run it any time to refresh the public copy with the latest summaries. The
-landing site at <https://hmumixam.github.io/stream-reduce/> links to the mirror
+Re-run it any time to refresh the public copy with the latest summaries.
+
+### Automated deploys (GitHub Actions)
+
+`.github/workflows/mirror.yml` runs the same pipeline on a daily schedule, on
+demand (`workflow_dispatch`), and when the mirror UI / exporter code changes.
+Because the NAS is on a Tailscale network with SSH port-forwarding disabled, the
+runner joins the tailnet and exports content over SSH `curl`, then deploys with
+Wrangler. Add these repository secrets (Settings → Secrets and variables →
+Actions):
+
+| Secret | Purpose |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | token with **Account → Cloudflare Pages → Edit** |
+| `CLOUDFLARE_ACCOUNT_ID` | your Cloudflare account id |
+| `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` | Tailscale OAuth client (tag `tag:ci`) |
+| `NAS_SSH_HOST` | `user@host` for the NAS on the tailnet |
+| `NAS_PASSWORD` | SSH password for that account |
+
+In your Tailscale ACLs, let `tag:ci` reach the NAS on `tcp:22`.
+
+The landing site at <https://hmumixam.github.io/stream-reduce/> links to the mirror
 and invites visitors to [open an issue](https://github.com/hmumixaM/stream-reduce/issues/new?template=summarize-request.yml)
 to request that a video/podcast be summarized and added to the queue.
 
