@@ -30,7 +30,15 @@ export interface ItemCardActions {
 
 export function ItemCard({ item, ...actions }: { item: Item } & ItemCardActions) {
   return (
-    <Link to={`/items/${item.id}`}>
+    <Link
+      to={`/items/${item.id}`}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", String(item.id));
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      className="cursor-grab active:cursor-grabbing"
+    >
       <Card className="group relative h-full overflow-hidden transition-colors hover:border-primary">
         <div className="absolute right-2 top-2 z-10 flex gap-1">
           <FolderMenu item={item} {...actions} />

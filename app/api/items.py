@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlmodel import Session, col, select
 
 from app.db import get_session
@@ -71,10 +72,35 @@ def add_items(payload: AddItemRequest, session: Session = Depends(get_session)) 
 
 
 @router.get("/groups", response_model=list[GroupRead])
-def list_groups(session: Session = Depends(get_session)) -> list[ItemGroup]:
-    return list(
-        session.exec(select(ItemGroup).order_by(col(ItemGroup.created_at).desc())).all()
-    )
+def list_groups(
+    session: Session = Depends(get_session),
+    archived: bool | None = None,
+) -> list[GroupRead]:
+    """List folders.
+
+    `archived` unset: all folders with their stored total `item_count`.
+    `archived` true/false: only folders that have >=1 member with that archived
+    flag, and `item_count` reflects that filtered count (folder-first views show
+    just the relevant folders without persisting the filtered count).
+    """
+    groups = session.exec(
+        select(ItemGroup).order_by(col(ItemGroup.created_at).desc())
+    ).all()
+    if archived is None:
+        return [GroupRead.model_validate(g, from_attributes=True) for g in groups]
+
+    out: list[GroupRead] = []
+    for g in groups:
+        count = session.exec(
+            select(func.count())
+            .select_from(Item)
+            .where(Item.group_id == g.id, Item.is_archived == archived)
+        ).one()
+        if count:
+            read = GroupRead.model_validate(g, from_attributes=True)
+            read.item_count = count
+            out.append(read)
+    return out
 
 
 @router.post("/groups", response_model=GroupRead)

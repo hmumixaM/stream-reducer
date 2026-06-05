@@ -241,7 +241,10 @@ export const api = {
     const qs = sp.toString();
     return req<Item[]>(`/api/items${qs ? `?${qs}` : ""}`);
   },
-  listGroups: () => req<Group[]>("/api/items/groups"),
+  listGroups: (archived?: boolean) =>
+    req<Group[]>(
+      `/api/items/groups${archived !== undefined ? `?archived=${archived}` : ""}`,
+    ),
   createGroup: (title: string) =>
     req<Group>("/api/items/groups", {
       method: "POST",
@@ -304,7 +307,8 @@ export const api = {
     return req<SearchHit[]>(`/api/search?${sp.toString()}`);
   },
 
-  getStats: () => req<Stats>("/api/stats"),
+  getStats: (refresh?: boolean) =>
+    req<Stats>(`/api/stats${refresh ? "?refresh=true" : ""}`),
   getSettings: () => req<AppSettings>("/api/settings"),
   updateSettings: (payload: SettingsUpdate) =>
     req<AppSettings>("/api/settings", {

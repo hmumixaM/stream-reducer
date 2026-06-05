@@ -1,16 +1,15 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import {
   useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Folder, FolderPlus } from "lucide-react";
-import { api, type Group } from "@/lib/api";
+import { FolderPlus } from "lucide-react";
+import { api } from "@/lib/api";
 import { Button, Card, Input, Select } from "@/components/ui";
-import { PlatformBadge } from "@/components/badges";
 import { ItemCard, type ItemCardActions } from "@/components/ItemCard";
+import { FolderSection, UnfiledSection } from "@/components/FolderSection";
 
 const PLATFORMS = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
 const PAGE_SIZE = 60;
@@ -31,36 +30,49 @@ export function Library() {
   const [sort, setSort] = useState<string>("added");
   const qc = useQueryClient();
 
-  // Folders are first-class navigation (always shown); the flat grid lists
-  // ungrouped items while simply browsing, or everything when filtering/searching.
-  const browsing = view === "all" && !q;
-  const itemParams = {
+  // Folder-first layout: show folders (and an "Unfiled" section) and lazy-load
+  // each section's items only when expanded. Fall back to a cross-folder flat
+  // grid only while searching/filtering or in the (typically small) Favorites
+  // view, where folder grouping isn't useful.
+  const archivedView = view === "archived";
+  const filtering = !!q || !!platform;
+  const folderFirst = (view === "all" || archivedView) && !filtering;
+
+  const flatParams = {
     q: q || undefined,
     platform: platform || undefined,
     favorite: view === "favorites" ? true : undefined,
-    archived: view === "archived" ? true : false,
-    ungrouped: browsing ? true : undefined,
+    archived: archivedView ? true : false,
     sort,
     order: "desc",
   };
   const items = useInfiniteQuery({
-    queryKey: ["items", { q, platform, view, sort, browsing }],
+    queryKey: ["items", { q, platform, view, sort, flat: true }],
     queryFn: ({ pageParam }) =>
-      api.listItems({ ...itemParams, limit: PAGE_SIZE, offset: pageParam }),
+      api.listItems({ ...flatParams, limit: PAGE_SIZE, offset: pageParam }),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) =>
       lastPage.length === PAGE_SIZE ? allPages.length * PAGE_SIZE : undefined,
+    enabled: !folderFirst,
     refetchInterval: 8000,
   });
+  // Cheap folder list for the folder-first sections (folders + filtered counts).
+  const sectionGroups = useQuery({
+    queryKey: ["groups", { archived: archivedView }],
+    queryFn: () => api.listGroups(archivedView),
+    enabled: folderFirst,
+    refetchInterval: 8000,
+  });
+  // Full folder list (unfiltered) powers the per-card "move to folder" menu.
   const groups = useQuery({
     queryKey: ["groups"],
     queryFn: () => api.listGroups(),
-    refetchInterval: 8000,
   });
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["items"] });
     qc.invalidateQueries({ queryKey: ["groups"] });
+    qc.invalidateQueries({ queryKey: ["ungrouped-count"] });
   };
   const favorite = useMutation({ mutationFn: api.toggleFavorite, onSuccess: invalidate });
   const archive = useMutation({ mutationFn: api.toggleArchive, onSuccess: invalidate });
@@ -90,7 +102,7 @@ export function Library() {
   };
 
   const visibleItems = items.data?.pages.flat() ?? [];
-  const folders = groups.data ?? [];
+  const sectionFolders = sectionGroups.data ?? [];
 
   const handleNewFolder = () => {
     const title = window.prompt("New folder name")?.trim();
@@ -103,9 +115,11 @@ export function Library() {
         <div>
           <h1 className="text-2xl font-semibold">Library</h1>
           <p className="text-sm text-muted-foreground">
-            {visibleItems.length}
-            {items.hasNextPage ? "+" : ""}{" "}
-            {view === "archived" ? "archived" : "summaries"}
+            {folderFirst
+              ? `${sectionFolders.length} folder${sectionFolders.length === 1 ? "" : "s"}`
+              : `${visibleItems.length}${items.hasNextPage ? "+" : ""} ${
+                  archivedView ? "archived" : "summaries"
+                }`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -159,18 +173,19 @@ export function Library() {
         ))}
       </div>
 
-      {browsing && folders.length > 0 && (
-        <div className="mb-8">
-          <h2 className="mb-3 text-sm font-medium text-muted-foreground">Folders</h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {folders.map((g) => (
-              <FolderTile key={g.id} group={g} />
-            ))}
-          </div>
+      {folderFirst ? (
+        <div className="space-y-2">
+          {sectionFolders.map((g) => (
+            <FolderSection
+              key={g.id}
+              group={g}
+              archived={archivedView}
+              actions={actions}
+            />
+          ))}
+          <UnfiledSection archived={archivedView} actions={actions} />
         </div>
-      )}
-
-      {items.isLoading ? (
+      ) : items.isLoading ? (
         <p className="text-muted-foreground">Loading...</p>
       ) : visibleItems.length > 0 ? (
         <>
@@ -191,35 +206,12 @@ export function Library() {
             </div>
           )}
         </>
-      ) : folders.length > 0 && browsing ? (
-        <Card className="p-10 text-center text-muted-foreground">
-          All items are organized into folders. Open a folder to browse.
-        </Card>
       ) : (
         <Card className="p-10 text-center text-muted-foreground">
-          No summaries yet. Click "Add content" to get started.
+          {filtering ? "No matching items." : "No summaries yet. Click \"Add content\" to get started."}
         </Card>
       )}
     </div>
-  );
-}
-
-function FolderTile({ group }: { group: Group }) {
-  return (
-    <Link to={`/folders/${group.id}`}>
-      <Card className="flex h-full items-center gap-3 p-4 transition-colors hover:border-primary">
-        <Folder className="h-8 w-8 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-medium">{group.title || "Folder"}</div>
-          <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-            {group.source_url && <PlatformBadge platform={group.platform} />}
-            <span>
-              {group.item_count} item{group.item_count === 1 ? "" : "s"}
-            </span>
-          </div>
-        </div>
-      </Card>
-    </Link>
   );
 }
 
