@@ -39,34 +39,45 @@ class ApplePodcastAdapter(Adapter):
         if url in self._cache:
             return self._cache[url]
         podcast_id, episode_id = _parse_ids(url)
-        result: dict = {}
         if episode_id:
-            resp = httpx.get(
-                ITUNES_LOOKUP,
-                params={"id": episode_id, "entity": "podcastEpisode"},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            items = resp.json().get("results", [])
-            if items:
-                ep = items[0]
-                result = {
-                    "title": ep.get("trackName"),
-                    "author": ep.get("collectionName") or ep.get("artistName"),
-                    "description": ep.get("description") or ep.get("shortDescription"),
-                    "audio_url": ep.get("episodeUrl"),
-                    "thumbnail": ep.get("artworkUrl600") or ep.get("artworkUrl100"),
-                    "duration_s": int(ep["trackTimeMillis"] / 1000)
-                    if ep.get("trackTimeMillis") else None,
-                    "published_at": _parse_date(ep.get("releaseDate")),
-                    "external_id": str(ep.get("trackId")),
-                }
-        if not result.get("audio_url") and podcast_id:
-            result = self._resolve_via_feed(podcast_id, episode_id)
+            result = self._resolve_episode(podcast_id, episode_id)
+        elif podcast_id:
+            # Bare show URL (no episode): best-effort to the latest episode.
+            result = self._resolve_via_feed(podcast_id, None)
+        else:
+            result = {}
         if not result.get("audio_url"):
             raise ValueError(f"could not resolve Apple Podcast audio for {url}")
         self._cache[url] = result
         return result
+
+    def _resolve_episode(self, podcast_id: str | None, episode_id: str) -> dict:
+        # 1. Direct episode lookup: rich metadata, but iTunes doesn't index every
+        #    episode this way (some shows return zero results).
+        resp = httpx.get(
+            ITUNES_LOOKUP,
+            params={"id": episode_id, "entity": "podcastEpisode"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        items = [r for r in resp.json().get("results", []) if r.get("episodeUrl")]
+        if items:
+            return _episode_result(items[0])
+        # 2. Fall back to the show's episode list and match by trackId. The batch
+        #    endpoint reliably includes the episode + its enclosure even when the
+        #    per-episode lookup is empty. (We deliberately do NOT fall back to the
+        #    feed's latest entry, which would summarize the wrong episode.)
+        if podcast_id:
+            resp = httpx.get(
+                ITUNES_LOOKUP,
+                params={"id": podcast_id, "entity": "podcastEpisode", "limit": 200},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            for ep in resp.json().get("results", []):
+                if str(ep.get("trackId")) == str(episode_id) and ep.get("episodeUrl"):
+                    return _episode_result(ep)
+        return {}
 
     def _resolve_via_feed(self, podcast_id: str, episode_id: str | None) -> dict:
         resp = httpx.get(ITUNES_LOOKUP, params={"id": podcast_id, "entity": "podcast"}, timeout=30)
@@ -133,6 +144,22 @@ class ApplePodcastAdapter(Adapter):
     def download_audio(self, url: str, dest_dir: Path) -> Path:
         r = self._resolve(url)
         return download_url(r["audio_url"], dest_dir, r.get("external_id") or "apple_episode")
+
+
+def _episode_result(ep: dict) -> dict:
+    """Build a resolved-episode dict from an iTunes podcastEpisode object."""
+    return {
+        "title": ep.get("trackName"),
+        "author": ep.get("collectionName") or ep.get("artistName"),
+        "description": ep.get("description") or ep.get("shortDescription"),
+        "audio_url": ep.get("episodeUrl"),
+        "thumbnail": ep.get("artworkUrl600") or ep.get("artworkUrl100"),
+        "duration_s": int(ep["trackTimeMillis"] / 1000)
+        if ep.get("trackTimeMillis")
+        else None,
+        "published_at": _parse_date(ep.get("releaseDate")),
+        "external_id": str(ep.get("trackId")),
+    }
 
 
 def _parse_date(value: str | None) -> datetime | None:

@@ -129,12 +129,29 @@ export interface Subscription {
   created_at: string;
 }
 
+export interface PlatformStat {
+  platform: string;
+  items: number;
+  done: number;
+  duration_s: number;
+  tokens: number;
+  cost_usd: number;
+}
+
 export interface Stats {
   total_items: number;
   items_by_status: Record<string, number>;
   items_by_platform: Record<string, number>;
+  by_platform: PlatformStat[];
   avg_stage_ms: Record<string, number>;
   total_stage_ms: Record<string, number>;
+  cost_by_stage: Record<string, number>;
+  total_duration_s: number;
+  transcript_words: number;
+  transcript_chars: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
   openrouter_requests: number;
   openrouter_tokens: number;
   gemini_tokens: number;

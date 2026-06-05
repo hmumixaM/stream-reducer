@@ -26,6 +26,20 @@ export function formatDuration(seconds?: number | null): string {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
+export function formatLength(seconds?: number | null): string {
+  if (!seconds) return "0m";
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h >= 24) {
+    const d = Math.floor(h / 24);
+    return `${d}d ${h % 24}h`;
+  }
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m`;
+  return `${s}s`;
+}
+
 export function formatBytes(bytes?: number | null): string {
   if (!bytes) return "—";
   const units = ["B", "KB", "MB", "GB"];

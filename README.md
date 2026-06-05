@@ -20,6 +20,9 @@ summaries and keeps them in a searchable library.
   OpenAI-compatible API). Lossless, timestamp-cited summaries that link back to
   the source.
 - **Subscriptions**: poll feeds on a schedule and auto-summarize new items.
+- **MCP**: a minimal [Model Context Protocol](https://modelcontextprotocol.io)
+  server is mounted at `/mcp` so AI agents can operate the app (add content,
+  search the library, read summaries).
 - **Queue + Stats**: live processing queue and a dashboard of time / requests /
   tokens / cost per stage.
 
@@ -79,7 +82,21 @@ with `SR_IMAGE=maximumh/stream-reduce:<sha>` in `.env` if you don't want
 
 ### Building & publishing the image
 
-Build for both architectures and push from a dev machine (not the NAS):
+CI builds and pushes the public multi-arch image automatically via
+[`.github/workflows/docker.yml`](.github/workflows/docker.yml):
+
+- push to `main` → `:latest`, `:main`, `:sha-<short>`
+- push a tag `vX.Y.Z` → `:X.Y.Z`, `:X.Y`, `:latest`
+
+One-time setup — add two repository secrets under **Settings → Secrets and
+variables → Actions**:
+
+| Secret | Value |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Docker Hub account that owns the image (e.g. `maximumh`) |
+| `DOCKERHUB_TOKEN` | Docker Hub access token with read/write scope |
+
+To build and push manually from a dev machine instead (not the NAS):
 
 ```bash
 docker buildx build --builder multiarch \
@@ -148,6 +165,27 @@ Live smoke tests (need real keys, run manually):
 uv run python tests/scripts/test_llm.py          # LiteLLM Gemini connectivity
 uv run python tests/scripts/test_transcribe.py   # OpenRouter Whisper round-trip
 ```
+
+## MCP (AI agents)
+
+A minimal MCP server is mounted on the web app at `/mcp` (Streamable HTTP), so
+any MCP-capable agent (Cursor, Claude, etc.) can drive stream-reduce. Point the
+client at `http://<host>:8010/mcp/`. Tools:
+
+| Tool           | Purpose                                                            |
+| -------------- | ----------------------------------------------------------------- |
+| `add_content`  | Queue URLs (video, episode, playlist, or whole podcast show)       |
+| `list_items`   | Search the library (by title / status / platform)                 |
+| `get_item`     | Read one item's summary (markdown + structured) and metadata       |
+
+Example Cursor/Claude config:
+
+```json
+{ "mcpServers": { "stream-reduce": { "url": "http://localhost:8010/mcp/" } } }
+```
+
+It can also run as a local stdio server: `uv run python -m app.mcp_server`. Set
+`ENABLE_MCP=false` to disable the mounted endpoint.
 
 ## How summarization stays source-traceable
 

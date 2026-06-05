@@ -1,6 +1,6 @@
 [project]
 name = "stream-reduce"
-version = "0.1.0"
+version = "0.2.0"
 description = "Self-hosted media summarizer: video/audio -> source-traceable summaries"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,6 +19,7 @@ dependencies = [
     "yt-dlp>=2025.1.1",
     "python-multipart>=0.0.12",
     "opencc-python-reimplemented>=0.1.7",
+    "fastmcp>=3.4.0",
 ]
 
 [project.scripts]

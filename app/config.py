@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     summary_reduce_max_tokens: int = 16000
     enable_gemini_audio_fallback: bool = False
 
+    # MCP server for AI agents (mounted at /mcp on the web app)
+    enable_mcp: bool = True
+
     # Subscriptions
     default_poll_interval_minutes: int = 60
 

@@ -185,12 +185,31 @@ class SettingsUpdate(BaseModel):
     summary_map_model: str | None = None
 
 
+class PlatformStat(BaseModel):
+    platform: str
+    items: int
+    done: int
+    duration_s: float
+    tokens: int
+    cost_usd: float
+
+
 class StatsRead(BaseModel):
     total_items: int
     items_by_status: dict[str, int]
     items_by_platform: dict[str, int]
+    by_platform: list[PlatformStat] = []
     avg_stage_ms: dict[str, float]
     total_stage_ms: dict[str, float]
+    cost_by_stage: dict[str, float] = {}
+    # Source media + transcript volume
+    total_duration_s: float = 0.0
+    transcript_words: int = 0
+    transcript_chars: int = 0
+    # Token usage
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
     openrouter_requests: int
     openrouter_tokens: int
     gemini_tokens: int
