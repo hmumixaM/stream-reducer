@@ -307,8 +307,7 @@ export const api = {
     return req<SearchHit[]>(`/api/search?${sp.toString()}`);
   },
 
-  getStats: (refresh?: boolean) =>
-    req<Stats>(`/api/stats${refresh ? "?refresh=true" : ""}`),
+  getStats: () => req<Stats>("/api/stats"),
   getSettings: () => req<AppSettings>("/api/settings"),
   updateSettings: (payload: SettingsUpdate) =>
     req<AppSettings>("/api/settings", {
