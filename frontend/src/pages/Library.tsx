@@ -112,7 +112,7 @@ export function Library() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between gap-4">
+      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Library</h1>
           <p className="text-sm text-muted-foreground">
@@ -123,16 +123,16 @@ export function Library() {
                 }`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {!MIRROR && (
             <Button variant="outline" size="sm" onClick={handleNewFolder}>
-              <FolderPlus className="h-4 w-4" /> New folder
+              <FolderPlus className="h-4 w-4" /> <span className="hidden sm:inline">New folder</span>
             </Button>
           )}
           <Select
             value={sort}
             onChange={(e) => setSort(e.target.value)}
-            className="w-40"
+            className="w-auto min-w-[120px]"
             title="Sort by"
           >
             {SORTS.map((s) => (

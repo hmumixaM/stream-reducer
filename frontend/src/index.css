@@ -2,64 +2,155 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: 0 0% 100%;
-  --foreground: 222 47% 11%;
-  --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215 16% 47%;
-  --primary: 246 80% 60%;
-  --primary-foreground: 0 0% 100%;
-  --accent: 210 40% 94%;
-  --accent-foreground: 222 47% 11%;
-  --border: 214 32% 91%;
-  --input: 214 32% 91%;
-  --ring: 246 80% 60%;
+@layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 240 10% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 10%;
+    --muted: 240 5% 92%;
+    --muted-foreground: 240 5% 45%;
+    --primary: 250 85% 60%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 240 5% 94%;
+    --accent-foreground: 240 10% 10%;
+    --border: 240 6% 88%;
+    --input: 240 6% 88%;
+    --ring: 250 85% 60%;
+  }
+
+  .dark {
+    --background: 240 10% 4%;
+    --foreground: 0 0% 95%;
+    --card: 240 10% 6%;
+    --card-foreground: 0 0% 95%;
+    --muted: 240 10% 12%;
+    --muted-foreground: 240 5% 65%;
+    --primary: 250 90% 70%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 240 10% 14%;
+    --accent-foreground: 0 0% 95%;
+    --border: 240 10% 14%;
+    --input: 240 10% 14%;
+    --ring: 250 90% 70%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    margin: 0;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
 }
 
-.dark {
-  --background: 222 47% 7%;
-  --foreground: 210 40% 96%;
-  --card: 222 40% 10%;
-  --card-foreground: 210 40% 96%;
-  --muted: 217 33% 16%;
-  --muted-foreground: 215 20% 65%;
-  --primary: 250 90% 66%;
-  --primary-foreground: 0 0% 100%;
-  --accent: 217 33% 18%;
-  --accent-foreground: 210 40% 96%;
-  --border: 217 33% 18%;
-  --input: 217 33% 20%;
-  --ring: 250 90% 66%;
-}
+@layer components {
+  /* Default prose for cards */
+  .prose-sr h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 1.25rem 0 0.5rem;
+    color: hsl(var(--foreground));
+  }
+  .prose-sr h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 1rem 0 0.5rem;
+    color: hsl(var(--foreground));
+  }
+  .prose-sr ul { margin: 0.5rem 0; padding-left: 1.25rem; list-style-type: disc; }
+  .prose-sr ol { margin: 0.5rem 0; padding-left: 1.25rem; list-style-type: decimal; }
+  .prose-sr li { margin: 0.25rem 0; }
+  .prose-sr blockquote {
+    border-left: 3px solid hsl(var(--primary));
+    padding-left: 1rem;
+    color: hsl(var(--muted-foreground));
+    margin: 0.75rem 0;
+    font-style: italic;
+  }
+  .prose-sr a { color: hsl(var(--primary)); text-decoration: none; font-weight: 500; }
+  .prose-sr a:hover { text-decoration: underline; }
+  .prose-sr p { margin: 0.75rem 0; line-height: 1.6; }
+  .prose-sr code {
+    background-color: hsl(var(--muted));
+    padding: 0.15rem 0.3rem;
+    border-radius: 0.25rem;
+    font-size: 0.875em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  .prose-sr pre {
+    background-color: hsl(var(--muted));
+    padding: 1rem;
+    border-radius: 0.5rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+  }
+  .prose-sr pre code {
+    background-color: transparent;
+    padding: 0;
+  }
+  .prose-sr hr {
+    border: 0;
+    border-top: 1px solid hsl(var(--border));
+    margin: 1.5rem 0;
+  }
 
-* {
-  border-color: hsl(var(--border));
+  /* Read mode prose (larger, wider, more relaxed) */
+  .prose-read h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 2rem 0 1rem;
+    color: hsl(var(--foreground));
+    letter-spacing: -0.02em;
+  }
+  .prose-read h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 1.5rem 0 0.75rem;
+    color: hsl(var(--foreground));
+    letter-spacing: -0.01em;
+  }
+  .prose-read ul { margin: 1rem 0; padding-left: 1.5rem; list-style-type: disc; }
+  .prose-read ol { margin: 1rem 0; padding-left: 1.5rem; list-style-type: decimal; }
+  .prose-read li { margin: 0.5rem 0; line-height: 1.7; }
+  .prose-read blockquote {
+    border-left: 4px solid hsl(var(--primary));
+    padding-left: 1.25rem;
+    color: hsl(var(--muted-foreground));
+    margin: 1.5rem 0;
+    font-size: 1.125rem;
+    font-style: italic;
+    line-height: 1.6;
+  }
+  .prose-read a { color: hsl(var(--primary)); text-decoration: none; font-weight: 500; transition: color 0.2s; }
+  .prose-read a:hover { color: hsl(var(--primary) / 0.8); text-decoration: underline; }
+  .prose-read p { margin: 1.25rem 0; line-height: 1.8; font-size: 1.125rem; color: hsl(var(--foreground) / 0.9); }
+  .prose-read code {
+    background-color: hsl(var(--muted));
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  .prose-read pre {
+    background-color: hsl(var(--muted));
+    padding: 1.25rem;
+    border-radius: 0.5rem;
+    overflow-x: auto;
+    margin: 1.5rem 0;
+  }
+  .prose-read pre code {
+    background-color: transparent;
+    padding: 0;
+    font-size: 0.875rem;
+  }
+  .prose-read hr {
+    border: 0;
+    border-top: 1px solid hsl(var(--border));
+    margin: 2.5rem 0;
+  }
 }
-
-body {
-  margin: 0;
-  background-color: hsl(var(--background));
-  color: hsl(var(--foreground));
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  -webkit-font-smoothing: antialiased;
-}
-
-.prose-sr h2 {
-  font-size: 1.05rem;
-  font-weight: 600;
-  margin: 1.1rem 0 0.4rem;
-  color: hsl(var(--foreground));
-}
-.prose-sr ul { margin: 0.25rem 0 0.5rem; padding-left: 1.1rem; }
-.prose-sr li { margin: 0.2rem 0; }
-.prose-sr blockquote {
-  border-left: 3px solid hsl(var(--primary));
-  padding-left: 0.75rem;
-  color: hsl(var(--muted-foreground));
-  margin: 0.4rem 0;
-}
-.prose-sr a { color: hsl(var(--primary)); text-decoration: none; }
-.prose-sr a:hover { text-decoration: underline; }
-.prose-sr p { margin: 0.4rem 0; }

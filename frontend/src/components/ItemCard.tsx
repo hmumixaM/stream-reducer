@@ -46,7 +46,7 @@ export function ItemCard({ item, ...actions }: { item: Item } & ItemCardActions)
     >
       <Card className="group relative h-full overflow-hidden transition-colors hover:border-primary">
         {!MIRROR && (
-          <div className="absolute right-2 top-2 z-10 flex gap-1">
+          <div className="absolute right-2 top-2 z-10 flex gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
             <FolderMenu item={item} {...actions} />
             <CardAction
               title={item.is_favorite ? "Unfavorite" : "Favorite"}
@@ -244,7 +244,7 @@ export function CardAction({
         e.stopPropagation();
         onClick();
       }}
-      className={`rounded-md border border-border p-1.5 backdrop-blur transition-colors ${
+      className={`rounded-md border border-border p-2 backdrop-blur transition-colors ${
         active
           ? "bg-background/90 text-amber-400"
           : "bg-background/70 text-muted-foreground hover:bg-background hover:text-foreground"

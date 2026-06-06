@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
@@ -13,6 +13,7 @@ import {
   ArchiveRestore,
   MessageSquare,
   Send,
+  BookOpen,
 } from "lucide-react";
 import { api, type StageRun, type Comment } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
@@ -26,6 +27,7 @@ import {
   formatDuration,
   formatMs,
   timeAgo,
+  cn,
 } from "@/lib/utils";
 
 export function ItemDetail() {
@@ -34,6 +36,15 @@ export function ItemDetail() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [showTranscript, setShowTranscript] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  
+  const [readMode, setReadMode] = useState(() => {
+    return localStorage.getItem("sr_read_mode") === "true";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("sr_read_mode", String(readMode));
+  }, [readMode]);
 
   const item = useQuery({
     queryKey: ["item", itemId],
@@ -81,12 +92,12 @@ export function ItemDetail() {
   const d = item.data;
 
   return (
-    <div>
+    <div className={readMode ? "mx-auto max-w-3xl" : ""}>
       <Link to="/" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4" /> Library
       </Link>
 
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+      <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="flex-1">
           <div className="mb-2 flex items-center gap-2">
             <PlatformBadge platform={d.platform} />
@@ -95,8 +106,8 @@ export function ItemDetail() {
           <h1 className="text-2xl font-semibold leading-tight">{d.title || d.source_url}</h1>
           {d.author && <p className="mt-1 text-sm text-muted-foreground">{d.author}</p>}
         </div>
-        <div className="flex gap-2">
-          {!MIRROR && (
+        <div className="flex flex-wrap gap-2">
+          {!readMode && !MIRROR && (
             <>
               <Button
                 variant="outline"
@@ -108,7 +119,7 @@ export function ItemDetail() {
                 <Star
                   className={`h-4 w-4 ${d.is_favorite ? "fill-amber-400 text-amber-400" : ""}`}
                 />
-                {d.is_favorite ? "Favorited" : "Favorite"}
+                <span className="hidden sm:inline">{d.is_favorite ? "Favorited" : "Favorite"}</span>
               </Button>
               <Button
                 variant="outline"
@@ -122,19 +133,27 @@ export function ItemDetail() {
                 ) : (
                   <Archive className="h-4 w-4" />
                 )}
-                {d.is_archived ? "Archived" : "Archive"}
+                <span className="hidden sm:inline">{d.is_archived ? "Archived" : "Archive"}</span>
               </Button>
             </>
           )}
           <a href={d.source_url} target="_blank" rel="noreferrer">
             <Button variant="outline" size="sm">
-              <ExternalLink className="h-4 w-4" /> Source
+              <ExternalLink className="h-4 w-4" /> <span className="hidden sm:inline">Source</span>
             </Button>
           </a>
-          {!MIRROR &&
+          <Button 
+            variant={readMode ? "default" : "outline"} 
+            size="sm" 
+            onClick={() => setReadMode(!readMode)}
+            title={readMode ? "Exit read mode" : "Read mode"}
+          >
+            <BookOpen className="h-4 w-4" /> <span className="hidden sm:inline">{readMode ? "Exit read mode" : "Read mode"}</span>
+          </Button>
+          {!readMode && !MIRROR &&
             (d.status === "error" ? (
               <Button size="sm" onClick={() => retry.mutate()} disabled={retry.isPending}>
-                <RefreshCw className="h-4 w-4" /> Retry
+                <RefreshCw className="h-4 w-4" /> <span className="hidden sm:inline">Retry</span>
               </Button>
             ) : (
               (() => {
@@ -148,12 +167,12 @@ export function ItemDetail() {
                     disabled={processing}
                   >
                     <RefreshCw className={`h-4 w-4 ${processing ? "animate-spin" : ""}`} />
-                    {processing ? "Regenerating…" : "Regenerate"}
+                    <span className="hidden sm:inline">{processing ? "Regenerating…" : "Regenerate"}</span>
                   </Button>
                 );
               })()
             ))}
-          {!MIRROR && (
+          {!readMode && !MIRROR && (
             <Button variant="danger" size="sm" onClick={() => remove.mutate()}>
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -167,11 +186,11 @@ export function ItemDetail() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+      <div className={readMode ? "block" : "grid grid-cols-1 gap-6 lg:grid-cols-3"}>
+        <div className={readMode ? "" : "lg:col-span-2"}>
           {d.summary ? (
-            <Card className="p-6">
-              <div className="prose-sr max-w-none text-sm">
+            <Card className={readMode ? "border-none shadow-none bg-transparent" : "p-6"}>
+              <div className={readMode ? "prose-read max-w-none" : "prose-sr max-w-none text-sm"}>
                 <ReactMarkdown>{d.summary.markdown}</ReactMarkdown>
               </div>
             </Card>
@@ -188,7 +207,7 @@ export function ItemDetail() {
           )}
 
           {d.transcript && (
-            <Card className="mt-4 p-4">
+            <Card className={cn("mt-4 p-4", readMode && "border-dashed bg-transparent shadow-none")}>
               <button
                 onClick={() => setShowTranscript((s) => !s)}
                 className="flex w-full items-center justify-between text-sm font-medium"
@@ -219,37 +238,65 @@ export function ItemDetail() {
             </Card>
           )}
 
-          {!MIRROR && <CommentsSection itemId={itemId} comments={d.comments} />}
-        </div>
-
-        <div className="space-y-4">
-          <MediaPanel
-            videoDuration={d.duration_s}
-            audioDuration={d.audio_duration_s}
-            mediaBytes={d.media_bytes}
-            publishedAt={d.published_at}
-            viewCount={d.view_count}
-            likeCount={d.like_count}
-            dislikeCount={d.dislike_count}
-            transcriptEnd={
-              d.transcript?.segments?.length
-                ? d.transcript.segments[d.transcript.segments.length - 1].end
-                : null
-            }
-            mediaPath={d.media_path}
-            onDeleteMedia={() => deleteMedia.mutate()}
-            deletingMedia={deleteMedia.isPending}
-          />
           {!MIRROR && (
-            <ProcessingPanel
-              stages={d.stages}
-              totalMs={d.total_processing_ms}
-              totalCost={d.total_cost_usd}
-              totalReq={d.total_api_requests}
-              totalTokens={d.total_tokens}
-            />
+            readMode ? (
+              <Card className="mt-4 p-4 border-dashed bg-transparent shadow-none">
+                <button
+                  onClick={() => setShowComments((s) => !s)}
+                  className="flex w-full items-center justify-between text-sm font-medium"
+                >
+                  <span className="flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4" /> Comments
+                    {d.comments.length > 0 && (
+                      <span className="text-muted-foreground">({d.comments.length})</span>
+                    )}
+                  </span>
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform ${showComments ? "rotate-180" : ""}`}
+                  />
+                </button>
+                {showComments && (
+                  <div className="mt-4">
+                    <CommentsSection itemId={itemId} comments={d.comments} />
+                  </div>
+                )}
+              </Card>
+            ) : (
+              <CommentsSection itemId={itemId} comments={d.comments} />
+            )
           )}
         </div>
+
+        {!readMode && (
+          <div className="space-y-4">
+            <MediaPanel
+              videoDuration={d.duration_s}
+              audioDuration={d.audio_duration_s}
+              mediaBytes={d.media_bytes}
+              publishedAt={d.published_at}
+              viewCount={d.view_count}
+              likeCount={d.like_count}
+              dislikeCount={d.dislike_count}
+              transcriptEnd={
+                d.transcript?.segments?.length
+                  ? d.transcript.segments[d.transcript.segments.length - 1].end
+                  : null
+              }
+              mediaPath={d.media_path}
+              onDeleteMedia={() => deleteMedia.mutate()}
+              deletingMedia={deleteMedia.isPending}
+            />
+            {!MIRROR && (
+              <ProcessingPanel
+                stages={d.stages}
+                totalMs={d.total_processing_ms}
+                totalCost={d.total_cost_usd}
+                totalReq={d.total_api_requests}
+                totalTokens={d.total_tokens}
+              />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

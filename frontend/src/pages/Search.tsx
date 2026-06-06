@@ -79,19 +79,19 @@ export function Search() {
         </p>
       </div>
 
-      <form onSubmit={submit} className="mb-6 flex items-center gap-2">
+      <form onSubmit={submit} className="mb-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
         <Input
           autoFocus
           placeholder="e.g. what did they say about interest rates?"
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
-        <Select value={source} onChange={(e) => setSource(e.target.value)} className="w-40">
+        <Select value={source} onChange={(e) => setSource(e.target.value)} className="w-full sm:w-40">
           <option value="">All content</option>
           <option value="transcript">Transcript</option>
           <option value="summary">Summary</option>
         </Select>
-        <Button type="submit" disabled={search.isPending || !text.trim()}>
+        <Button type="submit" disabled={search.isPending || !text.trim()} className="w-full sm:w-auto">
           {search.isPending ? <Spinner /> : <SearchIcon className="h-4 w-4" />}
           Search
         </Button>
