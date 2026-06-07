@@ -67,15 +67,16 @@ def _to_vector(blob):
     return np.asarray(blob, dtype=np.float32)
 
 
-def _select_paragraphs(session: Session, cap: int) -> list[Chunk]:
-    """The summary main-paragraph chunks that become graph nodes."""
+def _select_paragraphs(session: Session, cap: int) -> list[tuple[int, int, str, str]]:
+    """The summary main-paragraph chunks that become graph nodes, as plain
+    ``(chunk_id, item_id, field, text)`` tuples (detached from the session)."""
     rows = session.exec(
-        select(Chunk)
+        select(Chunk.id, Chunk.item_id, Chunk.field, Chunk.text)
         .where(Chunk.source == ChunkSource.summary, col(Chunk.field).in_(SUMMARY_FIELDS))
         .order_by(col(Chunk.id).desc())
         .limit(cap)
     ).all()
-    return list(reversed(rows))
+    return [(int(r[0]), int(r[1]), r[2] or "", r[3] or "") for r in reversed(rows)]
 
 
 def _load_matrix(session: Session, chunk_ids: list[int], dim: int):
@@ -209,8 +210,8 @@ def build_graph(force: bool = False) -> dict:
         logger.info("graph build: no summary paragraphs to graph")
         return {"skipped": True, "reason": "no_paragraphs"}
 
-    chunk_ids = [p.id for p in paragraphs]
-    item_ids = [p.item_id for p in paragraphs]
+    chunk_ids = [p[0] for p in paragraphs]
+    item_ids = [p[1] for p in paragraphs]
 
     with session_scope() as session:
         mat, found = _load_matrix(session, chunk_ids, settings.embedding_dim)
@@ -228,14 +229,14 @@ def build_graph(force: bool = False) -> dict:
 
     with session_scope() as session:
         _wipe(session)
-        for i, para in enumerate(paragraphs):
+        for i, (cid, iid, fld, txt) in enumerate(paragraphs):
             session.add(
                 GraphParagraph(
                     build_id=build_id,
-                    chunk_id=para.id,
-                    item_id=para.item_id,
-                    field=para.field,
-                    text=(para.text or "")[:NODE_TEXT_CAP],
+                    chunk_id=cid,
+                    item_id=iid,
+                    field=fld,
+                    text=txt[:NODE_TEXT_CAP],
                     community=node_community.get(i, 0),
                     degree=degree.get(i, 0),
                 )

@@ -1,44 +1,17 @@
-"""Tests for the topic-cluster knowledge graph.
+"""End-to-end test for the paragraph-similarity knowledge graph.
 
-Pure helpers run anywhere; the end-to-end build test spins up an isolated
-sqlite-vec engine (skipped when the extension is unavailable) and exercises the
-whole pipeline: kNN graph -> Louvain -> memberships, edges, recommendations, and
-the serialized blob.
+Spins up an isolated sqlite-vec engine (skipped when the extension is
+unavailable) and exercises the whole pipeline: summary paragraphs become nodes,
+embedding similarity becomes edges, transcript chunks are excluded, and
+related-article recommendations fall out of cross-article similarity.
 """
 
 from __future__ import annotations
 
-from collections import Counter
-
 import pytest
-
-from app.pipeline.graph_build import (
-    keywords_from_counter,
-    label_from_keywords,
-    tokenize,
-)
-
-
-def test_tokenize_latin_filters_stopwords():
-    terms = tokenize("The quick brown fox and the lazy dog")
-    assert "quick" in terms and "brown" in terms
-    assert "the" not in terms and "and" not in terms
-
-
-def test_tokenize_cjk_bigrams():
-    terms = tokenize("机器学习模型")
-    assert "机器" in terms and "学习" in terms
-
-
-def test_keywords_and_label():
-    kws = keywords_from_counter(Counter({"python": 5, "async": 3, "fastapi": 2}), top_n=2)
-    assert kws == ["python", "async"]
-    assert label_from_keywords(kws, 0) == "python · async"
-    assert label_from_keywords([], 4) == "Topic 5"
 
 
 def _vec_engine(tmp_path):
-    """An isolated engine with sqlite-vec loaded on every connection."""
     sqlite_vec = pytest.importorskip("sqlite_vec")
     from sqlalchemy import create_engine, event
     from sqlmodel import SQLModel
@@ -69,7 +42,7 @@ def test_build_graph_end_to_end(tmp_path, monkeypatch):
     import app.db as db
     from app.config import get_settings
     from app.embedding import l2_normalize
-    from app.graph import get_graph, primary_cluster, related_items
+    from app.graph import focus_node, get_graph, related_items
     from app.models import Chunk, ChunkSource, Item, Platform
 
     dim = 8
@@ -77,7 +50,6 @@ def test_build_graph_end_to_end(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "embedding_dim", dim)
     monkeypatch.setattr(settings, "graph_knn_k", 6)
     monkeypatch.setattr(settings, "graph_sim_threshold", 0.3)
-    monkeypatch.setattr(settings, "graph_edge_threshold", 0.9)
     monkeypatch.setattr(settings, "graph_louvain_resolution", 1.0)
     monkeypatch.setattr(settings, "enable_graph", True)
     monkeypatch.setattr(settings, "enable_embeddings", True)
@@ -90,9 +62,9 @@ def test_build_graph_end_to_end(tmp_path, monkeypatch):
         s.exec(sql_text(f"CREATE VIRTUAL TABLE chunk_vec USING vec0(embedding float[{dim}])"))
         s.commit()
 
-    # Two well-separated topics: items 1,2 (axis 0) and items 3,4 (axis 1).
     rng = np.random.default_rng(0)
     topics = {1: 0, 2: 0, 3: 1, 4: 1}
+
     with Session(engine) as s:
         for item_id in topics:
             s.add(Item(id=item_id, platform=Platform.youtube, source_url=f"http://x/{item_id}",
@@ -103,8 +75,8 @@ def test_build_graph_end_to_end(tmp_path, monkeypatch):
                 base = np.zeros(dim, dtype=np.float32)
                 base[axis] = 1.0
                 vec = base + rng.normal(0, 0.05, dim).astype(np.float32)
-                chunk = Chunk(item_id=item_id, source=ChunkSource.transcript, field="transcript",
-                              text=f"topic {axis} passage about subject{axis}")
+                chunk = Chunk(item_id=item_id, source=ChunkSource.summary, field="key_point",
+                              text=f"summary paragraph for topic {axis}")
                 s.add(chunk)
                 s.flush()
                 s.exec(
@@ -112,25 +84,37 @@ def test_build_graph_end_to_end(tmp_path, monkeypatch):
                         r=chunk.id, e=sqlite_vec.serialize_float32(l2_normalize(vec.tolist()))
                     )
                 )
+            # A transcript chunk that must NOT become a graph node.
+            tchunk = Chunk(item_id=item_id, source=ChunkSource.transcript, field="transcript",
+                           text="transcript noise")
+            s.add(tchunk)
+            s.flush()
+            s.exec(
+                sql_text("INSERT INTO chunk_vec(rowid, embedding) VALUES (:r, :e)").bindparams(
+                    r=tchunk.id,
+                    e=sqlite_vec.serialize_float32(l2_normalize(rng.normal(0, 1, dim).tolist())),
+                )
+            )
         s.commit()
 
     from app.pipeline.graph_build import build_graph
 
     result = build_graph(force=True)
-    assert result.get("clusters", 0) >= 2
+    # 4 items x 3 summary paragraphs; transcript chunks excluded.
+    assert result["nodes"] == 12
     assert result["items"] == 4
+    assert result["edges"] > 0
+    assert result["communities"] >= 2
 
     with Session(engine) as s:
         graph = get_graph(s)
-        assert len(graph["nodes"]) >= 2
-        covered = {it["item_id"] for node in graph["nodes"] for it in node["items"]}
+        assert len(graph["nodes"]) == 12
+        covered = {n["item_id"] for n in graph["nodes"]}
         assert covered == {1, 2, 3, 4}
+        # Every node is a summary paragraph (no transcript field present).
+        assert all(n["field"] == "key_point" for n in graph["nodes"])
 
-        # Same-topic items recommend each other; cross-topic ones do not.
         rel1 = {r["item_id"] for r in related_items(s, 1)}
         assert 2 in rel1 and 3 not in rel1 and 4 not in rel1
 
-        # An item resolves to a cluster (for graph focus jumps).
-        assert primary_cluster(s, 1) is not None
-        # Items 1 and 2 share a cluster.
-        assert primary_cluster(s, 1) == primary_cluster(s, 2)
+        assert focus_node(s, 1) is not None

@@ -107,6 +107,11 @@ def _ensure_vec_table() -> None:
 # Columns added after the initial schema; create_all won't ALTER existing tables,
 # so add them idempotently for SQLite databases created before the feature landed.
 _ADDED_COLUMNS = {
+    # The knowledge graph was reshaped from topic clusters to a paragraph graph;
+    # graphcache gained node_count (the old cluster_count column is left unused).
+    "graphcache": {
+        "node_count": "INTEGER NOT NULL DEFAULT 0",
+    },
     "item": {
         "is_favorite": "BOOLEAN NOT NULL DEFAULT 0",
         "is_archived": "BOOLEAN NOT NULL DEFAULT 0",
