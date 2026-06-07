@@ -1,24 +1,30 @@
-import React, { Suspense, lazy } from "react";
+import React, { lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
-import { Library } from "@/pages/Library";
-import { Search } from "@/pages/Search";
-import { FolderView } from "@/pages/FolderView";
-import { ItemDetail } from "@/pages/ItemDetail";
-import { Annotations } from "@/pages/Annotations";
-import { Queue } from "@/pages/Queue";
-import { Subscriptions } from "@/pages/Subscriptions";
-import { Stats } from "@/pages/Stats";
-import { Settings } from "@/pages/Settings";
 import { MIRROR } from "@/lib/mirror";
 import "./index.css";
 
-// The graph page pulls in the heavy force-graph/d3 bundle, so load it on demand.
-const Graph = lazy(() =>
-  import("@/pages/Graph").then((m) => ({ default: m.Graph })),
-);
+// Every page is code-split so the initial load only ships the shell + the
+// route you actually open. This keeps heavy, page-local deps out of the entry
+// bundle: recharts (Stats), react-markdown (ItemDetail), and the force-graph/d3
+// stack (Graph) each land in their own lazily-fetched chunk.
+const named = <T extends string>(
+  loader: () => Promise<Record<T, React.ComponentType>>,
+  name: T,
+) => lazy(() => loader().then((m) => ({ default: m[name] })));
+
+const Library = named(() => import("@/pages/Library"), "Library");
+const Search = named(() => import("@/pages/Search"), "Search");
+const Graph = named(() => import("@/pages/Graph"), "Graph");
+const FolderView = named(() => import("@/pages/FolderView"), "FolderView");
+const ItemDetail = named(() => import("@/pages/ItemDetail"), "ItemDetail");
+const Annotations = named(() => import("@/pages/Annotations"), "Annotations");
+const Queue = named(() => import("@/pages/Queue"), "Queue");
+const Subscriptions = named(() => import("@/pages/Subscriptions"), "Subscriptions");
+const Stats = named(() => import("@/pages/Stats"), "Stats");
+const Settings = named(() => import("@/pages/Settings"), "Settings");
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false } },
@@ -29,14 +35,7 @@ const queryClient = new QueryClient({
 const children = [
   { index: true, element: <Library /> },
   { path: "search", element: <Search /> },
-  {
-    path: "graph",
-    element: (
-      <Suspense fallback={<p className="text-muted-foreground">Loading graph…</p>}>
-        <Graph />
-      </Suspense>
-    ),
-  },
+  { path: "graph", element: <Graph /> },
   { path: "folders/:id", element: <FolderView /> },
   { path: "items/:id", element: <ItemDetail /> },
   ...(MIRROR

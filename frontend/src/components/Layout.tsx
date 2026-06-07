@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -201,7 +201,15 @@ export function Layout() {
       {/* Main Content */}
       <main className="flex-1 overflow-auto">
         <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
-          <Outlet />
+          <Suspense
+            fallback={
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Spinner /> Loading…
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </div>
       </main>
       
