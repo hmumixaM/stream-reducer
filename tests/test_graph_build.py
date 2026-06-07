@@ -75,8 +75,13 @@ def test_build_graph_end_to_end(tmp_path, monkeypatch):
                 base = np.zeros(dim, dtype=np.float32)
                 base[axis] = 1.0
                 vec = base + rng.normal(0, 0.05, dim).astype(np.float32)
-                chunk = Chunk(item_id=item_id, source=ChunkSource.summary, field="key_point",
-                              text=f"summary paragraph for topic {axis}")
+                chunk = Chunk(
+                    item_id=item_id, source=ChunkSource.summary, field="key_point",
+                    text=(
+                        f"Summary paragraph about topic {axis}, written with enough "
+                        f"detail to comfortably exceed the minimum length filter."
+                    ),
+                )
                 s.add(chunk)
                 s.flush()
                 s.exec(

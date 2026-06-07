@@ -50,19 +50,22 @@ def ssh_fetchers(host: str) -> tuple[FetchJson, FetchBytes]:
             "or pass --base-url for a reachable API."
         )
 
+    # Reuse a single SSH connection for every curl (the export makes hundreds of
+    # calls — one per item detail / related / thumbnail). Without multiplexing the
+    # NAS sshd throttles the connection storm and starts denying auth. The master
+    # is opened on the first call and persists briefly between calls.
+    control_path = f"/tmp/sr-mirror-{os.getpid()}-%h.sock"
+    mux = [
+        "-o", "ControlMaster=auto",
+        "-o", f"ControlPath={control_path}",
+        "-o", "ControlPersist=120s",
+        "-o", "StrictHostKeyChecking=accept-new",
+    ]
+
     def run(url: str, *, text: bool) -> subprocess.CompletedProcess:
         remote = f"curl -s --fail {shlex.quote(url)}"
         return subprocess.run(
-            [
-                "sshpass",
-                "-p",
-                password,
-                "ssh",
-                "-o",
-                "StrictHostKeyChecking=accept-new",
-                host,
-                remote,
-            ],
+            ["sshpass", "-p", password, "ssh", *mux, host, remote],
             capture_output=True,
             text=text,
         )

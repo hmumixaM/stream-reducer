@@ -61,7 +61,7 @@ export function NodePanel({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="border-b border-border p-4">
+      <div className="shrink-0 border-b border-border p-4">
         <div className="mb-2 flex items-center gap-2">
           <PlatformBadge platform={node.platform} />
           <span className="rounded-full bg-accent px-2 py-0.5 text-xs text-accent-foreground">
@@ -75,7 +75,11 @@ export function NodePanel({
           {node.title || "Untitled"}
           <ArrowUpRight className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-60" />
         </Link>
-        <p className="mt-3 whitespace-pre-wrap text-sm text-foreground/90">{node.text}</p>
+        {/* Cap the paragraph so a long one stays scrollable and never hides the
+            connected-paragraphs list below. */}
+        <p className="mt-3 max-h-40 overflow-y-auto whitespace-pre-wrap text-sm text-foreground/90">
+          {node.text}
+        </p>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">

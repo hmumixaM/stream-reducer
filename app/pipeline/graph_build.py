@@ -38,9 +38,13 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 
-# Summary fields that count as "main paragraphs". Excludes danmaku, atmosphere,
-# single-word entities, the raw markdown dump, and all transcript chunks.
-SUMMARY_FIELDS = {"tldr", "walkthrough", "background", "key_point", "quote", "outline"}
+# Summary fields that count as "main paragraphs". Excludes quotes (too short /
+# not topical), danmaku, atmosphere, single-word entities, the raw markdown
+# dump, and all transcript chunks.
+SUMMARY_FIELDS = {"tldr", "walkthrough", "background", "key_point", "outline"}
+
+# Drop paragraphs shorter than this (chars) — one-liners add noise, not topics.
+MIN_PARAGRAPH_CHARS = 50
 
 # Cap the paragraph text carried in each node payload (full text lives in the DB
 # row; summary paragraphs are short, but walkthrough windows can be long).
@@ -69,10 +73,16 @@ def _to_vector(blob):
 
 def _select_paragraphs(session: Session, cap: int) -> list[tuple[int, int, str, str]]:
     """The summary main-paragraph chunks that become graph nodes, as plain
-    ``(chunk_id, item_id, field, text)`` tuples (detached from the session)."""
+    ``(chunk_id, item_id, field, text)`` tuples (detached from the session).
+
+    Excludes quotes and short one-liners (< ``MIN_PARAGRAPH_CHARS``)."""
     rows = session.exec(
         select(Chunk.id, Chunk.item_id, Chunk.field, Chunk.text)
-        .where(Chunk.source == ChunkSource.summary, col(Chunk.field).in_(SUMMARY_FIELDS))
+        .where(
+            Chunk.source == ChunkSource.summary,
+            col(Chunk.field).in_(SUMMARY_FIELDS),
+            func.length(Chunk.text) >= MIN_PARAGRAPH_CHARS,
+        )
         .order_by(col(Chunk.id).desc())
         .limit(cap)
     ).all()
@@ -105,8 +115,10 @@ def _load_matrix(session: Session, chunk_ids: list[int], dim: int):
 def _knn_graph(mat, found, item_ids: list[int], k: int, threshold: float):
     """Exact cosine kNN over the (already unit-normalized) paragraph matrix.
 
-    Returns the sparse undirected edge weights (keyed by matrix index) plus the
-    cross-article weight accumulation used for related-article recommendations.
+    Edges only ever link paragraphs from *different* articles (intra-article
+    similarity is masked out before the top-k), so the graph shows how separate
+    articles relate. Returns the sparse undirected edge weights (keyed by matrix
+    index) plus the cross-article weights used for related-article recs.
     """
     import numpy as np
 
@@ -116,11 +128,15 @@ def _knn_graph(mat, found, item_ids: list[int], k: int, threshold: float):
     if n < 2:
         return edges, item_pairs
 
+    items = np.asarray(item_ids)
     # Cosine == dot product for unit vectors; mask self + missing rows.
     sim = mat @ mat.T
     np.fill_diagonal(sim, -1.0)
     sim[~found, :] = -1.0
     sim[:, ~found] = -1.0
+    # Mask same-article pairs so neighbors are always cross-article.
+    for i in range(n):
+        sim[i, items == items[i]] = -1.0
 
     keep = min(k, n - 1)
     # Top-k neighbors per node (unsorted partition is enough to threshold).
@@ -140,9 +156,8 @@ def _knn_graph(mat, found, item_ids: list[int], k: int, threshold: float):
             if cur is None or w > cur:
                 edges[(a, b)] = w
             ia, ib = item_ids[a], item_ids[b]
-            if ia != ib:
-                key = (ia, ib) if ia < ib else (ib, ia)
-                item_pairs[key] += w
+            key = (ia, ib) if ia < ib else (ib, ia)
+            item_pairs[key] += w
     return edges, item_pairs
 
 
@@ -227,9 +242,14 @@ def build_graph(force: bool = False) -> dict:
         degree[a] += 1
         degree[b] += 1
 
+    # Only keep paragraphs that connect to another article — the point of the
+    # graph is relatedness, so isolated nodes are dropped.
+    kept = [i for i in range(len(chunk_ids)) if degree.get(i, 0) >= 1]
+
     with session_scope() as session:
         _wipe(session)
-        for i, (cid, iid, fld, txt) in enumerate(paragraphs):
+        for i in kept:
+            cid, iid, fld, txt = paragraphs[i]
             session.add(
                 GraphParagraph(
                     build_id=build_id,
@@ -263,8 +283,8 @@ def build_graph(force: bool = False) -> dict:
         cache.build_id = build_id
         cache.blob = json.dumps(blob, ensure_ascii=False)
         cache.fingerprint = fingerprint
-        cache.node_count = len(chunk_ids)
-        cache.item_count = len(set(item_ids))
+        cache.node_count = len(kept)
+        cache.item_count = len({item_ids[i] for i in kept})
         from app.models import utcnow
 
         cache.built_at = utcnow()
@@ -272,10 +292,11 @@ def build_graph(force: bool = False) -> dict:
 
     result = {
         "build_id": build_id,
-        "nodes": len(chunk_ids),
+        "nodes": len(kept),
+        "candidates": len(chunk_ids),
         "edges": len(edges),
-        "items": len(set(item_ids)),
-        "communities": len(set(node_community.values())),
+        "items": len({item_ids[i] for i in kept}),
+        "communities": len({node_community.get(i, 0) for i in kept}),
         "recommendations": sum(len(r) for r in recs.values()),
         "fingerprint": fingerprint,
     }
