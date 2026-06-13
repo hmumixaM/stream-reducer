@@ -6,6 +6,7 @@ import { Layout } from "@/components/Layout";
 import { Login } from "@/pages/Login";
 import { useMe } from "@/lib/auth";
 import { Button, Card, Spinner } from "@/components/ui";
+import "@/lib/firebase"; // initialize Firebase monitoring (Performance + Analytics)
 import "./index.css";
 
 // Every page is code-split so the initial load only ships the shell + the
