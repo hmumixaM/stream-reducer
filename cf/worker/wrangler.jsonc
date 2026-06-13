@@ -11,7 +11,12 @@
   "assets": {
     "directory": "../../frontend/dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // Without this, the static-assets layer answers browser navigations to
+    // /api/* (e.g. the magic-link GET /api/auth/verify) with the SPA shell
+    // before the Worker runs, so React Router 404s. Run the Worker first for
+    // server-handled paths; everything else still falls back to the SPA.
+    "run_worker_first": ["/api/*", "/media/*"]
   },
 
   "observability": { "enabled": true },
