@@ -16,10 +16,11 @@
 
   "observability": { "enabled": true },
 
-  // Serve the Worker from a custom domain on the xgoose.org zone. `custom_domain`
-  // makes Cloudflare create the DNS record + route on deploy (the zone is in this
-  // same account). The workers.dev URL keeps working alongside it.
-  "routes": [{ "pattern": "reducer.xgoose.org", "custom_domain": true }],
+  // The Worker is served from the custom domain reducer.xgoose.org. That domain
+  // is attached out-of-band via the Workers Custom Domains API (the CI deploy
+  // token can't manage zone-level Workers routes), so it is intentionally NOT
+  // declared here — declaring it makes `wrangler deploy` fail with a zone-route
+  // auth error. The attached domain persists independently of deploys.
 
   // --- D1: relational store (users, items, user_item, subs, comments, ...) ---
   "d1_databases": [
