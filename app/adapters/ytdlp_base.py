@@ -117,6 +117,7 @@ class YtDlpAdapter(Adapter):
             view_count=info.get("view_count"),
             like_count=info.get("like_count"),
             dislike_count=info.get("dislike_count"),
+            channel_id=info.get("channel_id") or info.get("uploader_id"),
         )
 
     def get_native_transcript(

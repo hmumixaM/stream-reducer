@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS item (
   error         TEXT,
   -- Prioritization signals (see lib/priority.ts).
   request_count       INTEGER NOT NULL DEFAULT 0,  -- # users who want it
+  interest_count      INTEGER NOT NULL DEFAULT 0,  -- # users explicitly interested
   subscriber_demand   INTEGER NOT NULL DEFAULT 0,  -- # subscribers to its source feed
   priority_score      REAL NOT NULL DEFAULT 0,
   -- Media + processing metrics.
@@ -176,6 +177,16 @@ CREATE INDEX IF NOT EXISTS ix_user_item_user ON user_item(user_id);
 CREATE INDEX IF NOT EXISTS ix_user_item_item ON user_item(item_id);
 CREATE INDEX IF NOT EXISTS ix_user_item_folder ON user_item(folder_id);
 
+CREATE TABLE IF NOT EXISTS item_interest (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  item_id    INTEGER NOT NULL REFERENCES item(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE(user_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS ix_interest_item ON item_interest(item_id);
+CREATE INDEX IF NOT EXISTS ix_interest_user ON item_interest(user_id);
+
 CREATE TABLE IF NOT EXISTS subscription (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id         INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
@@ -195,6 +206,28 @@ CREATE TABLE IF NOT EXISTS subscription (
 );
 CREATE INDEX IF NOT EXISTS ix_sub_user ON subscription(user_id);
 CREATE INDEX IF NOT EXISTS ix_sub_feed ON subscription(feed_url);
+
+CREATE TABLE IF NOT EXISTS subscription_comment (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  subscription_id INTEGER NOT NULL REFERENCES subscription(id) ON DELETE CASCADE,
+  user_id         INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  body            TEXT NOT NULL,
+  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS ix_sub_comment_sub ON subscription_comment(subscription_id);
+CREATE INDEX IF NOT EXISTS ix_sub_comment_user ON subscription_comment(user_id);
+
+CREATE TABLE IF NOT EXISTS subscription_highlight (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  subscription_id INTEGER NOT NULL REFERENCES subscription(id) ON DELETE CASCADE,
+  user_id         INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  quote           TEXT NOT NULL,
+  note            TEXT NOT NULL DEFAULT '',
+  color           TEXT NOT NULL DEFAULT 'yellow',
+  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS ix_sub_highlight_sub ON subscription_highlight(subscription_id);
+CREATE INDEX IF NOT EXISTS ix_sub_highlight_user ON subscription_highlight(user_id);
 
 CREATE TABLE IF NOT EXISTS comment (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

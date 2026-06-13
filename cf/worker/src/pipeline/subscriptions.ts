@@ -48,7 +48,13 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
   }
   const minPublished = sub.min_published_at; // window cutoff (last 3 months)
   const within = fresh.filter((e) => !minPublished || !e.published || e.published >= minPublished);
-  const batch = within.slice(0, MAX_NEW_PER_POLL).reverse(); // oldest first
+  // Drain the backfill window from oldest -> newest. When the window is larger
+  // than one poll batch, move last_seen_guid only up to the newest item actually
+  // processed so later polls continue with the remaining recent entries.
+  const newestFirstBatch = within.length > MAX_NEW_PER_POLL
+    ? within.slice(-MAX_NEW_PER_POLL)
+    : within;
+  const batch = newestFirstBatch.slice().reverse(); // oldest first
 
   let enqueued = 0;
   for (const e of batch) {
@@ -59,15 +65,19 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
       external_id: e.guid,
       platform,
       subscriptionId: sub.id,
+      feedUrl: sub.feed_url,
     });
     if (res) enqueued++;
   }
 
+  const nextSeenGuid = within.length > MAX_NEW_PER_POLL
+    ? newestFirstBatch[0]?.guid
+    : newestGuid;
   await env.DB.prepare(
     `UPDATE subscription SET last_checked_at = ?, last_seen_guid = COALESCE(?, last_seen_guid),
        title = COALESCE(title, ?) WHERE id = ?`,
   )
-    .bind(isoNow(), newestGuid, feed.title, subId)
+    .bind(isoNow(), nextSeenGuid, feed.title, subId)
     .run();
   return enqueued;
 }

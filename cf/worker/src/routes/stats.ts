@@ -8,6 +8,7 @@ statsRoutes.use("*", requireAuth);
 
 // Aggregate stats over the global catalog + pipeline runs.
 statsRoutes.get("/", async (c) => {
+  const refresh = c.req.query("refresh") === "true";
   const total = (await first<{ n: number }>(c.env.DB.prepare("SELECT COUNT(*) AS n FROM item")))?.n ?? 0;
 
   const byStatus = await all<{ status: string; n: number }>(
@@ -46,6 +47,7 @@ statsRoutes.get("/", async (c) => {
     cost_by_stage[s.stage] = s.cost ?? 0;
   }
 
+  if (refresh) c.header("cache-control", "no-store");
   return c.json({
     total_items: total,
     items_by_status,

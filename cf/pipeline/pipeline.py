@@ -231,6 +231,7 @@ def _meta_to_dict(meta: ContentMeta) -> dict:
         "view_count": meta.view_count,
         "like_count": meta.like_count,
         "dislike_count": meta.dislike_count,
+        "channel_id": meta.channel_id,
     }
 
 

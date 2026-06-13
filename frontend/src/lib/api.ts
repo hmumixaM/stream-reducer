@@ -53,6 +53,8 @@ export interface Item {
   saved?: boolean;
   personal_status?: "waiting" | "done" | null;
   request_count?: number;
+  interest_count?: number;
+  is_interested?: boolean;
   priority_score?: number;
 }
 
@@ -183,6 +185,8 @@ export interface Subscription {
   feed_url: string;
   title?: string | null;
   interval_minutes: number;
+  window_days: number;
+  min_published_at?: string | null;
   enabled: boolean;
   last_checked_at?: string | null;
   last_seen_guid?: string | null;
@@ -324,6 +328,16 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function optionalSession(): Promise<{ user: User | null }> {
+  const res = await fetch("/api/auth/me", {
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+  });
+  if (res.status === 401) return { user: null };
+  if (!res.ok) return { user: null };
+  return res.json() as Promise<{ user: User | null }>;
+}
+
 export interface ListItemsParams {
   status?: string;
   platform?: string;
@@ -331,6 +345,7 @@ export interface ListItemsParams {
   favorite?: boolean;
   archived?: boolean;
   group_id?: number;
+  subscription_id?: number;
   ungrouped?: boolean;
   sort?: string;
   order?: string;
@@ -470,6 +485,7 @@ function itemQuery(params?: ListItemsParams): string {
   if (params?.favorite !== undefined) sp.set("favorite", String(params.favorite));
   if (params?.archived !== undefined) sp.set("archived", String(params.archived));
   if (params?.group_id !== undefined) sp.set("group_id", String(params.group_id));
+  if (params?.subscription_id !== undefined) sp.set("subscription_id", String(params.subscription_id));
   if (params?.ungrouped) sp.set("ungrouped", "true");
   if (params?.sort) sp.set("sort", params.sort);
   if (params?.order) sp.set("order", params.order);
@@ -486,7 +502,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
-  getMe: () => req<{ user: User | null }>("/api/auth/me"),
+  getMe: () => optionalSession(),
   logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
 
   // The signed-in user's personal library (waiting + done).
@@ -529,6 +545,8 @@ export const api = {
   deleteItem: (id: number) => req<void>(`/api/items/${id}`, { method: "DELETE" }),
   deleteMedia: (id: number) =>
     req<Item>(`/api/items/${id}/media`, { method: "DELETE" }),
+  toggleInterest: (id: number) =>
+    req<Item>(`/api/items/${id}/interest`, { method: "POST" }),
   toggleFavorite: (id: number) =>
     req<Item>(`/api/items/${id}/favorite`, { method: "POST" }),
   toggleArchive: (id: number) =>
@@ -570,15 +588,29 @@ export const api = {
   listQueue: () => req<QueueItem[]>("/api/queue"),
 
   listSubscriptions: () => req<Subscription[]>("/api/subscriptions"),
-  addSubscription: (feed_url: string, interval_minutes?: number) =>
+  addSubscription: (feed_url: string, interval_minutes?: number, window_days?: number) =>
     req<Subscription>("/api/subscriptions", {
       method: "POST",
-      body: JSON.stringify({ feed_url, interval_minutes }),
+      body: JSON.stringify({ feed_url, interval_minutes, window_days }),
     }),
   toggleSubscription: (id: number) =>
     req<Subscription>(`/api/subscriptions/${id}/toggle`, { method: "POST" }),
   pollSubscription: (id: number) =>
     req<{ ok: boolean }>(`/api/subscriptions/${id}/poll`, { method: "POST" }),
+  listSubscriptionItems: (id: number) =>
+    req<Item[]>(`/api/subscriptions/${id}/items`),
+  addSubscriptionComment: (id: number, body: string) =>
+    req<Record<string, unknown>>(`/api/subscriptions/${id}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    }),
+  addSubscriptionHighlight: (id: number, quote: string, note = "") =>
+    req<Record<string, unknown>>(`/api/subscriptions/${id}/highlights`, {
+      method: "POST",
+      body: JSON.stringify({ quote, note }),
+    }),
+  listSubscriptionAnnotations: (id: number) =>
+    req<Record<string, unknown>[]>(`/api/subscriptions/${id}/annotations`),
   deleteSubscription: (id: number) =>
     req<void>(`/api/subscriptions/${id}`, { method: "DELETE" }),
 

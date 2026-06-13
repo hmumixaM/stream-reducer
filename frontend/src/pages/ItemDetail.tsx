@@ -23,6 +23,7 @@ import {
   type NewHighlight,
 } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
+import { useMe } from "@/lib/auth";
 import { Button, Card, Spinner } from "@/components/ui";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { RelatedArticles } from "@/components/RelatedArticles";
@@ -43,6 +44,10 @@ export function ItemDetail() {
   const itemId = Number(id);
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const me = useMe();
+  // Personal actions (favorite, archive, comments, highlights, retry, delete)
+  // need a session; anonymous visitors get a read-only view.
+  const canEdit = !MIRROR && !!me.data?.user;
   const [showTranscript, setShowTranscript] = useState(false);
   const [showComments, setShowComments] = useState(false);
   
@@ -80,6 +85,10 @@ export function ItemDetail() {
   const retry = useMutation({
     mutationFn: () => api.retryItem(itemId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["item", itemId] }),
+  });
+  const interest = useMutation({
+    mutationFn: () => api.toggleInterest(itemId),
+    onSuccess: invalidate,
   });
   const remove = useMutation({
     mutationFn: () => api.deleteItem(itemId),
@@ -125,8 +134,11 @@ export function ItemDetail() {
 
   return (
     <div className={readMode ? "mx-auto max-w-3xl" : ""}>
-      <Link to="/" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" /> Library
+      <Link
+        to={me.data?.user ? "/" : "/browse"}
+        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" /> {me.data?.user ? "Library" : "Browse"}
       </Link>
 
       <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -139,7 +151,7 @@ export function ItemDetail() {
           {d.author && <p className="mt-1 text-sm text-muted-foreground">{d.author}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          {!readMode && !MIRROR && (
+          {!readMode && canEdit && (
             <>
               <Button
                 variant="outline"
@@ -182,7 +194,7 @@ export function ItemDetail() {
           >
             <BookOpen className="h-4 w-4" /> <span className="hidden sm:inline">{readMode ? "Exit read mode" : "Read mode"}</span>
           </Button>
-          {!readMode && !MIRROR &&
+          {!readMode && canEdit &&
             (d.status === "error" ? (
               <Button size="sm" onClick={() => retry.mutate()} disabled={retry.isPending}>
                 <RefreshCw className="h-4 w-4" /> <span className="hidden sm:inline">Retry</span>
@@ -204,7 +216,22 @@ export function ItemDetail() {
                 );
               })()
             ))}
-          {!readMode && !MIRROR && (
+          {!readMode && canEdit && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => interest.mutate()}
+              disabled={interest.isPending}
+              title={d.is_interested ? "You're interested — boosts processing priority" : "Mark interest to boost processing priority"}
+            >
+              <Star className={cn("h-4 w-4", d.is_interested && "fill-amber-400 text-amber-400")} />
+              <span className="hidden sm:inline">{d.is_interested ? "Interested" : "Mark interest"}</span>
+              {!!d.interest_count && (
+                <span className="text-xs text-muted-foreground">{d.interest_count}</span>
+              )}
+            </Button>
+          )}
+          {!readMode && canEdit && (
             <Button variant="danger" size="sm" onClick={() => remove.mutate()}>
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -226,7 +253,7 @@ export function ItemDetail() {
                 markdown={d.summary.markdown}
                 highlights={summaryHighlights}
                 source="summary"
-                readOnly={MIRROR}
+                readOnly={!canEdit}
                 onCreate={onCreateHighlight}
                 onUpdateNote={onUpdateHighlight}
                 onDelete={onDeleteHighlight}
@@ -266,7 +293,7 @@ export function ItemDetail() {
                 <TranscriptBody
                   segments={d.transcript.segments}
                   highlights={transcriptHighlights}
-                  readOnly={MIRROR}
+                  readOnly={!canEdit}
                   onCreate={onCreateHighlight}
                   onUpdateNote={onUpdateHighlight}
                   onDelete={onDeleteHighlight}
@@ -278,12 +305,12 @@ export function ItemDetail() {
           {d.highlights.length > 0 && (
             <HighlightsList
               highlights={d.highlights}
-              readOnly={MIRROR}
+              readOnly={!canEdit}
               onDelete={onDeleteHighlight}
             />
           )}
 
-          {!MIRROR && (
+          {canEdit && (
             readMode ? (
               <Card className="mt-4 p-4 border-dashed bg-transparent shadow-none">
                 <button

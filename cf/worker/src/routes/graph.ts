@@ -67,11 +67,62 @@ async function loadGlobalGraph(c: Parameters<typeof requireAuth>[0]): Promise<Gr
 }
 
 graphRoutes.get("/", async (c) => {
+  const userId = c.get("user").id;
   const graph = await loadGlobalGraph(c);
   const allowed = await allowedItemIds(c);
   const nodes = graph.nodes.filter((n) => allowed.has(n.item_id));
   const keep = new Set(nodes.map((n) => n.id));
   const edges = graph.edges.filter((e) => keep.has(e.source) && keep.has(e.target));
+  const firstNodeByItem = new Map<number, GraphNode>();
+  for (const n of nodes) {
+    if (!firstNodeByItem.has(n.item_id)) firstNodeByItem.set(n.item_id, n);
+  }
+
+  const highlights = await all<{ id: number; item_id: number; quote: string; note: string }>(
+    c.env.DB.prepare(
+      `SELECT id, item_id, quote, note FROM highlight
+        WHERE user_id = ? AND item_id IN (SELECT item_id FROM user_item WHERE user_id = ?)`,
+    ).bind(userId, userId),
+  );
+  const comments = await all<{ id: number; item_id: number; body: string }>(
+    c.env.DB.prepare(
+      `SELECT id, item_id, body FROM comment
+        WHERE user_id = ? AND item_id IN (SELECT item_id FROM user_item WHERE user_id = ?)`,
+    ).bind(userId, userId),
+  );
+
+  for (const h of highlights) {
+    if (!allowed.has(h.item_id)) continue;
+    const anchor = firstNodeByItem.get(h.item_id);
+    const id = -1000000 - h.id;
+    nodes.push({
+      id,
+      item_id: h.item_id,
+      title: "Your highlight",
+      platform: "unknown",
+      field: "highlight",
+      text: h.note ? `${h.quote}\n\nNote: ${h.note}` : h.quote,
+      community: anchor?.community ?? 0,
+      degree: anchor ? 1 : 0,
+    });
+    if (anchor) edges.push({ source: id, target: anchor.id, weight: 1 });
+  }
+  for (const cm of comments) {
+    if (!allowed.has(cm.item_id)) continue;
+    const anchor = firstNodeByItem.get(cm.item_id);
+    const id = -2000000 - cm.id;
+    nodes.push({
+      id,
+      item_id: cm.item_id,
+      title: "Your comment",
+      platform: "unknown",
+      field: "comment",
+      text: cm.body,
+      community: anchor?.community ?? 0,
+      degree: anchor ? 1 : 0,
+    });
+    if (anchor) edges.push({ source: id, target: anchor.id, weight: 1 });
+  }
   return c.json({ build_id: graph.build_id, built_at: graph.built_at, nodes, edges });
 });
 

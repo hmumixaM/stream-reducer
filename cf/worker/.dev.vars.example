@@ -2,8 +2,6 @@
 # In production these are set with `wrangler secret put <NAME>`.
 
 # Bearer token for the Gemini summary proxy.
-GEMINI_API_KEY=dd8db63f07651ab577ec6618256e249ee0bc60a8bd16b0b030898f7e973bd47b
+GEMINI_API_KEY=replace-with-gemini-proxy-token
 # OpenRouter key for Whisper speech-to-text.
 OPENROUTER_API_KEY=sk-or-v1-your-key
-# Random 32+ byte string used to sign/hash auth tokens.
-SESSION_SECRET=change-me-to-a-long-random-string

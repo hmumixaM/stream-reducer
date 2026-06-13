@@ -35,6 +35,16 @@ app.route("/api/settings", settingsRoutes);
 
 // Unknown API paths -> JSON 404 (don't fall through to the SPA shell).
 app.all("/api/*", (c) => c.json({ error: "not found" }, 404));
+app.get("/media/*", async (c) => {
+  const key = c.req.path.replace(/^\/media\/+/, "");
+  const object = key ? await c.env.MEDIA.get(key) : null;
+  if (!object) return c.json({ error: "media not found" }, 404);
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("etag", object.httpEtag);
+  headers.set("cache-control", "private, max-age=3600");
+  return new Response(object.body, { headers });
+});
 // Anything else: serve the built SPA (assets binding handles SPA fallback).
 app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 

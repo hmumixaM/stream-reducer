@@ -25,6 +25,7 @@ export interface ItemRow {
   status: string;
   error: string | null;
   request_count: number;
+  interest_count: number;
   subscriber_demand: number;
   priority_score: number;
   media_key: string | null;
@@ -95,6 +96,15 @@ export async function upsertItem(
     external_id?: string | null;
   },
 ): Promise<{ item: ItemRow; created: boolean }> {
+  if (opts.external_id) {
+    const existingByExternal = await first<ItemRow>(
+      env.DB.prepare(
+        "SELECT * FROM item WHERE platform = ? AND external_id = ? ORDER BY id LIMIT 1",
+      ).bind(opts.platform, opts.external_id),
+    );
+    if (existingByExternal) return { item: existingByExternal, created: false };
+  }
+
   const existing = await first<ItemRow>(
     env.DB.prepare("SELECT * FROM item WHERE source_url = ?").bind(opts.source_url),
   );

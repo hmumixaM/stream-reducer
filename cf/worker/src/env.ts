@@ -31,7 +31,6 @@ export interface Env {
   // Secrets
   GEMINI_API_KEY: string;
   OPENROUTER_API_KEY: string;
-  SESSION_SECRET: string;
 }
 
 // A unit of pipeline work. `kind` selects the action the queue consumer runs.

@@ -34,16 +34,22 @@ Worker (Hono, TS)  ──►  D1            (users, items, user_item, subs, ...)
 - **Container**: `cf/pipeline` (Python + FastAPI). Reuses the repo's
   `app/adapters` for platform handling. Stateless: returns JSON the Worker
   persists.
-- **Frontend**: the existing `frontend/` SPA, now auth-gated with a Login page,
-  a global **Browse** view, and a per-user **Library**.
+- **Frontend**: the existing `frontend/` SPA. The global **Browse** view and
+  item detail pages are public (no account needed); the per-user **Library**,
+  Search, Graph, annotations, queue, subscriptions, and settings require a
+  magic-link session.
 
 ## Prerequisites
 
 - A **Workers Paid plan** (Containers, Queues, and Email Sending all require it).
 - `wrangler` (installed via `npm install` here), Docker running locally (to
   build the container image on deploy).
-- A domain on Cloudflare, onboarded in **Email Service** so magic-link mail
-  delivers (the `EMAIL_FROM` address must be on that domain).
+- A domain on Cloudflare, onboarded in **Email Service → Email Sending** so
+  magic-link mail delivers to any recipient (the `EMAIL_FROM` address must be on
+  that onboarded domain). This deployment uses `noreply@xgoose.org`. Until a
+  sending domain is onboarded, the `send_email` binding can only reach verified
+  destination addresses, and an unonboarded/placeholder `EMAIL_FROM` makes
+  `/api/auth/request` fail (the route now returns a clear 502 instead of a 500).
 
 ## One-time resource creation
 
@@ -75,7 +81,6 @@ Then edit `wrangler.jsonc`:
 ```bash
 npx wrangler secret put GEMINI_API_KEY       # bearer for the Gemini summary proxy
 npx wrangler secret put OPENROUTER_API_KEY   # OpenRouter Whisper key
-npx wrangler secret put SESSION_SECRET       # long random string
 ```
 
 ## Migrate the database
@@ -120,7 +125,7 @@ ingest pipeline calls will fail locally but the rest of the API works.
 | Per-user knowledge graph | `src/routes/graph.ts` (filters the global graph by the user's `user_item`) |
 | Subscriptions, last-3-months default | `src/routes/subscriptions.ts` (`window_days = 90`), `src/pipeline/subscriptions.ts` |
 | Metadata-first ingest | `src/pipeline/consumer.ts` (`fetchMetadata` before `runPipeline`) |
-| Prioritization (views + subscribers + requesters) | `src/lib/priority.ts`, `src/lib/ingest.ts` (`recomputePriority`) |
-| Dedup (one item, many libraries, waiting/done) | `src/lib/ingest.ts` + `user_item` join in `migrations/0001_init.sql` |
+| Prioritization (views + subscribers + requesters/interest) | `src/lib/priority.ts`, `src/lib/ingest.ts` (`recomputePriority`); subscriber demand uses the global `item_feed` link (`migrations/0002_item_feed.sql`) so manually-added videos still credit their channel's subscribers |
+| Dedup (one item, many libraries, waiting/done) | `src/lib/ingest.ts` + `user_item` join in `migrations/0001_init.sql`; the per-user `waiting` badge surfaces in Browse/Library (`components/ItemCard.tsx`, `pages/Browse.tsx`) |
 | Gemini summary endpoint | `vars.LLM_BASE_URL` + `GEMINI_API_KEY` (used in `cf/pipeline/llm.py`) |
 | OpenRouter STT (unchanged) | `cf/pipeline/llm.py` `transcribe_chunk` |

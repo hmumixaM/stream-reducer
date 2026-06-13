@@ -18,7 +18,7 @@ import {
 import type { Group, Item } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
 import { Card } from "@/components/ui";
-import { PlatformBadge, StatusBadge } from "@/components/badges";
+import { PlatformBadge, StatusBadge, WaitingBadge } from "@/components/badges";
 import { formatCost, formatCount, formatDate, formatMs, timeAgo } from "@/lib/utils";
 
 export interface ItemCardActions {
@@ -86,6 +86,7 @@ export function ItemCard({ item, ...actions }: { item: Item } & ItemCardActions)
           <div className="mb-2 flex items-center gap-2">
             <PlatformBadge platform={item.platform} />
             <StatusBadge status={item.status} />
+            {item.personal_status === "waiting" && item.status !== "done" && <WaitingBadge />}
           </div>
           <h3 className="mb-2 line-clamp-2 font-medium leading-snug">
             {item.title || item.source_url}

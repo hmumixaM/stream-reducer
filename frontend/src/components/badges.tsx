@@ -22,6 +22,17 @@ export function StatusBadge({ status }: { status: ItemStatus }) {
   );
 }
 
+// Shown when a shared item is still being processed for the current user's copy
+// (the dedup payoff: the same content can sit "waiting" in several libraries).
+export function WaitingBadge({ label = "waiting" }: { label?: string }) {
+  return (
+    <Badge className="bg-amber-500/15 text-amber-400" title="Shared content still processing — it'll appear once ready">
+      <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+      {label}
+    </Badge>
+  );
+}
+
 const PLATFORM_LABELS: Record<Platform, string> = {
   youtube: "YouTube",
   bilibili: "Bilibili",

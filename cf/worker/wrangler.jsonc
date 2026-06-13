@@ -16,6 +16,11 @@
 
   "observability": { "enabled": true },
 
+  // Serve the Worker from a custom domain on the xgoose.org zone. `custom_domain`
+  // makes Cloudflare create the DNS record + route on deploy (the zone is in this
+  // same account). The workers.dev URL keeps working alongside it.
+  "routes": [{ "pattern": "reducer.xgoose.org", "custom_domain": true }],
+
   // --- D1: relational store (users, items, user_item, subs, comments, ...) ---
   "d1_databases": [
     {
@@ -92,8 +97,8 @@
   },
 
   "vars": {
-    "APP_ORIGIN": "https://stream-reduce.max-678.workers.dev",
-    "EMAIL_FROM": "noreply@example.com",
+    "APP_ORIGIN": "https://reducer.xgoose.org",
+    "EMAIL_FROM": "noreply@xgoose.org",
     "LLM_BASE_URL": "https://xgoose-gemini-proxy-1.max-678.workers.dev/v1",
     "LLM_MODEL": "gemini-3.5-flash",
     "STT_MODEL": "openai/whisper-large-v3-turbo",
@@ -106,5 +111,4 @@
   // Secrets (set via `wrangler secret put`):
   //   GEMINI_API_KEY        - bearer token for the Gemini summary proxy
   //   OPENROUTER_API_KEY    - OpenRouter key for Whisper STT
-  //   SESSION_SECRET        - HMAC key for signing session/magic-link tokens
 }

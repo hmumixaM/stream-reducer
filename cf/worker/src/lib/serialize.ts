@@ -3,7 +3,11 @@ import type { ItemRow, UserItemRow } from "../db";
 // Shape a global item row (+ optional per-user state) into the JSON the SPA's
 // `Item` type expects. Per-user fields fall back to neutral defaults when the
 // user hasn't saved the item (i.e. when browsing the global catalog).
-export function toItemRead(item: ItemRow, ui?: UserItemRow | null) {
+export function toItemRead(
+  item: ItemRow,
+  ui?: UserItemRow | null,
+  extra?: { is_interested?: boolean },
+) {
   return {
     id: item.id,
     platform: item.platform,
@@ -41,6 +45,8 @@ export function toItemRead(item: ItemRow, ui?: UserItemRow | null) {
     saved: !!ui,
     personal_status: ui?.personal_status ?? null,
     request_count: item.request_count,
+    interest_count: item.interest_count,
+    is_interested: !!extra?.is_interested,
     priority_score: item.priority_score,
   };
 }

@@ -1,7 +1,7 @@
 import type { Env, PipelineMessage } from "../env";
 import { first, type ItemRow } from "../db";
 import { isoNow } from "../lib/crypto";
-import { recomputePriority } from "../lib/ingest";
+import { persistItemMetadata, recomputePriority, linkItemFeed, youtubeChannelFeed } from "../lib/ingest";
 import { runPipeline, fetchMetadata, type PipelineResult } from "./container";
 import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
@@ -9,7 +9,7 @@ import { buildGraph } from "./graph_build";
 export async function handleMessage(env: Env, msg: PipelineMessage): Promise<void> {
   switch (msg.kind) {
     case "process":
-      return processItem(env, msg.item_id);
+      return processNextQueuedItem(env, msg.item_id);
     case "resummarize":
       return processItem(env, msg.item_id, true);
     case "poll":
@@ -21,6 +21,50 @@ export async function handleMessage(env: Env, msg: PipelineMessage): Promise<voi
   }
 }
 
+async function processNextQueuedItem(env: Env, requestedItemId: number): Promise<void> {
+  await refreshQueuedMetadata(env, requestedItemId);
+  const item = await claimNextQueuedItem(env);
+  if (!item) return;
+  return processClaimedItem(env, item, false);
+}
+
+async function refreshQueuedMetadata(env: Env, itemId: number): Promise<void> {
+  const item = await first<ItemRow>(
+    env.DB.prepare("SELECT * FROM item WHERE id = ? AND status IN ('queued', 'error')").bind(itemId),
+  );
+  if (!item || item.view_count != null) return;
+
+  const meta = await fetchMetadata(env, item.source_url, item.platform).catch(() => null);
+  if (!meta) return;
+  await persistMetadata(env, itemId, meta);
+  if (item.platform === "youtube") await linkItemFeed(env, itemId, youtubeChannelFeed(meta.channel_id));
+  await recomputePriority(env, itemId);
+}
+
+async function claimNextQueuedItem(env: Env): Promise<ItemRow | null> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = await first<ItemRow>(
+      env.DB.prepare(
+        `SELECT * FROM item
+          WHERE status IN ('queued', 'error')
+          ORDER BY priority_score DESC, request_count DESC, enqueued_at ASC
+          LIMIT 1`,
+      ),
+    );
+    if (!candidate) return null;
+
+    const res = await env.DB.prepare(
+      "UPDATE item SET status = 'fetching', started_at = ?, error = NULL WHERE id = ? AND status IN ('queued', 'error')",
+    )
+      .bind(isoNow(), candidate.id)
+      .run();
+    if ((res.meta.changes ?? 0) > 0) {
+      return { ...candidate, status: "fetching", error: null, started_at: isoNow() };
+    }
+  }
+  return null;
+}
+
 async function processItem(env: Env, itemId: number, resummarize = false): Promise<void> {
   const item = await first<ItemRow>(env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(itemId));
   if (!item) return;
@@ -28,7 +72,11 @@ async function processItem(env: Env, itemId: number, resummarize = false): Promi
   await env.DB.prepare("UPDATE item SET status = 'fetching', started_at = ?, error = NULL WHERE id = ?")
     .bind(isoNow(), itemId)
     .run();
+  return processClaimedItem(env, { ...item, status: "fetching", error: null }, resummarize);
+}
 
+async function processClaimedItem(env: Env, item: ItemRow, resummarize = false): Promise<void> {
+  const itemId = item.id;
   try {
     // Metadata-first: fetch + persist lightweight metadata before the expensive
     // transcribe/summarize stages, so prioritization signals are populated early.
@@ -36,6 +84,7 @@ async function processItem(env: Env, itemId: number, resummarize = false): Promi
       const meta = await fetchMetadata(env, item.source_url, item.platform).catch(() => null);
       if (meta) {
         await persistMetadata(env, itemId, meta);
+        if (item.platform === "youtube") await linkItemFeed(env, itemId, youtubeChannelFeed(meta.channel_id));
         await recomputePriority(env, itemId);
       }
     }
@@ -77,21 +126,7 @@ async function processItem(env: Env, itemId: number, resummarize = false): Promi
 }
 
 async function persistMetadata(env: Env, itemId: number, m: PipelineResult["metadata"]): Promise<void> {
-  await env.DB.prepare(
-    `UPDATE item SET
-       title = COALESCE(?, title), author = COALESCE(?, author),
-       description = COALESCE(?, description), duration_s = COALESCE(?, duration_s),
-       published_at = COALESCE(?, published_at), thumbnail = COALESCE(?, thumbnail),
-       external_id = COALESCE(?, external_id), view_count = COALESCE(?, view_count),
-       like_count = COALESCE(?, like_count), dislike_count = COALESCE(?, dislike_count)
-     WHERE id = ?`,
-  )
-    .bind(
-      m.title ?? null, m.author ?? null, m.description ?? null, m.duration_s ?? null,
-      m.published_at ?? null, m.thumbnail ?? null, m.external_id ?? null,
-      m.view_count ?? null, m.like_count ?? null, m.dislike_count ?? null, itemId,
-    )
-    .run();
+  await persistItemMetadata(env, itemId, m);
 }
 
 async function persistResult(env: Env, itemId: number, r: PipelineResult): Promise<void> {

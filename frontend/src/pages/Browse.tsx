@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Film, Plus } from "lucide-react";
+import { Check, Film, Plus, Star } from "lucide-react";
 import { api, type Item } from "@/lib/api";
+import { useMe } from "@/lib/auth";
 import { Button, Card, Input, Select } from "@/components/ui";
-import { PlatformBadge, StatusBadge } from "@/components/badges";
-import { formatCount } from "@/lib/utils";
+import { PlatformBadge, StatusBadge, WaitingBadge } from "@/components/badges";
+import { cn, formatCount } from "@/lib/utils";
 
 const PLATFORMS = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
 const PAGE_SIZE = 60;
@@ -21,6 +22,8 @@ export function Browse() {
   const [platform, setPlatform] = useState("");
   const [sort, setSort] = useState("priority");
   const qc = useQueryClient();
+  const me = useMe();
+  const canAdd = !!me.data?.user;
 
   const items = useInfiniteQuery({
     queryKey: ["browse", { q, platform, sort }],
@@ -46,6 +49,10 @@ export function Browse() {
       qc.invalidateQueries({ queryKey: ["items"] });
       qc.invalidateQueries({ queryKey: ["queue"] });
     },
+  });
+  const interest = useMutation({
+    mutationFn: (id: number) => api.toggleInterest(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["browse"] }),
   });
 
   const all = items.data?.pages.flat() ?? [];
@@ -86,8 +93,11 @@ export function Browse() {
               <BrowseCard
                 key={item.id}
                 item={item}
+                canAdd={canAdd}
                 onAdd={() => add.mutate(item.source_url)}
                 adding={add.isPending && add.variables === item.source_url}
+                onInterest={() => interest.mutate(item.id)}
+                interestPending={interest.isPending && interest.variables === item.id}
               />
             ))}
           </div>
@@ -108,7 +118,21 @@ export function Browse() {
   );
 }
 
-function BrowseCard({ item, onAdd, adding }: { item: Item; onAdd: () => void; adding: boolean }) {
+function BrowseCard({
+  item,
+  canAdd,
+  onAdd,
+  adding,
+  onInterest,
+  interestPending,
+}: {
+  item: Item;
+  canAdd: boolean;
+  onAdd: () => void;
+  adding: boolean;
+  onInterest: () => void;
+  interestPending: boolean;
+}) {
   return (
     <Card className="group relative flex h-full flex-col overflow-hidden transition-colors hover:border-primary">
       <Link to={`/items/${item.id}`} className="block">
@@ -126,6 +150,7 @@ function BrowseCard({ item, onAdd, adding }: { item: Item; onAdd: () => void; ad
         <div className="mb-2 flex items-center gap-2">
           <PlatformBadge platform={item.platform} />
           <StatusBadge status={item.status} />
+          {item.personal_status === "waiting" && item.status !== "done" && <WaitingBadge />}
         </div>
         <Link to={`/items/${item.id}`} className="mb-2 line-clamp-2 font-medium leading-snug hover:underline">
           {item.title || item.source_url}
@@ -134,15 +159,38 @@ function BrowseCard({ item, onAdd, adding }: { item: Item; onAdd: () => void; ad
           {item.author && <span className="truncate">{item.author}</span>}
           {item.view_count != null && <span>{formatCount(item.view_count)} views</span>}
           {item.request_count ? <span>{item.request_count} in libraries</span> : null}
+          {item.interest_count ? <span>{item.interest_count} interested</span> : null}
         </div>
-        <div className="mt-auto">
+        <div className="mt-auto flex gap-2">
           {item.saved ? (
-            <Button variant="outline" size="sm" disabled className="w-full">
+            <Button variant="outline" size="sm" disabled className="flex-1">
               <Check className="h-4 w-4" /> In your library
             </Button>
+          ) : !canAdd ? (
+            <Link to="/login" className="block flex-1">
+              <Button variant="outline" size="sm" className="w-full">
+                Sign in to add
+              </Button>
+            </Link>
           ) : (
-            <Button size="sm" className="w-full" onClick={onAdd} disabled={adding}>
+            <Button size="sm" className="flex-1" onClick={onAdd} disabled={adding}>
               <Plus className="h-4 w-4" /> {adding ? "Adding…" : "Add to library"}
+            </Button>
+          )}
+          {canAdd && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onInterest}
+              disabled={interestPending}
+              title={item.is_interested ? "You're interested — boosts processing priority" : "Mark interest to boost processing priority"}
+            >
+              <Star
+                className={cn("h-4 w-4", item.is_interested && "fill-amber-400 text-amber-400")}
+              />
+              {!!item.interest_count && (
+                <span className="text-xs text-muted-foreground">{item.interest_count}</span>
+              )}
             </Button>
           )}
         </div>

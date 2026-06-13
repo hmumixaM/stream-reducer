@@ -16,7 +16,21 @@ authRoutes.post("/request", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { email?: string };
   const email = (body.email || "").trim().toLowerCase();
   if (!isValidEmail(email)) return c.json({ error: "invalid email" }, 400);
-  await sendMagicLink(c.env, email);
+  try {
+    await sendMagicLink(c.env, email);
+  } catch (err) {
+    if (err instanceof Error && err.message === "rate_limited") {
+      return c.json({ error: "Too many sign-in emails. Please try again in a few minutes." }, 429);
+    }
+    // Email delivery failures (unverified sender/destination, provider outage)
+    // shouldn't surface as an opaque 500. Log for the operator and return a
+    // clear, actionable error to the client.
+    console.error("magic-link send failed", { email, err: String(err) });
+    return c.json(
+      { error: "Could not send the sign-in email. Please try again later." },
+      502,
+    );
+  }
   return c.json({ ok: true });
 });
 
@@ -24,6 +38,32 @@ authRoutes.post("/request", async (c) => {
 // redirects into the app.
 authRoutes.get("/verify", async (c) => {
   const token = c.req.query("token") || "";
+  if (!token) {
+    return c.redirect(`${c.env.APP_ORIGIN}/login?error=invalid_or_expired`);
+  }
+  return c.html(`<!doctype html>
+    <html lang="en">
+      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in</title></head>
+      <body style="font-family:system-ui,sans-serif;display:grid;min-height:100vh;place-items:center;background:#0f172a;color:#e5e7eb">
+        <form method="post" action="/api/auth/verify" style="max-width:28rem;padding:2rem;border:1px solid #334155;border-radius:1rem;background:#111827">
+          <h1 style="margin-top:0">Sign in to stream-reduce</h1>
+          <p>Email security scanners sometimes open links automatically, so click the button below to finish signing in.</p>
+          <input type="hidden" name="token" value="${token.replace(/"/g, "&quot;")}">
+          <button style="padding:.65rem 1rem;border:0;border-radius:.5rem;background:#818cf8;color:#fff;font-weight:600">Continue</button>
+        </form>
+      </body>
+    </html>`);
+});
+
+authRoutes.post("/verify", async (c) => {
+  const contentType = c.req.header("content-type") || "";
+  let token = "";
+  if (contentType.includes("application/json")) {
+    token = (((await c.req.json().catch(() => ({}))) as { token?: string }).token || "");
+  } else {
+    const body = (await c.req.parseBody().catch(() => ({}))) as Record<string, string | File>;
+    token = typeof body.token === "string" ? body.token : "";
+  }
   const session = token ? await verifyMagicLink(c.env, token) : null;
   if (!session) {
     return c.redirect(`${c.env.APP_ORIGIN}/login?error=invalid_or_expired`);

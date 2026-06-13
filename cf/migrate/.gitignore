@@ -1,0 +1,4 @@
+stream_reduce.db
+stream_reduce.db-*
+out/
+*.log

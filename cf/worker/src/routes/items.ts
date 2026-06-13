@@ -1,13 +1,16 @@
 import { Hono } from "hono";
 import type { AppContext } from "../auth";
-import { requireAuth } from "../auth";
+import { requireAuth, resolveUser } from "../auth";
 import { all, first, type ItemRow, type UserItemRow } from "../db";
 import { toItemRead } from "../lib/serialize";
 import { addUrlToLibrary, recomputePriority } from "../lib/ingest";
 import { splitUrls } from "../lib/url";
 
 export const itemsRoutes = new Hono<AppContext>();
-itemsRoutes.use("*", requireAuth);
+
+// Read-only catalog endpoints (browse list, item detail, related) are public so
+// anyone can explore the content without an account. Per-user state (library,
+// favorites, comments, highlights) requires auth and is applied per-route.
 
 const SORT_COLUMNS: Record<string, string> = {
   added: "item.created_at",
@@ -41,18 +44,22 @@ itemsRoutes.get("/", async (c) => {
   const offset = Number(u.offset ?? 0);
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
-  const userId = c.get("user").id;
-  const rows = await all<ItemRow & { _ui_id: number | null; ui_is_favorite: number | null; ui_is_archived: number | null; ui_folder_id: number | null; ui_status: string | null }>(
+  // Anonymous browsing is allowed: with no session the LEFT JOIN simply finds
+  // no per-user rows (user id -1 never matches), so items render as un-saved.
+  const user = await resolveUser(c.env, c);
+  const userId = user?.id ?? -1;
+  const rows = await all<ItemRow & { _ui_id: number | null; ui_is_favorite: number | null; ui_is_archived: number | null; ui_folder_id: number | null; ui_status: string | null; _interest_id: number | null }>(
     c.env.DB.prepare(
       `SELECT item.*, ui.id AS _ui_id, ui.is_favorite AS ui_is_favorite,
               ui.is_archived AS ui_is_archived, ui.folder_id AS ui_folder_id,
-              ui.personal_status AS ui_status
+              ui.personal_status AS ui_status, ii.id AS _interest_id
          FROM item
          LEFT JOIN user_item ui ON ui.item_id = item.id AND ui.user_id = ?
+         LEFT JOIN item_interest ii ON ii.item_id = item.id AND ii.user_id = ?
          ${whereSql}
          ORDER BY ${sortCol} ${order}, item.created_at DESC
          LIMIT ? OFFSET ?`,
-    ).bind(userId, ...binds, limit, offset),
+    ).bind(userId, userId, ...binds, limit, offset),
   );
   return c.json(
     rows.map((r) =>
@@ -68,13 +75,14 @@ itemsRoutes.get("/", async (c) => {
               group_position: null,
             } as UserItemRow)
           : null,
+        { is_interested: r._interest_id != null },
       ),
     ),
   );
 });
 
 // --- The signed-in user's personal library ------------------------------
-itemsRoutes.get("/library", async (c) => {
+itemsRoutes.get("/library", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const u = c.req.query();
   const where: string[] = ["ui.user_id = ?"];
@@ -90,6 +98,10 @@ itemsRoutes.get("/library", async (c) => {
   if (u.group_id !== undefined) {
     where.push("ui.folder_id = ?");
     binds.push(Number(u.group_id));
+  }
+  if (u.subscription_id !== undefined) {
+    where.push("ui.subscription_id = ?");
+    binds.push(Number(u.subscription_id));
   }
   if (u.ungrouped === "true") where.push("ui.folder_id IS NULL");
   if (u.status) {
@@ -110,15 +122,20 @@ itemsRoutes.get("/library", async (c) => {
       `SELECT item.*, ui.id AS ui_id, ui.folder_id AS folder_id,
               ui.group_position AS group_position, ui.is_favorite AS is_favorite,
               ui.is_archived AS is_archived, ui.personal_status AS personal_status,
-              ui.subscription_id AS subscription_id
+              ui.subscription_id AS subscription_id, ii.id AS _interest_id
          FROM user_item ui
          JOIN item ON item.id = ui.item_id
+         LEFT JOIN item_interest ii ON ii.item_id = item.id AND ii.user_id = ui.user_id
          WHERE ${where.join(" AND ")}
          ORDER BY ${sortCol} ${order}, ui.added_at DESC
          LIMIT ? OFFSET ?`,
     ).bind(...binds, limit, offset),
   );
-  return c.json(rows.map((r) => toItemRead(r, r as unknown as UserItemRow)));
+  return c.json(
+    rows.map((r) =>
+      toItemRead(r, r as unknown as UserItemRow, { is_interested: r._interest_id != null }),
+    ),
+  );
 });
 
 interface UserItemRowAlias {
@@ -129,10 +146,11 @@ interface UserItemRowAlias {
   is_archived: number;
   personal_status: string;
   subscription_id: number | null;
+  _interest_id: number | null;
 }
 
 // Add one or more URLs to the user's library (dedup + enqueue).
-itemsRoutes.post("/library", async (c) => {
+itemsRoutes.post("/library", requireAuth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     url?: string;
     urls?: string[];
@@ -153,9 +171,11 @@ itemsRoutes.post("/library", async (c) => {
 });
 
 // Item detail: global content + this user's comments/highlights + user_item.
+// Public: anonymous visitors get the global content with empty personal state.
 itemsRoutes.get("/:id", async (c) => {
   const id = Number(c.req.param("id"));
-  const userId = c.get("user").id;
+  const user = await resolveUser(c.env, c);
+  const userId = user?.id ?? -1;
   const item = await first<ItemRow>(c.env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(id));
   if (!item) return c.json({ error: "item not found" }, 404);
   const ui = await first<UserItemRow>(
@@ -176,9 +196,12 @@ itemsRoutes.get("/:id", async (c) => {
   const highlights = await all<Record<string, unknown>>(
     c.env.DB.prepare("SELECT * FROM highlight WHERE item_id = ? AND user_id = ? ORDER BY created_at").bind(id, userId),
   );
+  const interested = await first<{ id: number }>(
+    c.env.DB.prepare("SELECT id FROM item_interest WHERE user_id = ? AND item_id = ?").bind(userId, id),
+  );
 
   return c.json({
-    ...toItemRead(item, ui),
+    ...toItemRead(item, ui, { is_interested: interested != null }),
     summary: summary
       ? { ...summary, structured: JSON.parse(summary.structured || "{}") }
       : null,
@@ -206,7 +229,7 @@ itemsRoutes.get("/:id/related", async (c) => {
 });
 
 // Re-enqueue processing for a global item (any signed-in user may trigger).
-itemsRoutes.post("/:id/retry", async (c) => {
+itemsRoutes.post("/:id/retry", requireAuth, async (c) => {
   const id = Number(c.req.param("id"));
   const item = await first<ItemRow>(c.env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(id));
   if (!item) return c.json({ error: "item not found" }, 404);
@@ -215,7 +238,7 @@ itemsRoutes.post("/:id/retry", async (c) => {
   return c.json(toItemRead({ ...item, status: "queued", error: null }));
 });
 
-itemsRoutes.post("/:id/regenerate", async (c) => {
+itemsRoutes.post("/:id/regenerate", requireAuth, async (c) => {
   const id = Number(c.req.param("id"));
   const item = await first<ItemRow>(c.env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(id));
   if (!item) return c.json({ error: "item not found" }, 404);
@@ -233,7 +256,7 @@ itemsRoutes.post("/:id/regenerate", async (c) => {
 });
 
 // --- Per-user library mutations -----------------------------------------
-itemsRoutes.post("/:id/favorite", async (c) => {
+itemsRoutes.post("/:id/favorite", requireAuth, async (c) => {
   const id = Number(c.req.param("id"));
   const userId = c.get("user").id;
   await c.env.DB.prepare(
@@ -242,7 +265,7 @@ itemsRoutes.post("/:id/favorite", async (c) => {
   return reloadItem(c, id, userId);
 });
 
-itemsRoutes.post("/:id/archive", async (c) => {
+itemsRoutes.post("/:id/archive", requireAuth, async (c) => {
   const id = Number(c.req.param("id"));
   const userId = c.get("user").id;
   await c.env.DB.prepare(
@@ -251,7 +274,7 @@ itemsRoutes.post("/:id/archive", async (c) => {
   return reloadItem(c, id, userId);
 });
 
-itemsRoutes.post("/:id/group", async (c) => {
+itemsRoutes.post("/:id/group", requireAuth, async (c) => {
   const id = Number(c.req.param("id"));
   const userId = c.get("user").id;
   const body = (await c.req.json().catch(() => ({}))) as { group_id?: number | null };
@@ -261,8 +284,44 @@ itemsRoutes.post("/:id/group", async (c) => {
   return reloadItem(c, id, userId);
 });
 
+itemsRoutes.post("/:id/interest", requireAuth, async (c) => {
+  const id = Number(c.req.param("id"));
+  const userId = c.get("user").id;
+  const existing = await first<{ id: number }>(
+    c.env.DB.prepare("SELECT id FROM item_interest WHERE user_id = ? AND item_id = ?").bind(userId, id),
+  );
+  if (existing) {
+    await c.env.DB.prepare("DELETE FROM item_interest WHERE id = ?").bind(existing.id).run();
+  } else {
+    await c.env.DB.prepare(
+      "INSERT INTO item_interest (user_id, item_id) VALUES (?, ?) ON CONFLICT(user_id, item_id) DO NOTHING",
+    ).bind(userId, id).run();
+  }
+  await recomputePriority(c.env, id);
+  return reloadItem(c, id, userId);
+});
+
+itemsRoutes.delete("/:id/media", requireAuth, async (c) => {
+  const id = Number(c.req.param("id"));
+  const userId = c.get("user").id;
+  const ui = await first<{ id: number }>(
+    c.env.DB.prepare("SELECT id FROM user_item WHERE user_id = ? AND item_id = ?").bind(userId, id),
+  );
+  if (!ui) return c.json({ error: "item not in your library" }, 404);
+
+  const item = await first<ItemRow>(
+    c.env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(id),
+  );
+  if (!item) return c.json({ error: "item not found" }, 404);
+  if (item.media_key) await c.env.MEDIA.delete(item.media_key);
+  await c.env.DB.prepare(
+    "UPDATE item SET media_key = NULL, media_bytes = 0, audio_duration_s = NULL WHERE id = ?",
+  ).bind(id).run();
+  return reloadItem(c, id, userId);
+});
+
 // Remove an item from the user's library (the global content stays).
-itemsRoutes.delete("/:id", async (c) => {
+itemsRoutes.delete("/:id", requireAuth, async (c) => {
   const id = Number(c.req.param("id"));
   const userId = c.get("user").id;
   await c.env.DB.prepare("DELETE FROM user_item WHERE user_id = ? AND item_id = ?").bind(userId, id).run();
@@ -278,5 +337,8 @@ async function reloadItem(c: Parameters<typeof requireAuth>[0], id: number, user
     c.env.DB.prepare("SELECT * FROM user_item WHERE user_id = ? AND item_id = ?").bind(userId, id),
   );
   if (!item) return c.json({ error: "item not found" }, 404);
-  return c.json(toItemRead(item, ui));
+  const interested = await first<{ id: number }>(
+    c.env.DB.prepare("SELECT id FROM item_interest WHERE user_id = ? AND item_id = ?").bind(userId, id),
+  );
+  return c.json(toItemRead(item, ui, { is_interested: interested != null }));
 }

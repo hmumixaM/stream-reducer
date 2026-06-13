@@ -7,6 +7,8 @@ import { randomToken, sha256, isoNow, isoIn } from "./lib/crypto";
 const SESSION_COOKIE = "sr_session";
 const MAGIC_LINK_TTL_MS = 15 * 60 * 1000; // 15 minutes
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const MAGIC_LINK_MAX_PER_WINDOW = 3;
+const MAGIC_LINK_WINDOW_MS = 10 * 60 * 1000;
 
 export type AppContext = {
   Bindings: Env;
@@ -21,6 +23,17 @@ export function isValidEmail(email: string): boolean {
 
 // Create a single-use magic-link token for `email` and email the link.
 export async function sendMagicLink(env: Env, email: string): Promise<void> {
+  await env.DB.prepare(
+    "DELETE FROM auth_token WHERE expires_at < ? OR used_at IS NOT NULL",
+  ).bind(isoNow()).run();
+  const since = new Date(Date.now() - MAGIC_LINK_WINDOW_MS).toISOString();
+  const recent = await first<{ n: number }>(
+    env.DB.prepare("SELECT COUNT(*) AS n FROM auth_token WHERE email = ? AND created_at >= ?").bind(email, since),
+  );
+  if ((recent?.n ?? 0) >= MAGIC_LINK_MAX_PER_WINDOW) {
+    throw new Error("rate_limited");
+  }
+
   const token = randomToken();
   const hash = await sha256(token);
   await env.DB.prepare(

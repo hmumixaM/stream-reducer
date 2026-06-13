@@ -19,6 +19,8 @@ class ContentMeta:
     view_count: int | None = None
     like_count: int | None = None
     dislike_count: int | None = None
+    # Channel/uploader id (used to derive the channel feed for prioritization).
+    channel_id: str | None = None
 
 
 @dataclass

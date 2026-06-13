@@ -18,9 +18,11 @@ import {
   LogOut,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useMe } from "@/lib/auth";
 import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { LogIn } from "lucide-react";
 
 const NAV = [
   { to: "/", label: "Library", icon: LayoutGrid, end: true },
@@ -37,7 +39,8 @@ const NAV = [
 // The public mirror is read-only: browsing, search, and the unified graph are
 // reachable.
 const MIRROR_NAV = new Set(["/", "/search", "/graph"]);
-const NAV_ITEMS = MIRROR ? NAV.filter((item) => MIRROR_NAV.has(item.to)) : NAV;
+// Anonymous (no session) visitors can only browse the global catalog.
+const PUBLIC_NAV = new Set(["/browse"]);
 
 function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [text, setText] = useState("");
@@ -106,15 +109,23 @@ export function Layout() {
     () => document.documentElement.classList.contains("dark"),
   );
   
+  const me = useMe();
+  const authed = !!me.data?.user;
+
   const queue = useQuery({
     queryKey: ["queue"],
     queryFn: api.listQueue,
     refetchInterval: 4000,
-    enabled: !MIRROR,
+    enabled: !MIRROR && authed,
   });
   const active = (queue.data ?? []).filter((i) => i.status !== "error").length;
 
-  const me = useQuery({ queryKey: ["me"], queryFn: api.getMe });
+  const navItems = MIRROR
+    ? NAV.filter((item) => MIRROR_NAV.has(item.to))
+    : authed
+      ? NAV
+      : NAV.filter((item) => PUBLIC_NAV.has(item.to));
+
   const logout = async () => {
     await api.logout();
     window.location.href = "/login";
@@ -136,13 +147,13 @@ export function Layout() {
         <img src="/logo.png" alt="" className="h-8 w-8 rounded-md" />
         <span className="text-lg font-semibold tracking-tight">stream-reduce</span>
       </div>
-      {!MIRROR && (
+      {!MIRROR && authed && (
         <Button className="mb-4 w-full" onClick={() => { setAddOpen(true); setSidebarOpen(false); }}>
           <Plus className="h-4 w-4" /> Add content
         </Button>
       )}
       <nav className="flex flex-1 flex-col gap-1">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -167,18 +178,26 @@ export function Layout() {
         ))}
       </nav>
       <div className="mt-auto space-y-1 border-t border-border pt-2">
-        {me.data?.user && (
-          <p className="truncate px-3 pt-1 text-xs text-muted-foreground" title={me.data.user.email}>
-            {me.data.user.email}
+        {authed && (
+          <p className="truncate px-3 pt-1 text-xs text-muted-foreground" title={me.data!.user!.email}>
+            {me.data!.user!.email}
           </p>
         )}
         <Button variant="ghost" size="sm" className="w-full justify-start" onClick={toggleTheme}>
           {dark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
           {dark ? "Dark" : "Light"} mode
         </Button>
-        <Button variant="ghost" size="sm" className="w-full justify-start" onClick={logout}>
-          <LogOut className="h-4 w-4" /> Sign out
-        </Button>
+        {authed ? (
+          <Button variant="ghost" size="sm" className="w-full justify-start" onClick={logout}>
+            <LogOut className="h-4 w-4" /> Sign out
+          </Button>
+        ) : (
+          <NavLink to="/login" className="block">
+            <Button variant="ghost" size="sm" className="w-full justify-start">
+              <LogIn className="h-4 w-4" /> Sign in
+            </Button>
+          </NavLink>
+        )}
       </div>
     </>
   );

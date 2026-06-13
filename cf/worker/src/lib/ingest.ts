@@ -3,6 +3,69 @@ import { first, upsertItem, type ItemRow } from "../db";
 import { detectPlatform, normalizeUrl } from "./url";
 import { priorityScore } from "./priority";
 
+export interface ItemMetadata {
+  title?: string | null;
+  author?: string | null;
+  description?: string | null;
+  duration_s?: number | null;
+  published_at?: string | null;
+  thumbnail?: string | null;
+  external_id?: string | null;
+  view_count?: number | null;
+  like_count?: number | null;
+  dislike_count?: number | null;
+  // Channel id (YouTube). Used to derive the channel feed for the subscriber
+  // -demand signal; not persisted on the item row itself.
+  channel_id?: string | null;
+}
+
+// Derive the canonical YouTube channel feed URL from a channel id. This matches
+// the feed_url shape stored for YouTube subscriptions (see routes/subscriptions),
+// so a manually-added video links to the same feed its subscribers follow.
+export function youtubeChannelFeed(channelId?: string | null): string | null {
+  return channelId ? `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}` : null;
+}
+
+// Link a global item to a feed/channel (idempotent). Powers subscriber demand.
+export async function linkItemFeed(env: Env, itemId: number, feedUrl?: string | null): Promise<void> {
+  if (!feedUrl) return;
+  await env.DB.prepare(
+    "INSERT INTO item_feed (item_id, feed_url) VALUES (?, ?) ON CONFLICT(item_id, feed_url) DO NOTHING",
+  )
+    .bind(itemId, feedUrl)
+    .run();
+}
+
+export async function persistItemMetadata(
+  env: Env,
+  itemId: number,
+  m: ItemMetadata,
+): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE item SET
+       title = COALESCE(?, title), author = COALESCE(?, author),
+       description = COALESCE(?, description), duration_s = COALESCE(?, duration_s),
+       published_at = COALESCE(?, published_at), thumbnail = COALESCE(?, thumbnail),
+       external_id = COALESCE(?, external_id), view_count = COALESCE(?, view_count),
+       like_count = COALESCE(?, like_count), dislike_count = COALESCE(?, dislike_count)
+     WHERE id = ?`,
+  )
+    .bind(
+      m.title ?? null,
+      m.author ?? null,
+      m.description ?? null,
+      m.duration_s ?? null,
+      m.published_at ?? null,
+      m.thumbnail ?? null,
+      m.external_id ?? null,
+      m.view_count ?? null,
+      m.like_count ?? null,
+      m.dislike_count ?? null,
+      itemId,
+    )
+    .run();
+}
+
 // Recompute an item's demand counters + priority score from current state:
 //   request_count    = # of users who have it in their library
 //   subscriber_demand = # of subscriptions (across all users) to any feed that
@@ -12,16 +75,18 @@ export async function recomputePriority(env: Env, itemId: number): Promise<void>
     env.DB.prepare("SELECT COUNT(*) AS n FROM user_item WHERE item_id = ?").bind(itemId),
   );
   const request_count = reqRow?.n ?? 0;
+  const interestRow = await first<{ n: number }>(
+    env.DB.prepare("SELECT COUNT(*) AS n FROM item_interest WHERE item_id = ?").bind(itemId),
+  );
+  const interest_count = interestRow?.n ?? 0;
 
-  // Feeds that produced this item -> how many total subscriptions to those feeds.
+  // Subscribed people: distinct users subscribed to any feed/channel this item
+  // belongs to (via the global item_feed association, independent of who has it
+  // saved). This credits popular channels even for manually-added videos.
   const subRow = await first<{ n: number }>(
     env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM subscription
-        WHERE feed_url IN (
-          SELECT s.feed_url FROM subscription s
-          JOIN user_item ui ON ui.subscription_id = s.id
-          WHERE ui.item_id = ?
-        )`,
+      `SELECT COUNT(DISTINCT user_id) AS n FROM subscription
+        WHERE feed_url IN (SELECT feed_url FROM item_feed WHERE item_id = ?)`,
     ).bind(itemId),
   );
   const subscriber_demand = subRow?.n ?? 0;
@@ -33,12 +98,13 @@ export async function recomputePriority(env: Env, itemId: number): Promise<void>
     view_count: item?.view_count ?? 0,
     subscriber_demand,
     request_count,
+    interest_count,
   });
 
   await env.DB.prepare(
-    "UPDATE item SET request_count = ?, subscriber_demand = ?, priority_score = ? WHERE id = ?",
+    "UPDATE item SET request_count = ?, interest_count = ?, subscriber_demand = ?, priority_score = ? WHERE id = ?",
   )
-    .bind(request_count, subscriber_demand, score, itemId)
+    .bind(request_count, interest_count, subscriber_demand, score, itemId)
     .run();
 }
 
@@ -61,17 +127,38 @@ export async function addUrlToLibrary(
     platform?: string;
     folderId?: number | null;
     subscriptionId?: number | null;
+    // Feed/channel URL this item was ingested from (e.g. a subscription poll).
+    feedUrl?: string | null;
   } = {},
 ): Promise<AddResult | null> {
   const url = normalizeUrl(rawUrl);
   if (!url) return null;
   const platform = opts.platform || detectPlatform(url);
+  let metadata: ItemMetadata | null = null;
+  try {
+    const { fetchMetadata } = await import("../pipeline/container");
+    metadata = await fetchMetadata(env, url, platform);
+  } catch (err) {
+    console.warn("metadata prefetch failed", { url, err: String(err) });
+  }
+
   const { item, created } = await upsertItem(env, {
     source_url: url,
     platform,
-    title: opts.title,
-    external_id: opts.external_id,
+    title: opts.title ?? metadata?.title,
+    external_id: opts.external_id ?? metadata?.external_id,
   });
+
+  if (metadata) {
+    await persistItemMetadata(env, item.id, metadata);
+  }
+
+  // Link this item to its channel feed (derived from metadata) and the feed it
+  // was ingested from, so subscriber demand reflects the whole channel audience.
+  if (platform === "youtube") {
+    await linkItemFeed(env, item.id, youtubeChannelFeed(metadata?.channel_id));
+  }
+  await linkItemFeed(env, item.id, opts.feedUrl);
 
   const personalStatus = item.status === "done" ? "done" : "waiting";
   const existingUi = await first<{ id: number }>(

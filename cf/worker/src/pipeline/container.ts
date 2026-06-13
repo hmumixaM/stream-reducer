@@ -52,6 +52,7 @@ export interface PipelineResult {
     view_count?: number | null;
     like_count?: number | null;
     dislike_count?: number | null;
+    channel_id?: string | null;
   };
   transcript: { language: string | null; source: string; segments: unknown[]; text: string } | null;
   summary: { model: string; prompt_version: string; markdown: string; structured: Record<string, unknown> } | null;
