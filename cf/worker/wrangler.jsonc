@@ -92,7 +92,7 @@
   },
 
   "vars": {
-    "APP_ORIGIN": "https://stream-reduce.example.com",
+    "APP_ORIGIN": "https://stream-reduce.max-678.workers.dev",
     "EMAIL_FROM": "noreply@example.com",
     "LLM_BASE_URL": "https://xgoose-gemini-proxy-1.max-678.workers.dev/v1",
     "LLM_MODEL": "gemini-3.5-flash",
