@@ -4,11 +4,14 @@ import { requireAuth } from "../auth";
 import { all, first } from "../db";
 
 // Per-user comments + highlights, plus a unified cross-item annotations feed.
+// This router is mounted at the broad "/api" prefix (to own both
+// /api/items/:id/... and /api/annotations), so auth is applied per-route rather
+// than via a wildcard middleware — a wildcard here would gate every /api/* path
+// (e.g. the public /api/items catalog).
 export const annotationRoutes = new Hono<AppContext>();
-annotationRoutes.use("*", requireAuth);
 
 // --- Comments ------------------------------------------------------------
-annotationRoutes.post("/items/:id/comments", async (c) => {
+annotationRoutes.post("/items/:id/comments", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const itemId = Number(c.req.param("id"));
   const body = (await c.req.json().catch(() => ({}))) as { body?: string };
@@ -21,7 +24,7 @@ annotationRoutes.post("/items/:id/comments", async (c) => {
   return c.json(row);
 });
 
-annotationRoutes.delete("/items/:id/comments/:commentId", async (c) => {
+annotationRoutes.delete("/items/:id/comments/:commentId", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const commentId = Number(c.req.param("commentId"));
   await c.env.DB.prepare("DELETE FROM comment WHERE id = ? AND user_id = ?").bind(commentId, userId).run();
@@ -29,7 +32,7 @@ annotationRoutes.delete("/items/:id/comments/:commentId", async (c) => {
 });
 
 // --- Highlights ----------------------------------------------------------
-annotationRoutes.post("/items/:id/highlights", async (c) => {
+annotationRoutes.post("/items/:id/highlights", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const itemId = Number(c.req.param("id"));
   const b = (await c.req.json().catch(() => ({}))) as {
@@ -52,7 +55,7 @@ annotationRoutes.post("/items/:id/highlights", async (c) => {
   return c.json(row);
 });
 
-annotationRoutes.patch("/items/:id/highlights/:hid", async (c) => {
+annotationRoutes.patch("/items/:id/highlights/:hid", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const hid = Number(c.req.param("hid"));
   const b = (await c.req.json().catch(() => ({}))) as { note?: string; color?: string };
@@ -75,7 +78,7 @@ annotationRoutes.patch("/items/:id/highlights/:hid", async (c) => {
   return c.json(row);
 });
 
-annotationRoutes.delete("/items/:id/highlights/:hid", async (c) => {
+annotationRoutes.delete("/items/:id/highlights/:hid", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const hid = Number(c.req.param("hid"));
   await c.env.DB.prepare("DELETE FROM highlight WHERE id = ? AND user_id = ?").bind(hid, userId).run();
@@ -83,7 +86,7 @@ annotationRoutes.delete("/items/:id/highlights/:hid", async (c) => {
 });
 
 // --- Unified cross-item feed --------------------------------------------
-annotationRoutes.get("/annotations", async (c) => {
+annotationRoutes.get("/annotations", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const kind = c.req.query("kind");
   const itemId = c.req.query("item_id");
