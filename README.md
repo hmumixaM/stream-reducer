@@ -2,6 +2,16 @@
 
 **Website:** https://hmumixam.github.io/stream-reduce/
 
+> **`dev` branch — public, multi-user, Cloudflare-native rewrite.** This branch
+> adds a fully Cloudflare-hosted edition under [`cf/`](cf/README.md): a Worker
+> (API + magic-link auth + SPA) backed by D1, Vectorize, R2, Queues, Cron, and a
+> pipeline Container that reuses the Python `app/adapters`. Each account gets its
+> own library, subscriptions, comments, highlights, and personal knowledge graph;
+> content is shared and deduped globally. See [`cf/README.md`](cf/README.md) for
+> the architecture and deploy steps. The original self-hosted NAS stack
+> (Docker Compose + the static Cloudflare Pages mirror) documented below remains
+> on `main`.
+
 Self-hosted media summarizer. Turns videos and podcasts into source-traceable
 summaries and keeps them in a searchable library.
 

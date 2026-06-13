@@ -8,8 +8,11 @@ tunnel) and writes, under ``<out_dir>/data``:
 - ``groups.json``       -> folders with their non-archived item counts.
 - ``items/<id>.json``   -> per-item detail (summary + transcript + metadata),
                            with stages / comments / media internals dropped.
-- ``search-index.json`` -> flat passage docs (transcript windows + summary
-                           fields) for the client-side keyword index.
+- ``search-index.json.gz`` -> gzipped flat passage docs (transcript windows +
+                           summary fields) for the client-side keyword index.
+                           Gzipped because the raw JSON outgrows Cloudflare
+                           Pages' 25 MiB per-file limit; the SPA inflates it in
+                           the browser before building the MiniSearch index.
 - ``graph.json``        -> the unified paragraph knowledge graph (summary
                            paragraphs as nodes + similarity edges).
 - ``meta.json``         -> ``{generated_at, item_count}``.
@@ -21,6 +24,7 @@ secrets, or live API are involved at serve time.
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -268,7 +272,16 @@ def export(fetch: FetchJson, fetch_bytes: FetchBytes, out_dir: Path) -> dict[str
 
     (data_dir / "items.json").write_text(json.dumps(slim_items, ensure_ascii=False))
     (data_dir / "groups.json").write_text(json.dumps(groups, ensure_ascii=False))
-    (data_dir / "search-index.json").write_text(json.dumps(search_docs, ensure_ascii=False))
+    # Gzipped: the raw index (tens of MiB once the library is large) exceeds
+    # Cloudflare Pages' 25 MiB per-file limit. mtime=0 keeps the bytes stable
+    # across runs when the content is unchanged.
+    (data_dir / "search-index.json.gz").write_bytes(
+        gzip.compress(
+            json.dumps(search_docs, ensure_ascii=False).encode("utf-8"),
+            compresslevel=9,
+            mtime=0,
+        )
+    )
     (data_dir / "graph.json").write_text(json.dumps(graph, ensure_ascii=False))
     meta = {
         "generated_at": datetime.now(UTC).isoformat(),

@@ -1,0 +1,282 @@
+import { Hono } from "hono";
+import type { AppContext } from "../auth";
+import { requireAuth } from "../auth";
+import { all, first, type ItemRow, type UserItemRow } from "../db";
+import { toItemRead } from "../lib/serialize";
+import { addUrlToLibrary, recomputePriority } from "../lib/ingest";
+import { splitUrls } from "../lib/url";
+
+export const itemsRoutes = new Hono<AppContext>();
+itemsRoutes.use("*", requireAuth);
+
+const SORT_COLUMNS: Record<string, string> = {
+  added: "item.created_at",
+  published: "item.published_at",
+  views: "item.view_count",
+  likes: "item.like_count",
+  duration: "item.duration_s",
+  priority: "item.priority_score",
+};
+
+// --- Browse the GLOBAL catalog (every item anyone has ingested) ----------
+itemsRoutes.get("/", async (c) => {
+  const u = c.req.query();
+  const where: string[] = [];
+  const binds: unknown[] = [];
+  if (u.status) {
+    where.push("item.status = ?");
+    binds.push(u.status);
+  }
+  if (u.platform) {
+    where.push("item.platform = ?");
+    binds.push(u.platform);
+  }
+  if (u.q) {
+    where.push("item.title LIKE ?");
+    binds.push(`%${u.q}%`);
+  }
+  const sortCol = SORT_COLUMNS[u.sort ?? "added"] ?? "item.created_at";
+  const order = u.order === "asc" ? "ASC" : "DESC";
+  const limit = Math.min(Number(u.limit ?? 100), 500);
+  const offset = Number(u.offset ?? 0);
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  const userId = c.get("user").id;
+  const rows = await all<ItemRow & { _ui_id: number | null; ui_is_favorite: number | null; ui_is_archived: number | null; ui_folder_id: number | null; ui_status: string | null }>(
+    c.env.DB.prepare(
+      `SELECT item.*, ui.id AS _ui_id, ui.is_favorite AS ui_is_favorite,
+              ui.is_archived AS ui_is_archived, ui.folder_id AS ui_folder_id,
+              ui.personal_status AS ui_status
+         FROM item
+         LEFT JOIN user_item ui ON ui.item_id = item.id AND ui.user_id = ?
+         ${whereSql}
+         ORDER BY ${sortCol} ${order}, item.created_at DESC
+         LIMIT ? OFFSET ?`,
+    ).bind(userId, ...binds, limit, offset),
+  );
+  return c.json(
+    rows.map((r) =>
+      toItemRead(
+        r,
+        r._ui_id
+          ? ({
+              folder_id: r.ui_folder_id,
+              is_favorite: r.ui_is_favorite ?? 0,
+              is_archived: r.ui_is_archived ?? 0,
+              personal_status: r.ui_status ?? "waiting",
+              subscription_id: null,
+              group_position: null,
+            } as UserItemRow)
+          : null,
+      ),
+    ),
+  );
+});
+
+// --- The signed-in user's personal library ------------------------------
+itemsRoutes.get("/library", async (c) => {
+  const userId = c.get("user").id;
+  const u = c.req.query();
+  const where: string[] = ["ui.user_id = ?"];
+  const binds: unknown[] = [userId];
+  if (u.favorite !== undefined) {
+    where.push("ui.is_favorite = ?");
+    binds.push(u.favorite === "true" ? 1 : 0);
+  }
+  if (u.archived !== undefined) {
+    where.push("ui.is_archived = ?");
+    binds.push(u.archived === "true" ? 1 : 0);
+  }
+  if (u.group_id !== undefined) {
+    where.push("ui.folder_id = ?");
+    binds.push(Number(u.group_id));
+  }
+  if (u.ungrouped === "true") where.push("ui.folder_id IS NULL");
+  if (u.status) {
+    where.push("item.status = ?");
+    binds.push(u.status);
+  }
+  if (u.q) {
+    where.push("item.title LIKE ?");
+    binds.push(`%${u.q}%`);
+  }
+  const sortCol = SORT_COLUMNS[u.sort ?? "added"] ?? "item.created_at";
+  const order = u.order === "asc" ? "ASC" : "DESC";
+  const limit = Math.min(Number(u.limit ?? 200), 500);
+  const offset = Number(u.offset ?? 0);
+
+  const rows = await all<ItemRow & UserItemRowAlias>(
+    c.env.DB.prepare(
+      `SELECT item.*, ui.id AS ui_id, ui.folder_id AS folder_id,
+              ui.group_position AS group_position, ui.is_favorite AS is_favorite,
+              ui.is_archived AS is_archived, ui.personal_status AS personal_status,
+              ui.subscription_id AS subscription_id
+         FROM user_item ui
+         JOIN item ON item.id = ui.item_id
+         WHERE ${where.join(" AND ")}
+         ORDER BY ${sortCol} ${order}, ui.added_at DESC
+         LIMIT ? OFFSET ?`,
+    ).bind(...binds, limit, offset),
+  );
+  return c.json(rows.map((r) => toItemRead(r, r as unknown as UserItemRow)));
+});
+
+interface UserItemRowAlias {
+  ui_id: number;
+  folder_id: number | null;
+  group_position: number | null;
+  is_favorite: number;
+  is_archived: number;
+  personal_status: string;
+  subscription_id: number | null;
+}
+
+// Add one or more URLs to the user's library (dedup + enqueue).
+itemsRoutes.post("/library", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    url?: string;
+    urls?: string[];
+    folder_id?: number;
+  };
+  const raw: string[] = [...(body.urls ?? [])];
+  if (body.url) raw.push(body.url);
+  const urls = raw.flatMap((entry) => splitUrls(entry));
+  if (!urls.length) return c.json({ error: "no urls provided" }, 400);
+
+  const userId = c.get("user").id;
+  const created: unknown[] = [];
+  for (const url of urls) {
+    const res = await addUrlToLibrary(c.env, userId, url, { folderId: body.folder_id ?? null });
+    if (res) created.push(toItemRead(res.item));
+  }
+  return c.json(created);
+});
+
+// Item detail: global content + this user's comments/highlights + user_item.
+itemsRoutes.get("/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  const userId = c.get("user").id;
+  const item = await first<ItemRow>(c.env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(id));
+  if (!item) return c.json({ error: "item not found" }, 404);
+  const ui = await first<UserItemRow>(
+    c.env.DB.prepare("SELECT * FROM user_item WHERE user_id = ? AND item_id = ?").bind(userId, id),
+  );
+  const summary = await first<{ id: number; model: string; prompt_version: string; markdown: string; structured: string; created_at: string }>(
+    c.env.DB.prepare("SELECT * FROM summary WHERE item_id = ?").bind(id),
+  );
+  const transcript = await first<{ id: number; language: string | null; source: string; segments: string; text: string }>(
+    c.env.DB.prepare("SELECT * FROM transcript WHERE item_id = ?").bind(id),
+  );
+  const stages = await all<Record<string, unknown>>(
+    c.env.DB.prepare("SELECT * FROM stage_run WHERE item_id = ? ORDER BY id").bind(id),
+  );
+  const comments = await all<Record<string, unknown>>(
+    c.env.DB.prepare("SELECT * FROM comment WHERE item_id = ? AND user_id = ? ORDER BY created_at").bind(id, userId),
+  );
+  const highlights = await all<Record<string, unknown>>(
+    c.env.DB.prepare("SELECT * FROM highlight WHERE item_id = ? AND user_id = ? ORDER BY created_at").bind(id, userId),
+  );
+
+  return c.json({
+    ...toItemRead(item, ui),
+    summary: summary
+      ? { ...summary, structured: JSON.parse(summary.structured || "{}") }
+      : null,
+    transcript: transcript
+      ? { ...transcript, segments: JSON.parse(transcript.segments || "[]") }
+      : null,
+    stages,
+    comments,
+    highlights,
+  });
+});
+
+// Related articles (global recommendations) for an item.
+itemsRoutes.get("/:id/related", async (c) => {
+  const id = Number(c.req.param("id"));
+  const rows = await all<Record<string, unknown>>(
+    c.env.DB.prepare(
+      `SELECT r.related_item_id AS item_id, r.score,
+              i.id, i.title, i.platform, i.author, i.thumbnail, i.source_url
+         FROM item_recommendation r JOIN item i ON i.id = r.related_item_id
+        WHERE r.item_id = ? ORDER BY r.score DESC LIMIT 12`,
+    ).bind(id),
+  );
+  return c.json(rows);
+});
+
+// Re-enqueue processing for a global item (any signed-in user may trigger).
+itemsRoutes.post("/:id/retry", async (c) => {
+  const id = Number(c.req.param("id"));
+  const item = await first<ItemRow>(c.env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(id));
+  if (!item) return c.json({ error: "item not found" }, 404);
+  await c.env.DB.prepare("UPDATE item SET status = 'queued', error = NULL WHERE id = ?").bind(id).run();
+  await c.env.PIPELINE.send({ kind: "process", item_id: id });
+  return c.json(toItemRead({ ...item, status: "queued", error: null }));
+});
+
+itemsRoutes.post("/:id/regenerate", async (c) => {
+  const id = Number(c.req.param("id"));
+  const item = await first<ItemRow>(c.env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(id));
+  if (!item) return c.json({ error: "item not found" }, 404);
+  const transcript = await first<{ id: number }>(
+    c.env.DB.prepare("SELECT id FROM transcript WHERE item_id = ?").bind(id),
+  );
+  if (transcript) {
+    await c.env.DB.prepare("UPDATE item SET status = 'summarizing', error = NULL WHERE id = ?").bind(id).run();
+    await c.env.PIPELINE.send({ kind: "resummarize", item_id: id });
+  } else {
+    await c.env.DB.prepare("UPDATE item SET status = 'queued', error = NULL WHERE id = ?").bind(id).run();
+    await c.env.PIPELINE.send({ kind: "process", item_id: id });
+  }
+  return c.json(toItemRead(item));
+});
+
+// --- Per-user library mutations -----------------------------------------
+itemsRoutes.post("/:id/favorite", async (c) => {
+  const id = Number(c.req.param("id"));
+  const userId = c.get("user").id;
+  await c.env.DB.prepare(
+    "UPDATE user_item SET is_favorite = 1 - is_favorite WHERE user_id = ? AND item_id = ?",
+  ).bind(userId, id).run();
+  return reloadItem(c, id, userId);
+});
+
+itemsRoutes.post("/:id/archive", async (c) => {
+  const id = Number(c.req.param("id"));
+  const userId = c.get("user").id;
+  await c.env.DB.prepare(
+    "UPDATE user_item SET is_archived = 1 - is_archived WHERE user_id = ? AND item_id = ?",
+  ).bind(userId, id).run();
+  return reloadItem(c, id, userId);
+});
+
+itemsRoutes.post("/:id/group", async (c) => {
+  const id = Number(c.req.param("id"));
+  const userId = c.get("user").id;
+  const body = (await c.req.json().catch(() => ({}))) as { group_id?: number | null };
+  await c.env.DB.prepare(
+    "UPDATE user_item SET folder_id = ? WHERE user_id = ? AND item_id = ?",
+  ).bind(body.group_id ?? null, userId, id).run();
+  return reloadItem(c, id, userId);
+});
+
+// Remove an item from the user's library (the global content stays).
+itemsRoutes.delete("/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  const userId = c.get("user").id;
+  await c.env.DB.prepare("DELETE FROM user_item WHERE user_id = ? AND item_id = ?").bind(userId, id).run();
+  await c.env.DB.prepare("DELETE FROM comment WHERE user_id = ? AND item_id = ?").bind(userId, id).run();
+  await c.env.DB.prepare("DELETE FROM highlight WHERE user_id = ? AND item_id = ?").bind(userId, id).run();
+  await recomputePriority(c.env, id);
+  return c.json({ ok: true });
+});
+
+async function reloadItem(c: Parameters<typeof requireAuth>[0], id: number, userId: number) {
+  const item = await first<ItemRow>(c.env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(id));
+  const ui = await first<UserItemRow>(
+    c.env.DB.prepare("SELECT * FROM user_item WHERE user_id = ? AND item_id = ?").bind(userId, id),
+  );
+  if (!item) return c.json({ error: "item not found" }, 404);
+  return c.json(toItemRead(item, ui));
+}

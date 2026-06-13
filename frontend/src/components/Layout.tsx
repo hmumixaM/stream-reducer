@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutGrid,
+  Compass,
   Search as SearchIcon,
   Network,
   Highlighter,
@@ -14,6 +15,7 @@ import {
   Moon,
   Sun,
   Menu,
+  LogOut,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
@@ -22,6 +24,7 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { to: "/", label: "Library", icon: LayoutGrid, end: true },
+  { to: "/browse", label: "Browse", icon: Compass },
   { to: "/search", label: "Search", icon: SearchIcon },
   { to: "/graph", label: "Graph", icon: Network },
   { to: "/annotations", label: "Highlights", icon: Highlighter },
@@ -111,6 +114,12 @@ export function Layout() {
   });
   const active = (queue.data ?? []).filter((i) => i.status !== "error").length;
 
+  const me = useQuery({ queryKey: ["me"], queryFn: api.getMe });
+  const logout = async () => {
+    await api.logout();
+    window.location.href = "/login";
+  };
+
   const toggleTheme = () => {
     document.documentElement.classList.toggle("dark");
     setDark(document.documentElement.classList.contains("dark"));
@@ -157,10 +166,20 @@ export function Layout() {
           </NavLink>
         ))}
       </nav>
-      <Button variant="ghost" size="sm" className="justify-start mt-auto" onClick={toggleTheme}>
-        {dark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-        {dark ? "Dark" : "Light"} mode
-      </Button>
+      <div className="mt-auto space-y-1 border-t border-border pt-2">
+        {me.data?.user && (
+          <p className="truncate px-3 pt-1 text-xs text-muted-foreground" title={me.data.user.email}>
+            {me.data.user.email}
+          </p>
+        )}
+        <Button variant="ghost" size="sm" className="w-full justify-start" onClick={toggleTheme}>
+          {dark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+          {dark ? "Dark" : "Light"} mode
+        </Button>
+        <Button variant="ghost" size="sm" className="w-full justify-start" onClick={logout}>
+          <LogOut className="h-4 w-4" /> Sign out
+        </Button>
+      </div>
     </>
   );
 

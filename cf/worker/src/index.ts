@@ -1,0 +1,65 @@
+import { Hono } from "hono";
+import type { Env, PipelineMessage } from "./env";
+import type { AppContext } from "./auth";
+import { authRoutes } from "./routes/auth";
+import { itemsRoutes } from "./routes/items";
+import { folderRoutes } from "./routes/folders";
+import { annotationRoutes } from "./routes/annotations";
+import { subscriptionRoutes } from "./routes/subscriptions";
+import { searchRoutes } from "./routes/search";
+import { graphRoutes } from "./routes/graph";
+import { statsRoutes } from "./routes/stats";
+import { queueRoutes } from "./routes/queue";
+import { settingsRoutes } from "./routes/settings";
+import { handleMessage } from "./pipeline/consumer";
+import { pollDueSubscriptions } from "./pipeline/subscriptions";
+
+export { PipelineContainer } from "./pipeline/container";
+
+const app = new Hono<AppContext>();
+
+app.get("/api/health", (c) => c.json({ status: "ok", llm_model: c.env.LLM_MODEL, stt_model: c.env.STT_MODEL }));
+
+app.route("/api/auth", authRoutes);
+// Folders live under /api/items/groups; register before the /:id catch-all.
+app.route("/api/items/groups", folderRoutes);
+// Comments/highlights (/api/items/:id/...) + the /api/annotations feed.
+app.route("/api", annotationRoutes);
+app.route("/api/items", itemsRoutes);
+app.route("/api/subscriptions", subscriptionRoutes);
+app.route("/api/search", searchRoutes);
+app.route("/api/graph", graphRoutes);
+app.route("/api/stats", statsRoutes);
+app.route("/api/queue", queueRoutes);
+app.route("/api/settings", settingsRoutes);
+
+// Unknown API paths -> JSON 404 (don't fall through to the SPA shell).
+app.all("/api/*", (c) => c.json({ error: "not found" }, 404));
+// Anything else: serve the built SPA (assets binding handles SPA fallback).
+app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
+
+export default {
+  fetch: app.fetch,
+
+  // Pipeline queue consumer.
+  async queue(batch: MessageBatch<PipelineMessage>, env: Env): Promise<void> {
+    for (const message of batch.messages) {
+      try {
+        await handleMessage(env, message.body);
+        message.ack();
+      } catch (err) {
+        console.error("pipeline message failed", message.body, err);
+        message.retry();
+      }
+    }
+  },
+
+  // Cron: poll subscriptions (every 15m) + nightly graph rebuild (04:00 UTC).
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    if (controller.cron === "0 4 * * *") {
+      await env.PIPELINE.send({ kind: "graph_build", force: false });
+    } else {
+      await pollDueSubscriptions(env);
+    }
+  },
+};

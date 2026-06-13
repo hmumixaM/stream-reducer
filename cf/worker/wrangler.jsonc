@@ -1,0 +1,110 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "stream-reduce",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Built React SPA (frontend `npm run build` -> ../../frontend/dist).
+  // The Worker serves these as static assets and falls back to index.html
+  // for client-side routes via the run_worker_first / not_found handling.
+  "assets": {
+    "directory": "../../frontend/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  "observability": { "enabled": true },
+
+  // --- D1: relational store (users, items, user_item, subs, comments, ...) ---
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "stream_reduce",
+      "database_id": "60e0f618-ad5c-41ab-88d5-7099f526809a",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // --- Vectorize: semantic search over chunk embeddings ---
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "stream-reduce-chunks"
+    }
+  ],
+
+  // --- Workers AI: embeddings (bge-m3) used to fill Vectorize ---
+  "ai": { "binding": "AI" },
+
+  // --- R2: downloaded audio media ---
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "stream-reduce-media"
+    }
+  ],
+
+  // --- Queues: pipeline jobs (ingest/transcribe/summarize/embed) ---
+  "queues": {
+    "producers": [{ "binding": "PIPELINE", "queue": "stream-reduce-pipeline" }],
+    "consumers": [
+      {
+        "queue": "stream-reduce-pipeline",
+        "max_batch_size": 1,
+        "max_concurrency": 4,
+        "max_retries": 3,
+        "dead_letter_queue": "stream-reduce-pipeline-dlq"
+      }
+    ]
+  },
+
+  // --- Container: Python pipeline (yt-dlp + ffmpeg + summarize) ---
+  // Controlled per-instance through the PipelineContainer Durable Object.
+  "containers": [
+    {
+      "class_name": "PipelineContainer",
+      "image": "../pipeline/Dockerfile",
+      // Build from the repo root so the Dockerfile can COPY the shared `app/`
+      // package (adapters) alongside cf/pipeline/*.py.
+      "image_build_context": "../../",
+      "instance_type": "standard-2",
+      "max_instances": 5
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      { "class_name": "PipelineContainer", "name": "PIPELINE_CONTAINER" }
+    ]
+  },
+
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["PipelineContainer"] }
+  ],
+
+  // --- Email Service: magic-link sign-in ---
+  "send_email": [{ "name": "EMAIL" }],
+
+  // --- Cron: poll subscriptions (hourly) + nightly graph rebuild ---
+  "triggers": {
+    "crons": ["*/15 * * * *", "0 4 * * *"]
+  },
+
+  "vars": {
+    "APP_ORIGIN": "https://stream-reduce.example.com",
+    "EMAIL_FROM": "noreply@example.com",
+    "LLM_BASE_URL": "https://xgoose-gemini-proxy-1.max-678.workers.dev/v1",
+    "LLM_MODEL": "gemini-3.5-flash",
+    "STT_MODEL": "openai/whisper-large-v3-turbo",
+    "EMBEDDING_DIM": "1024",
+    "SUBSCRIPTION_WINDOW_DAYS": "90",
+    "GRAPH_KNN_K": "6",
+    "GRAPH_SIM_THRESHOLD": "0.6"
+  }
+
+  // Secrets (set via `wrangler secret put`):
+  //   GEMINI_API_KEY        - bearer token for the Gemini summary proxy
+  //   OPENROUTER_API_KEY    - OpenRouter key for Whisper STT
+  //   SESSION_SECRET        - HMAC key for signing session/magic-link tokens
+}

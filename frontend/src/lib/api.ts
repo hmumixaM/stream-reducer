@@ -49,6 +49,17 @@ export interface Item {
   total_cost_usd: number;
   retry_count: number;
   created_at: string;
+  // Multi-user extensions (Cloudflare backend):
+  saved?: boolean;
+  personal_status?: "waiting" | "done" | null;
+  request_count?: number;
+  priority_score?: number;
+}
+
+export interface User {
+  id: number;
+  email: string;
+  created_at: string;
 }
 
 export interface QueueItem extends Item {
@@ -295,8 +306,16 @@ export interface SettingsUpdate {
 async function req<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     ...options,
   });
+  if (res.status === 401) {
+    // Session missing/expired: bounce to login (unless already there).
+    if (!location.pathname.startsWith("/login")) {
+      location.href = "/login";
+    }
+    throw new Error("401: unauthorized");
+  }
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`${res.status}: ${body}`);
@@ -349,47 +368,16 @@ const mirrorJson = (() => {
   };
 })();
 
-const SORT_KEYS: Record<string, keyof Item> = {
-  added: "created_at",
-  published: "published_at",
-  views: "view_count",
-  likes: "like_count",
-  duration: "duration_s",
-  position: "group_position",
-};
-
-function compareItems(a: Item, b: Item, sort: string, order: string): number {
-  const key = SORT_KEYS[sort] ?? "created_at";
-  const av = a[key];
-  const bv = b[key];
-  // Nulls always sort last, regardless of direction.
-  if (av == null && bv == null) return 0;
-  if (av == null) return 1;
-  if (bv == null) return -1;
-  let cmp = av < bv ? -1 : av > bv ? 1 : 0;
-  if (order !== "asc") cmp = -cmp;
-  if (cmp !== 0) return cmp;
-  // Stable secondary key: most-recently-added first.
-  return a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0;
-}
-
-async function mirrorListItems(params?: ListItemsParams): Promise<Item[]> {
-  const all = await mirrorJson<Item[]>("/data/items.json");
-  let items = all;
-  if (params?.platform) items = items.filter((i) => i.platform === params.platform);
-  if (params?.group_id !== undefined)
-    items = items.filter((i) => i.group_id === params.group_id);
-  if (params?.ungrouped) items = items.filter((i) => i.group_id == null);
-  if (params?.q) {
-    const needle = params.q.toLowerCase();
-    items = items.filter((i) => (i.title ?? "").toLowerCase().includes(needle));
-  }
-  items = [...items].sort((a, b) =>
-    compareItems(a, b, params?.sort ?? "added", params?.order ?? "desc"),
-  );
-  const offset = params?.offset ?? 0;
-  const limit = params?.limit ?? items.length;
-  return items.slice(offset, offset + limit);
+// Fetch a gzipped JSON asset and inflate it in the browser. Used for the search
+// index, whose raw JSON outgrows Cloudflare Pages' 25 MiB per-file limit; the
+// gzipped file stays well under it. `DecompressionStream` is supported in all
+// current evergreen browsers (Chrome 80+, Firefox 113+, Safari 16.4+).
+async function fetchGzipJson<T>(path: string): Promise<T> {
+  const res = await fetch(path);
+  if (!res.ok || !res.body) throw new Error(`${res.status}: ${path}`);
+  const stream = res.body.pipeThrough(new DecompressionStream("gzip"));
+  const text = await new Response(stream).text();
+  return JSON.parse(text) as T;
 }
 
 let mirrorSearchIndex: Promise<{
@@ -400,7 +388,7 @@ function loadMirrorSearchIndex() {
   if (!mirrorSearchIndex) {
     mirrorSearchIndex = (async () => {
       const { default: MiniSearch } = await import("minisearch");
-      const docs = await mirrorJson<SearchDoc[]>("/data/search-index.json");
+      const docs = await fetchGzipJson<SearchDoc[]>("/data/search-index.json.gz");
       const ms = new MiniSearch<SearchDoc>({
         idField: "id",
         fields: ["text", "title"],
@@ -474,24 +462,37 @@ function graphFilterParams(filters?: GraphFilters): string {
   return qs ? `?${qs}` : "";
 }
 
+function itemQuery(params?: ListItemsParams): string {
+  const sp = new URLSearchParams();
+  if (params?.status) sp.set("status", params.status);
+  if (params?.platform) sp.set("platform", params.platform);
+  if (params?.q) sp.set("q", params.q);
+  if (params?.favorite !== undefined) sp.set("favorite", String(params.favorite));
+  if (params?.archived !== undefined) sp.set("archived", String(params.archived));
+  if (params?.group_id !== undefined) sp.set("group_id", String(params.group_id));
+  if (params?.ungrouped) sp.set("ungrouped", "true");
+  if (params?.sort) sp.set("sort", params.sort);
+  if (params?.order) sp.set("order", params.order);
+  if (params?.limit !== undefined) sp.set("limit", String(params.limit));
+  if (params?.offset !== undefined) sp.set("offset", String(params.offset));
+  const qs = sp.toString();
+  return qs ? `?${qs}` : "";
+}
+
 export const api = {
-  listItems: (params?: ListItemsParams) => {
-    if (MIRROR) return mirrorListItems(params);
-    const sp = new URLSearchParams();
-    if (params?.status) sp.set("status", params.status);
-    if (params?.platform) sp.set("platform", params.platform);
-    if (params?.q) sp.set("q", params.q);
-    if (params?.favorite !== undefined) sp.set("favorite", String(params.favorite));
-    if (params?.archived !== undefined) sp.set("archived", String(params.archived));
-    if (params?.group_id !== undefined) sp.set("group_id", String(params.group_id));
-    if (params?.ungrouped) sp.set("ungrouped", "true");
-    if (params?.sort) sp.set("sort", params.sort);
-    if (params?.order) sp.set("order", params.order);
-    if (params?.limit !== undefined) sp.set("limit", String(params.limit));
-    if (params?.offset !== undefined) sp.set("offset", String(params.offset));
-    const qs = sp.toString();
-    return req<Item[]>(`/api/items${qs ? `?${qs}` : ""}`);
-  },
+  // --- auth ---
+  requestMagicLink: (email: string) =>
+    req<{ ok: boolean }>("/api/auth/request", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+  getMe: () => req<{ user: User | null }>("/api/auth/me"),
+  logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+
+  // The signed-in user's personal library (waiting + done).
+  listItems: (params?: ListItemsParams) => req<Item[]>(`/api/items/library${itemQuery(params)}`),
+  // The global catalog everyone has ingested (Browse page).
+  browseItems: (params?: ListItemsParams) => req<Item[]>(`/api/items${itemQuery(params)}`),
   listGroups: (archived?: boolean) =>
     MIRROR
       ? mirrorJson<Group[]>("/data/groups.json")
@@ -519,8 +520,9 @@ export const api = {
     MIRROR
       ? mirrorJson<ItemDetail>(`/data/items/${id}.json`)
       : req<ItemDetail>(`/api/items/${id}`),
+  // Add URLs to the signed-in user's library (dedup + enqueue server-side).
   addItems: (urls: string[]) =>
-    req<Item[]>("/api/items", { method: "POST", body: JSON.stringify({ urls }) }),
+    req<Item[]>("/api/items/library", { method: "POST", body: JSON.stringify({ urls }) }),
   retryItem: (id: number) => req<Item>(`/api/items/${id}/retry`, { method: "POST" }),
   regenerateItem: (id: number) =>
     req<Item>(`/api/items/${id}/regenerate`, { method: "POST" }),

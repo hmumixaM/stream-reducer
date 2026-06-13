@@ -16,3 +16,7 @@ mirror/dist/
 
 # Login cookies (yt-dlp) contain sensitive session tokens
 cookies/
+
+# Local agent / browser-automation artifacts
+.cursor/
+.playwright-mcp/

@@ -1,0 +1,73 @@
+name: Deploy to Cloudflare
+
+# Builds the SPA, applies D1 migrations, and deploys the Worker + pipeline
+# Container to Cloudflare on every push to main (and manually via the Actions
+# tab). Requires these repository secrets:
+#   CLOUDFLARE_API_TOKEN   - scoped token (Workers Scripts, D1, R2, Queues,
+#                            Vectorize, Workers AI, Durable Objects edit)
+#   CLOUDFLARE_ACCOUNT_ID  - 6789acff6cdae2c3d5073a701c708db7
+#   GEMINI_API_KEY         - Gemini summary proxy bearer token
+#   OPENROUTER_API_KEY     - OpenRouter Whisper key
+#   SESSION_SECRET         - random string for auth token hashing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cf/**"
+      - "frontend/**"
+      - "app/**"
+      - ".github/workflows/deploy-cloudflare.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cloudflare
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # 1. Build the SPA -> frontend/dist (served by the Worker as static assets)
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      # 2. Install Worker deps
+      - name: Install worker deps
+        working-directory: cf/worker
+        run: npm ci
+
+      # 3. Apply D1 migrations (idempotent)
+      - name: Apply D1 migrations
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cf/worker
+          command: d1 migrations apply stream_reduce --remote
+
+      # 4. Deploy the Worker + Container, and push runtime secrets
+      - name: Deploy Worker + Container
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cf/worker
+          command: deploy
+          secrets: |
+            GEMINI_API_KEY
+            OPENROUTER_API_KEY
+            SESSION_SECRET
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
