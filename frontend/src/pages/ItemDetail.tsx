@@ -14,9 +14,11 @@ import {
   Send,
   BookOpen,
   Highlighter,
+  Languages,
 } from "lucide-react";
 import {
   api,
+  TRANSLATE_LANGS,
   type StageRun,
   type Comment,
   type Highlight,
@@ -248,18 +250,18 @@ export function ItemDetail() {
       <div className={readMode ? "block" : "grid grid-cols-1 gap-6 lg:grid-cols-3"}>
         <div className={readMode ? "" : "lg:col-span-2"}>
           {d.summary ? (
-            <Card className={readMode ? "border-none shadow-none bg-transparent" : "p-6"}>
-              <HighlightableMarkdown
-                markdown={d.summary.markdown}
-                highlights={summaryHighlights}
-                source="summary"
-                readOnly={!canEdit}
-                onCreate={onCreateHighlight}
-                onUpdateNote={onUpdateHighlight}
-                onDelete={onDeleteHighlight}
-                className={readMode ? "prose-read max-w-none" : "prose-sr max-w-none text-sm"}
-              />
-            </Card>
+            <SummaryView
+              itemId={itemId}
+              summaryMarkdown={d.summary.markdown}
+              translations={d.translations ?? []}
+              readMode={readMode}
+              canEdit={canEdit}
+              authed={!!me.data?.user}
+              summaryHighlights={summaryHighlights}
+              onCreate={onCreateHighlight}
+              onUpdateNote={onUpdateHighlight}
+              onDelete={onDeleteHighlight}
+            />
           ) : (
             <Card className="flex items-center gap-3 p-6 text-muted-foreground">
               {["done", "error"].includes(d.status) ? (
@@ -373,6 +375,151 @@ export function ItemDetail() {
 
       {["done", "error"].includes(d.status) && <RelatedArticles itemId={itemId} />}
     </div>
+  );
+}
+
+// Summary with an on-demand language switcher. "Original" shows the stored
+// summary (editable highlights); other languages show a shared translation,
+// regenerated from the transcript on first request and cached for everyone.
+function SummaryView({
+  itemId,
+  summaryMarkdown,
+  translations,
+  readMode,
+  canEdit,
+  authed,
+  summaryHighlights,
+  onCreate,
+  onUpdateNote,
+  onDelete,
+}: {
+  itemId: number;
+  summaryMarkdown: string;
+  translations: { lang: string; status: string }[];
+  readMode: boolean;
+  canEdit: boolean;
+  authed: boolean;
+  summaryHighlights: Highlight[];
+  onCreate: (h: NewHighlight) => void;
+  onUpdateNote: (id: number, note: string) => void;
+  onDelete: (id: number) => void;
+}) {
+  const [lang, setLang] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const mdClass = readMode ? "prose-read max-w-none" : "prose-sr max-w-none text-sm";
+  const statusByLang = new Map(translations.map((t) => [t.lang, t.status]));
+
+  const translation = useQuery({
+    queryKey: ["translation", itemId, lang],
+    queryFn: () => api.getTranslation(itemId, lang!),
+    enabled: lang != null,
+    retry: false,
+    refetchInterval: (q) =>
+      q.state.data && (q.state.data.status === "queued" || q.state.data.status === "processing")
+        ? 3000
+        : false,
+  });
+  const request = useMutation({
+    mutationFn: () => api.requestTranslation(itemId, lang!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["translation", itemId, lang] }),
+  });
+
+  const notTranslatedYet =
+    translation.isError && String(translation.error).startsWith("404");
+
+  return (
+    <Card className={readMode ? "border-none bg-transparent shadow-none" : "p-6"}>
+      <div className="mb-4 flex flex-wrap items-center gap-1.5 border-b border-border pb-3">
+        <Languages className="mr-1 h-4 w-4 text-muted-foreground" />
+        <LangChip label="Original" active={lang === null} onClick={() => setLang(null)} />
+        {TRANSLATE_LANGS.map((l) => (
+          <LangChip
+            key={l.code}
+            label={l.label}
+            active={lang === l.code}
+            done={statusByLang.get(l.code) === "done"}
+            onClick={() => setLang(l.code)}
+          />
+        ))}
+      </div>
+
+      {lang === null ? (
+        <HighlightableMarkdown
+          markdown={summaryMarkdown}
+          highlights={summaryHighlights}
+          source="summary"
+          readOnly={!canEdit}
+          onCreate={onCreate}
+          onUpdateNote={onUpdateNote}
+          onDelete={onDelete}
+          className={mdClass}
+        />
+      ) : translation.isLoading ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner /> Loading…</div>
+      ) : notTranslatedYet ? (
+        <div className="space-y-3 text-sm text-muted-foreground">
+          <p>This episode hasn’t been translated to this language yet.</p>
+          {authed ? (
+            <Button size="sm" onClick={() => request.mutate()} disabled={request.isPending}>
+              {request.isPending ? <Spinner /> : <Languages className="h-4 w-4" />} Translate now
+            </Button>
+          ) : (
+            <p className="text-xs">Sign in to request a translation.</p>
+          )}
+        </div>
+      ) : translation.data?.status === "done" ? (
+        <HighlightableMarkdown
+          markdown={translation.data.markdown}
+          highlights={[]}
+          source="summary"
+          readOnly
+          onCreate={() => {}}
+          onUpdateNote={() => {}}
+          onDelete={() => {}}
+          className={mdClass}
+        />
+      ) : translation.data?.status === "error" ? (
+        <div className="space-y-3 text-sm text-red-400">
+          <p>Translation failed.{translation.data.error ? ` ${translation.data.error}` : ""}</p>
+          {authed && (
+            <Button size="sm" variant="outline" onClick={() => request.mutate()} disabled={request.isPending}>
+              <RefreshCw className="h-4 w-4" /> Retry
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner /> Translating… generated once and shared with everyone. Check back shortly.
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function LangChip({
+  label,
+  active,
+  done,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  done?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
+        active
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-border text-muted-foreground hover:bg-accent",
+      )}
+    >
+      {label}
+      {done && !active ? " ✓" : ""}
+    </button>
   );
 }
 

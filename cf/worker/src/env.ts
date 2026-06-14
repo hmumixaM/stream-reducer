@@ -43,5 +43,6 @@ export interface Env {
 export type PipelineMessage =
   | { kind: "process"; item_id: number }
   | { kind: "resummarize"; item_id: number }
+  | { kind: "translate"; item_id: number; lang: string }
   | { kind: "poll"; subscription_id: number }
   | { kind: "graph_build"; force?: boolean };

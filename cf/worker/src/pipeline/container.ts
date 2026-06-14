@@ -26,6 +26,16 @@ export interface PipelineJob {
   // resummarize re-runs only the summary using a provided transcript.
   mode: "process" | "resummarize";
   transcript?: { language: string | null; source: string; segments: unknown[]; text: string } | null;
+  // When set, the summary is regenerated in this language (on-demand translation).
+  target_lang?: string;
+  // Caller-supplied metadata for resummarize/translate (avoids a re-fetch).
+  item?: {
+    title?: string | null;
+    author?: string | null;
+    description?: string | null;
+    duration_s?: number | null;
+    published_at?: string | null;
+  };
 }
 
 export interface ChunkOut {

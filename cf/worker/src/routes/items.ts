@@ -199,6 +199,10 @@ itemsRoutes.get("/:id", async (c) => {
   const interested = await first<{ id: number }>(
     c.env.DB.prepare("SELECT id FROM item_interest WHERE user_id = ? AND item_id = ?").bind(userId, id),
   );
+  // Available shared translations (status only; the body is fetched on demand).
+  const translations = await all<{ lang: string; status: string }>(
+    c.env.DB.prepare("SELECT lang, status FROM item_translation WHERE item_id = ? ORDER BY lang").bind(id),
+  );
 
   return c.json({
     ...toItemRead(item, ui, { is_interested: interested != null }),
@@ -211,7 +215,52 @@ itemsRoutes.get("/:id", async (c) => {
     stages,
     comments,
     highlights,
+    translations,
   });
+});
+
+// Supported on-demand translation languages (kept in sync with the frontend).
+const TRANSLATE_LANGS = new Set(["en", "zh", "ja", "ko", "es", "fr", "de", "ru"]);
+
+// Fetch a shared translation's body (public). 404 when it doesn't exist yet.
+itemsRoutes.get("/:id/translation", async (c) => {
+  const id = Number(c.req.param("id"));
+  const lang = (c.req.query("lang") || "").trim();
+  const row = await first<Record<string, unknown>>(
+    c.env.DB.prepare("SELECT lang, status, model, markdown, structured, error, updated_at FROM item_translation WHERE item_id = ? AND lang = ?").bind(id, lang),
+  );
+  if (!row) return c.json({ error: "not found" }, 404);
+  return c.json({ ...row, structured: JSON.parse((row.structured as string) || "{}") });
+});
+
+// Request a translation (auth'd). Idempotent: returns the existing row, or
+// creates a queued one + enqueues the job. Shared across all users.
+itemsRoutes.post("/:id/translate", requireAuth, async (c) => {
+  const id = Number(c.req.param("id"));
+  const body = (await c.req.json().catch(() => ({}))) as { lang?: string };
+  const lang = (body.lang || "").trim();
+  if (!TRANSLATE_LANGS.has(lang)) return c.json({ error: "unsupported language" }, 400);
+
+  const item = await first<ItemRow>(c.env.DB.prepare("SELECT id, status FROM item WHERE id = ?").bind(id));
+  if (!item) return c.json({ error: "item not found" }, 404);
+  const transcript = await first<{ id: number }>(
+    c.env.DB.prepare("SELECT id FROM transcript WHERE item_id = ?").bind(id),
+  );
+  if (!transcript) return c.json({ error: "item has no transcript yet" }, 409);
+
+  const existing = await first<{ status: string }>(
+    c.env.DB.prepare("SELECT status FROM item_translation WHERE item_id = ? AND lang = ?").bind(id, lang),
+  );
+  // Re-enqueue only when missing or previously errored.
+  if (!existing || existing.status === "error") {
+    await c.env.DB.prepare(
+      `INSERT INTO item_translation (item_id, lang, status) VALUES (?, ?, 'queued')
+       ON CONFLICT(item_id, lang) DO UPDATE SET status='queued', error=NULL, updated_at=excluded.updated_at`,
+    ).bind(id, lang).run();
+    await c.env.PIPELINE.send({ kind: "translate", item_id: id, lang });
+    return c.json({ lang, status: "queued" });
+  }
+  return c.json({ lang, status: existing.status });
 });
 
 // Related articles (global recommendations) for an item.

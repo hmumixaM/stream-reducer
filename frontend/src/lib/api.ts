@@ -177,12 +177,42 @@ export interface Annotation {
   body: string;
 }
 
+export type TranslationStatus = "queued" | "processing" | "done" | "error";
+
+export interface TranslationRef {
+  lang: string;
+  status: TranslationStatus;
+}
+
+export interface Translation {
+  lang: string;
+  status: TranslationStatus;
+  model?: string;
+  markdown: string;
+  structured: Record<string, unknown>;
+  error?: string | null;
+  updated_at?: string;
+}
+
+// Supported on-demand translation languages (kept in sync with the worker).
+export const TRANSLATE_LANGS: { code: string; label: string }[] = [
+  { code: "en", label: "English" },
+  { code: "zh", label: "简体中文" },
+  { code: "ja", label: "日本語" },
+  { code: "ko", label: "한국어" },
+  { code: "es", label: "Español" },
+  { code: "fr", label: "Français" },
+  { code: "de", label: "Deutsch" },
+  { code: "ru", label: "Русский" },
+];
+
 export interface ItemDetail extends Item {
   summary?: Summary | null;
   transcript?: Transcript | null;
   stages: StageRun[];
   comments: Comment[];
   highlights: Highlight[];
+  translations?: TranslationRef[];
   // Only present in the static mirror bundle (related articles embedded so the
   // recommendation grid works without a live API).
   related?: RelatedItem[];
@@ -647,6 +677,13 @@ export const api = {
     MIRROR
       ? mirrorGraph()
       : req<GraphData>(`/api/graph${graphFilterParams(filters)}`),
+  getTranslation: (id: number, lang: string) =>
+    req<Translation>(`/api/items/${id}/translation?lang=${encodeURIComponent(lang)}`),
+  requestTranslation: (id: number, lang: string) =>
+    req<TranslationRef>(`/api/items/${id}/translate`, {
+      method: "POST",
+      body: JSON.stringify({ lang }),
+    }),
   getRelated: (id: number) =>
     MIRROR ? mirrorRelated(id) : req<RelatedItem[]>(`/api/items/${id}/related`),
   getItemFocus: async (id: number): Promise<number | null> => {

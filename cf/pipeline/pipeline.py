@@ -301,11 +301,32 @@ def _chunk_for_embed(transcript: dict | None, structured: dict, markdown: str) -
     return chunks
 
 
+# Target-language directives for on-demand translations. The summary is
+# re-generated from the transcript with the output language enforced.
+_LANG_NAMES = {
+    "en": "English", "ja": "Japanese (日本語)", "ko": "Korean (한국어)",
+    "es": "Spanish", "fr": "French", "de": "German", "ru": "Russian",
+}
+
+
+def target_language_directive(code: str) -> str:
+    if code == "zh":
+        from app.pipeline.prompts import LANGUAGE_SIMPLIFIED_CHINESE
+        return LANGUAGE_SIMPLIFIED_CHINESE
+    name = _LANG_NAMES.get(code, code)
+    return (
+        f"Write ALL text fields in {name}, translating faithfully from the source. "
+        f"Render the entire summary natively in {name}; do not mix in the source language "
+        f"for narration. You may keep widely-used proper nouns, product names, and "
+        f"technical acronyms in their original form where natural."
+    )
+
+
 # --- summarize -------------------------------------------------------------
-def summarize(item: ItemView, transcript: dict, stages: list[Stage]) -> dict:
+def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang: str | None = None) -> dict:
     segments = transcript.get("segments") or []
     chunks = _chunk_segments(segments, SUMMARY_CHUNK_CHARS)
-    lang = language_directive(transcript.get("text") or "")
+    lang = target_language_directive(target_lang) if target_lang else language_directive(transcript.get("text") or "")
 
     with Stage("summarize", provider="gemini", model=os.environ.get("GEMINI_MODEL")) as st:
         note_blocks: list[str] = []
@@ -341,6 +362,7 @@ def run(job: dict) -> dict:
     mode = job.get("mode", "process")
     stages: list[Stage] = []
 
+    target_lang = job.get("target_lang") or None
     adapter = get_adapter(plat)
     item = ItemView(platform=plat.value, source_url=source_url)
     metadata: dict = {}
@@ -376,19 +398,33 @@ def run(job: dict) -> dict:
             if transcript is None:
                 transcript = _transcribe(tmp, audio_path, stages)
     else:
-        # resummarize: reuse provided transcript + best-effort metadata
-        meta = adapter.fetch_metadata(source_url)
-        metadata = _meta_to_dict(meta)
-        item.title = metadata["title"]
-        item.author = metadata["author"]
-        item.description = metadata["description"]
-        item.duration_s = metadata["duration_s"]
-        item.published_at = meta.published_at
+        # resummarize / translate: reuse provided transcript. Prefer metadata
+        # passed by the caller (avoids a re-fetch — important for sources like
+        # Bilibili that block our egress); fall back to fetching otherwise.
+        supplied = job.get("item") or {}
+        if supplied:
+            item.title = supplied.get("title")
+            item.author = supplied.get("author")
+            item.description = supplied.get("description")
+            item.duration_s = supplied.get("duration_s")
+            pub = supplied.get("published_at")
+            try:
+                item.published_at = datetime.fromisoformat(pub.replace("Z", "+00:00")) if pub else None
+            except (ValueError, AttributeError):
+                item.published_at = None
+        else:
+            meta = adapter.fetch_metadata(source_url)
+            metadata = _meta_to_dict(meta)
+            item.title = metadata["title"]
+            item.author = metadata["author"]
+            item.description = metadata["description"]
+            item.duration_s = metadata["duration_s"]
+            item.published_at = meta.published_at
 
     if not transcript or not transcript.get("segments"):
         raise RuntimeError("no transcript available")
 
-    structured = summarize(item, transcript, stages)
+    structured = summarize(item, transcript, stages, target_lang=target_lang)
     markdown = render_markdown(item, structured)
     chunks = _chunk_for_embed(transcript, structured, markdown)
 

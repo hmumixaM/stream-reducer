@@ -12,6 +12,8 @@ export async function handleMessage(env: Env, msg: PipelineMessage): Promise<voi
       return processNextQueuedItem(env);
     case "resummarize":
       return processItem(env, msg.item_id, true);
+    case "translate":
+      return translateItem(env, msg.item_id, msg.lang);
     case "poll":
       await pollSubscription(env, msg.subscription_id);
       return;
@@ -49,6 +51,62 @@ async function claimNextQueuedItem(env: Env): Promise<ItemRow | null> {
     }
   }
   return null;
+}
+
+// Generate a shared, on-demand translation: re-summarize the original
+// transcript + metadata with the output language enforced. Result is stored in
+// item_translation (keyed by item+lang) and shown to every user.
+async function translateItem(env: Env, itemId: number, lang: string): Promise<void> {
+  const item = await first<ItemRow>(env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(itemId));
+  const t = await first<{ language: string | null; source: string; segments: string; text: string }>(
+    env.DB.prepare("SELECT language, source, segments, text FROM transcript WHERE item_id = ?").bind(itemId),
+  );
+  const fail = async (msg: string) => {
+    await env.DB.prepare(
+      "UPDATE item_translation SET status = 'error', error = ?, updated_at = ? WHERE item_id = ? AND lang = ?",
+    ).bind(msg.slice(0, 2000), isoNow(), itemId, lang).run();
+  };
+  if (!item || !t) return fail("item has no transcript to translate");
+
+  await env.DB.prepare(
+    "UPDATE item_translation SET status = 'processing', error = NULL, updated_at = ? WHERE item_id = ? AND lang = ?",
+  ).bind(isoNow(), itemId, lang).run();
+
+  try {
+    const result = await runPipeline(env, {
+      item_id: itemId,
+      source_url: item.source_url,
+      platform: item.platform,
+      mode: "resummarize",
+      target_lang: lang,
+      transcript: { language: t.language, source: t.source, segments: JSON.parse(t.segments || "[]"), text: t.text },
+      item: {
+        title: item.title,
+        author: item.author,
+        description: item.description,
+        duration_s: item.duration_s,
+        published_at: item.published_at,
+      },
+    });
+    if (result.error || !result.summary) throw new Error(result.error || "no summary produced");
+    await env.DB.prepare(
+      `UPDATE item_translation SET status = 'done', model = ?, prompt_version = ?, markdown = ?,
+         structured = ?, error = NULL, updated_at = ? WHERE item_id = ? AND lang = ?`,
+    )
+      .bind(
+        result.summary.model,
+        result.summary.prompt_version,
+        result.summary.markdown,
+        JSON.stringify(result.summary.structured),
+        isoNow(),
+        itemId,
+        lang,
+      )
+      .run();
+  } catch (err) {
+    await fail(err instanceof Error ? `${err.name}: ${err.message}` : String(err));
+    throw err;
+  }
 }
 
 async function processItem(env: Env, itemId: number, resummarize = false): Promise<void> {
