@@ -129,6 +129,9 @@ export async function addUrlToLibrary(
     subscriptionId?: number | null;
     // Feed/channel URL this item was ingested from (e.g. a subscription poll).
     feedUrl?: string | null;
+    // Feed-provided metadata (e.g. podcast RSS): authoritative for items whose
+    // audio URL can't be scraped for rich metadata. Applied last so it wins.
+    meta?: ItemMetadata;
   } = {},
 ): Promise<AddResult | null> {
   const url = normalizeUrl(rawUrl);
@@ -145,12 +148,16 @@ export async function addUrlToLibrary(
   const { item, created } = await upsertItem(env, {
     source_url: url,
     platform,
-    title: opts.title ?? metadata?.title,
-    external_id: opts.external_id ?? metadata?.external_id,
+    title: opts.title ?? opts.meta?.title ?? metadata?.title,
+    external_id: opts.external_id ?? opts.meta?.external_id ?? metadata?.external_id,
   });
 
   if (metadata) {
     await persistItemMetadata(env, item.id, metadata);
+  }
+  // Feed metadata overrides the (often empty) scraped metadata for podcasts.
+  if (opts.meta) {
+    await persistItemMetadata(env, item.id, opts.meta);
   }
 
   // Link this item to its channel feed (derived from metadata) and the feed it

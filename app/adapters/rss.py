@@ -28,7 +28,10 @@ class GenericAdapter(Adapter):
         if url in self._cache:
             return self._cache[url]
         if looks_like_audio(url):
-            result = {"title": Path(url).stem, "audio_url": url}
+            # Direct audio (e.g. a podcast enclosure): no scrapeable metadata.
+            # Leave title None so feed-provided metadata (title/description/date)
+            # isn't clobbered by the audio file's name.
+            result = {"title": None, "audio_url": url}
             self._cache[url] = result
             return result
         # Peek headers first: many podcast enclosures redirect and serve audio
@@ -39,7 +42,7 @@ class GenericAdapter(Adapter):
             resp.raise_for_status()
             ctype = resp.headers.get("content-type", "").lower()
             if ctype.startswith("audio") or "mpeg" in ctype or "octet-stream" in ctype:
-                result = {"title": Path(url).stem, "audio_url": str(resp.url)}
+                result = {"title": None, "audio_url": str(resp.url)}
                 self._cache[url] = result
                 return result
             html = resp.read().decode(resp.encoding or "utf-8", errors="replace")

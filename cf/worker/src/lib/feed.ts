@@ -10,6 +10,9 @@ export interface FeedEntry {
   published: string | null; // ISO string when parseable
   audio: string | null;
   duration_s?: number | null; // when the feed exposes it (podcasts, Bilibili)
+  description?: string | null;
+  thumbnail?: string | null;
+  author?: string | null;
 }
 
 // Parse a duration that may be a number of seconds or "HH:MM:SS" / "MM:SS".
@@ -165,6 +168,9 @@ export function parseFeed(xml: string): ParsedFeed {
       published: toIso(tag(block, "pubDate") || tag(block, "dc:date")),
       audio,
       duration_s: parseDuration(tag(block, "itunes:duration")),
+      description: tag(block, "itunes:summary") || tag(block, "description") || tag(block, "content:encoded"),
+      thumbnail: attr(block, "itunes:image", "href"),
+      author: tag(block, "itunes:author") || tag(block, "dc:creator"),
     });
   }
 

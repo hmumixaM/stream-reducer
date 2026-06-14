@@ -99,6 +99,16 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
       platform,
       subscriptionId: sub.id,
       feedUrl: sub.feed_url,
+      // Carry the feed's episode metadata so podcasts keep their title, show
+      // notes, date, and artwork even when the audio URL has none.
+      meta: {
+        title: e.title,
+        description: e.description ?? null,
+        published_at: e.published ?? null,
+        duration_s: e.duration_s ?? null,
+        thumbnail: e.thumbnail ?? null,
+        author: e.author ?? null,
+      },
     });
     if (res) enqueued++;
   }
