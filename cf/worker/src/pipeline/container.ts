@@ -72,9 +72,13 @@ export interface PipelineResult {
   error?: string | null;
 }
 
-// Run a job by forwarding it to a fresh container instance.
+// Run a job by forwarding it to the shared pipeline container instance. A
+// single instance key is used (not one per item): the queue consumer runs at
+// concurrency 1, so jobs are already serialized, and per-item instances would
+// each linger for `sleepAfter` and quickly exceed the container max_instances
+// cap ("Maximum number of running containers").
 export async function runPipeline(env: Env, job: PipelineJob): Promise<PipelineResult> {
-  const instance = getContainer(env.PIPELINE_CONTAINER, `job-${job.item_id}`);
+  const instance = getContainer(env.PIPELINE_CONTAINER, "pipeline");
   const res = await instance.fetch(
     new Request("http://pipeline/process", {
       method: "POST",
