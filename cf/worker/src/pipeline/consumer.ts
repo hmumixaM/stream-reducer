@@ -1,15 +1,15 @@
 import type { Env, PipelineMessage } from "../env";
 import { first, type ItemRow } from "../db";
 import { isoNow } from "../lib/crypto";
-import { persistItemMetadata, recomputePriority, linkItemFeed, youtubeChannelFeed } from "../lib/ingest";
-import { runPipeline, fetchMetadata, type PipelineResult } from "./container";
+import { persistItemMetadata, linkItemFeed, youtubeChannelFeed } from "../lib/ingest";
+import { runPipeline, type PipelineResult } from "./container";
 import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
 
 export async function handleMessage(env: Env, msg: PipelineMessage): Promise<void> {
   switch (msg.kind) {
     case "process":
-      return processNextQueuedItem(env, msg.item_id);
+      return processNextQueuedItem(env);
     case "resummarize":
       return processItem(env, msg.item_id, true);
     case "poll":
@@ -21,24 +21,10 @@ export async function handleMessage(env: Env, msg: PipelineMessage): Promise<voi
   }
 }
 
-async function processNextQueuedItem(env: Env, requestedItemId: number): Promise<void> {
-  await refreshQueuedMetadata(env, requestedItemId);
+async function processNextQueuedItem(env: Env): Promise<void> {
   const item = await claimNextQueuedItem(env);
   if (!item) return;
   return processClaimedItem(env, item, false);
-}
-
-async function refreshQueuedMetadata(env: Env, itemId: number): Promise<void> {
-  const item = await first<ItemRow>(
-    env.DB.prepare("SELECT * FROM item WHERE id = ? AND status IN ('queued', 'error')").bind(itemId),
-  );
-  if (!item || item.view_count != null) return;
-
-  const meta = await fetchMetadata(env, item.source_url, item.platform).catch(() => null);
-  if (!meta) return;
-  await persistMetadata(env, itemId, meta);
-  if (item.platform === "youtube") await linkItemFeed(env, itemId, youtubeChannelFeed(meta.channel_id));
-  await recomputePriority(env, itemId);
 }
 
 async function claimNextQueuedItem(env: Env): Promise<ItemRow | null> {
@@ -78,17 +64,9 @@ async function processItem(env: Env, itemId: number, resummarize = false): Promi
 async function processClaimedItem(env: Env, item: ItemRow, resummarize = false): Promise<void> {
   const itemId = item.id;
   try {
-    // Metadata-first: fetch + persist lightweight metadata before the expensive
-    // transcribe/summarize stages, so prioritization signals are populated early.
-    if (!resummarize) {
-      const meta = await fetchMetadata(env, item.source_url, item.platform).catch(() => null);
-      if (meta) {
-        await persistMetadata(env, itemId, meta);
-        if (item.platform === "youtube") await linkItemFeed(env, itemId, youtubeChannelFeed(meta.channel_id));
-        await recomputePriority(env, itemId);
-      }
-    }
-
+    // Metadata is no longer pre-fetched in its own container call (avoids extra
+    // container instances / 503s); the full pipeline run below returns and
+    // persists metadata anyway.
     let transcript = null;
     if (resummarize) {
       const t = await first<{ language: string | null; source: string; segments: string; text: string }>(
@@ -131,6 +109,9 @@ async function persistMetadata(env: Env, itemId: number, m: PipelineResult["meta
 
 async function persistResult(env: Env, itemId: number, r: PipelineResult): Promise<void> {
   await persistMetadata(env, itemId, r.metadata);
+  // Link the item to its YouTube channel feed for subscriber-demand signals
+  // (derived from the pipeline result instead of a separate metadata fetch).
+  await linkItemFeed(env, itemId, youtubeChannelFeed(r.metadata.channel_id));
 
   // Media -> R2 (optional; container only returns audio when under the limit).
   let mediaKey: string | null = null;

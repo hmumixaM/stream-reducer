@@ -63,7 +63,10 @@
       {
         "queue": "stream-reduce-pipeline",
         "max_batch_size": 1,
-        "max_concurrency": 4,
+        // Each job runs in its own container instance (job-<id>); keep this at 1
+        // so we never exceed the container max_instances cap (avoids the
+        // "no Container instance available" 503). Throughput is secondary.
+        "max_concurrency": 1,
         "max_retries": 3,
         "dead_letter_queue": "stream-reduce-pipeline-dlq"
       }
