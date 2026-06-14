@@ -26,7 +26,7 @@ import {
 } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
 import { useMe } from "@/lib/auth";
-import { Button, Card, Spinner } from "@/components/ui";
+import { Button, Card, Select, Spinner } from "@/components/ui";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { RelatedArticles } from "@/components/RelatedArticles";
 import { HighlightableMarkdown, HighlightLayer, hlClass } from "@/components/Highlightable";
@@ -405,9 +405,15 @@ function SummaryView({
   onDelete: (id: number) => void;
 }) {
   const [lang, setLang] = useState<string | null>(null);
+  const [pick, setPick] = useState("");
   const qc = useQueryClient();
   const mdClass = readMode ? "prose-read max-w-none" : "prose-sr max-w-none text-sm";
-  const statusByLang = new Map(translations.map((t) => [t.lang, t.status]));
+
+  const labelFor = (code: string) => TRANSLATE_LANGS.find((l) => l.code === code)?.label ?? code;
+  // Languages already translated (or in progress) become one-click chips.
+  const available = [...translations].sort((a, b) => labelFor(a.lang).localeCompare(labelFor(b.lang)));
+  const availSet = new Set(translations.map((t) => t.lang));
+  const remaining = TRANSLATE_LANGS.filter((l) => !availSet.has(l.code));
 
   const translation = useQuery({
     queryKey: ["translation", itemId, lang],
@@ -419,28 +425,59 @@ function SummaryView({
         ? 3000
         : false,
   });
+
+  // Requesting a translation is a deliberate, confirmed action so users don't
+  // accidentally spawn many jobs. Existing translations are just viewed.
   const request = useMutation({
-    mutationFn: () => api.requestTranslation(itemId, lang!),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["translation", itemId, lang] }),
+    mutationFn: (code: string) => api.requestTranslation(itemId, code),
+    onSuccess: (_data, code) => {
+      qc.invalidateQueries({ queryKey: ["item", itemId] });
+      qc.invalidateQueries({ queryKey: ["translation", itemId, code] });
+      setLang(code);
+      setPick("");
+    },
   });
 
-  const notTranslatedYet =
-    translation.isError && String(translation.error).startsWith("404");
+  const requestPick = () => {
+    if (!pick) return;
+    if (confirm(`Generate a ${labelFor(pick)} translation? It runs a one-time job and is then shared with everyone.`)) {
+      request.mutate(pick);
+    }
+  };
 
   return (
     <Card className={readMode ? "border-none bg-transparent shadow-none" : "p-6"}>
       <div className="mb-4 flex flex-wrap items-center gap-1.5 border-b border-border pb-3">
         <Languages className="mr-1 h-4 w-4 text-muted-foreground" />
         <LangChip label="Original" active={lang === null} onClick={() => setLang(null)} />
-        {TRANSLATE_LANGS.map((l) => (
+        {available.map((t) => (
           <LangChip
-            key={l.code}
-            label={l.label}
-            active={lang === l.code}
-            done={statusByLang.get(l.code) === "done"}
-            onClick={() => setLang(l.code)}
+            key={t.lang}
+            label={labelFor(t.lang) + (t.status === "done" ? "" : " …")}
+            active={lang === t.lang}
+            onClick={() => setLang(t.lang)}
           />
         ))}
+        {authed && remaining.length > 0 && (
+          <span className="ml-auto flex items-center gap-1.5">
+            <Select
+              value={pick}
+              onChange={(e) => setPick(e.target.value)}
+              className="h-8 w-auto py-0 text-xs"
+            >
+              <option value="">Translate to…</option>
+              {remaining.map((l) => (
+                <option key={l.code} value={l.code}>{l.label}</option>
+              ))}
+            </Select>
+            <Button size="sm" variant="outline" disabled={!pick || request.isPending} onClick={requestPick}>
+              {request.isPending ? <Spinner /> : <Languages className="h-4 w-4" />} Translate
+            </Button>
+          </span>
+        )}
+        {!authed && remaining.length > 0 && (
+          <span className="ml-auto text-xs text-muted-foreground">Sign in to request a translation</span>
+        )}
       </div>
 
       {lang === null ? (
@@ -454,19 +491,6 @@ function SummaryView({
           onDelete={onDelete}
           className={mdClass}
         />
-      ) : translation.isLoading ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner /> Loading…</div>
-      ) : notTranslatedYet ? (
-        <div className="space-y-3 text-sm text-muted-foreground">
-          <p>This episode hasn’t been translated to this language yet.</p>
-          {authed ? (
-            <Button size="sm" onClick={() => request.mutate()} disabled={request.isPending}>
-              {request.isPending ? <Spinner /> : <Languages className="h-4 w-4" />} Translate now
-            </Button>
-          ) : (
-            <p className="text-xs">Sign in to request a translation.</p>
-          )}
-        </div>
       ) : translation.data?.status === "done" ? (
         <HighlightableMarkdown
           markdown={translation.data.markdown}
@@ -482,14 +506,14 @@ function SummaryView({
         <div className="space-y-3 text-sm text-red-400">
           <p>Translation failed.{translation.data.error ? ` ${translation.data.error}` : ""}</p>
           {authed && (
-            <Button size="sm" variant="outline" onClick={() => request.mutate()} disabled={request.isPending}>
+            <Button size="sm" variant="outline" onClick={() => request.mutate(lang!)} disabled={request.isPending}>
               <RefreshCw className="h-4 w-4" /> Retry
             </Button>
           )}
         </div>
       ) : (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner /> Translating… generated once and shared with everyone. Check back shortly.
+          <Spinner /> Translating to {labelFor(lang!)}… generated once and shared with everyone. This can take a minute.
         </div>
       )}
     </Card>
@@ -499,12 +523,10 @@ function SummaryView({
 function LangChip({
   label,
   active,
-  done,
   onClick,
 }: {
   label: string;
   active: boolean;
-  done?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -518,7 +540,6 @@ function LangChip({
       )}
     >
       {label}
-      {done && !active ? " ✓" : ""}
     </button>
   );
 }
