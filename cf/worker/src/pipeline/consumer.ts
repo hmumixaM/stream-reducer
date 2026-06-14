@@ -50,10 +50,11 @@ function claimableBinds(cutoff: string): unknown[] {
 async function processNextQueuedItem(env: Env): Promise<void> {
   const item = await claimNextQueuedItem(env);
   if (!item) return;
-  await processClaimedItem(env, item, false);
-  // Self-drain: keep the (concurrency-1) pipeline moving without relying on one
-  // queue message per item. Enqueue the next claimable item, if any.
+  // Enqueue the continuation BEFORE processing. concurrency=1 keeps it from
+  // overlapping, and it ensures the chain survives even if this invocation is
+  // evicted mid-job (which previously stalled the whole queue).
   await enqueueNextIfWork(env);
+  await processClaimedItem(env, item, false);
 }
 
 // Reclaim the next claimable item: a queued one, or one stuck in-progress past
