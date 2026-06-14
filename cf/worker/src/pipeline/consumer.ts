@@ -23,34 +23,68 @@ export async function handleMessage(env: Env, msg: PipelineMessage): Promise<voi
   }
 }
 
+// An item still 'fetching'/'transcribing'/'summarizing' after this long was
+// orphaned by a Worker restart/eviction (a queue invocation caps at ~15 min),
+// so it's safe to reclaim. Errors are NOT auto-reclaimed (need explicit retry).
+const STALE_IN_PROGRESS_MS = 20 * 60 * 1000;
+const IN_PROGRESS = ["fetching", "transcribing", "summarizing"];
+
+function staleCutoff(): string {
+  return new Date(Date.now() - STALE_IN_PROGRESS_MS).toISOString();
+}
+
 async function processNextQueuedItem(env: Env): Promise<void> {
   const item = await claimNextQueuedItem(env);
   if (!item) return;
-  return processClaimedItem(env, item, false);
+  await processClaimedItem(env, item, false);
+  // Self-drain: keep the (concurrency-1) pipeline moving without relying on one
+  // queue message per item. Enqueue the next claimable item, if any.
+  await enqueueNextIfWork(env);
 }
 
+// Reclaim the next claimable item: a queued one, or one stuck in-progress past
+// the stale cutoff (orphaned by a restart). Uses a conditional UPDATE so two
+// concurrent claims can't grab the same item.
 async function claimNextQueuedItem(env: Env): Promise<ItemRow | null> {
+  const cutoff = staleCutoff();
+  const placeholders = IN_PROGRESS.map(() => "?").join(",");
   for (let attempt = 0; attempt < 5; attempt++) {
     const candidate = await first<ItemRow>(
       env.DB.prepare(
         `SELECT * FROM item
-          WHERE status IN ('queued', 'error')
+          WHERE status = 'queued'
+             OR (status IN (${placeholders}) AND started_at < ?)
           ORDER BY priority_score DESC, request_count DESC, enqueued_at ASC
           LIMIT 1`,
-      ),
+      ).bind(...IN_PROGRESS, cutoff),
     );
     if (!candidate) return null;
 
     const res = await env.DB.prepare(
-      "UPDATE item SET status = 'fetching', started_at = ?, error = NULL WHERE id = ? AND status IN ('queued', 'error')",
+      `UPDATE item SET status = 'fetching', started_at = ?, error = NULL
+        WHERE id = ? AND (status = 'queued' OR (status IN (${placeholders}) AND started_at < ?))`,
     )
-      .bind(isoNow(), candidate.id)
+      .bind(isoNow(), candidate.id, ...IN_PROGRESS, cutoff)
       .run();
     if ((res.meta.changes ?? 0) > 0) {
       return { ...candidate, status: "fetching", error: null, started_at: isoNow() };
     }
   }
   return null;
+}
+
+// Enqueue a continuation 'process' message when claimable work remains.
+async function enqueueNextIfWork(env: Env): Promise<void> {
+  const cutoff = staleCutoff();
+  const placeholders = IN_PROGRESS.map(() => "?").join(",");
+  const more = await first<{ id: number }>(
+    env.DB.prepare(
+      `SELECT id FROM item
+        WHERE status = 'queued' OR (status IN (${placeholders}) AND started_at < ?)
+        LIMIT 1`,
+    ).bind(...IN_PROGRESS, cutoff),
+  );
+  if (more) await env.PIPELINE.send({ kind: "process", item_id: more.id });
 }
 
 // Generate a shared, on-demand translation: re-summarize the original
@@ -151,13 +185,16 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
     // Flip every user's saved copy of this content to done (dedup payoff).
     await env.DB.prepare("UPDATE user_item SET personal_status = 'done' WHERE item_id = ?").bind(itemId).run();
   } catch (err) {
+    // Record the failure and stop: leave the item in 'error' (not auto-retried)
+    // and don't rethrow, so the queue message acks cleanly and the self-drain
+    // continuation isn't lost (which previously stranded items in 'fetching').
     const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     await env.DB.prepare(
       "UPDATE item SET status = 'error', error = ?, retry_count = retry_count + 1 WHERE id = ?",
     )
       .bind(msg.slice(0, 4000), itemId)
       .run();
-    throw err; // let the Queue retry per max_retries
+    console.error("pipeline item failed", itemId, msg);
   }
 }
 
