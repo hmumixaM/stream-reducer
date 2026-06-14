@@ -25,7 +25,8 @@ _BV_RE = re.compile(r"BV[0-9A-Za-z]{8,}")
 
 
 def detect_platform(url: str) -> Platform:
-    host = (urlparse(url).hostname or "").lower()
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
     if any(h in host for h in ("youtube.com", "youtu.be", "youtube-nocookie.com")):
         return Platform.youtube
     if "bilibili.com" in host or host == "b23.tv":
@@ -33,7 +34,12 @@ def detect_platform(url: str) -> Platform:
     if "podcasts.apple.com" in host or "podcast.apple.com" in host:
         return Platform.apple_podcast
     if "xiaoyuzhoufm.com" in host:
-        return Platform.xiaoyuzhou
+        # Only episode/podcast *pages* use the scraping adapter. Direct audio
+        # track URLs (e.g. dts-api.xiaoyuzhoufm.com/track/.../media.xyzcdn.net/x.m4a,
+        # common in podcast RSS enclosures) are plain audio — download directly.
+        if "/episode/" in parsed.path or "/podcast/" in parsed.path:
+            return Platform.xiaoyuzhou
+        return Platform.rss
     return Platform.rss
 
 
