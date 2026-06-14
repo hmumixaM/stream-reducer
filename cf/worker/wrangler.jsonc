@@ -114,7 +114,8 @@
     "EMBEDDING_DIM": "1024",
     "SUBSCRIPTION_WINDOW_DAYS": "90",
     "GRAPH_KNN_K": "6",
-    "GRAPH_SIM_THRESHOLD": "0.6"
+    "GRAPH_SIM_THRESHOLD": "0.6",
+    "ADMIN_EMAILS": "huyangmax@gmail.com"
   }
 
   // Secrets (set via `wrangler secret put`):

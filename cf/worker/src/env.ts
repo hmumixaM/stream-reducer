@@ -34,6 +34,9 @@ export interface Env {
   // Bilibili web cookies (Netscape values joined as "name=value; …"), used to
   // clear risk-control on the space/season/series feed APIs. Optional.
   BILIBILI_COOKIE?: string;
+
+  // Comma-separated emails auto-granted admin on sign-in.
+  ADMIN_EMAILS?: string;
 }
 
 // A unit of pipeline work. `kind` selects the action the queue consumer runs.

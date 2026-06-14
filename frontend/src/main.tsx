@@ -27,6 +27,7 @@ const Queue = named(() => import("@/pages/Queue"), "Queue");
 const Subscriptions = named(() => import("@/pages/Subscriptions"), "Subscriptions");
 const Stats = named(() => import("@/pages/Stats"), "Stats");
 const Settings = named(() => import("@/pages/Settings"), "Settings");
+const Admin = named(() => import("@/pages/Admin"), "Admin");
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false, retry: false } },
@@ -51,6 +52,15 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   const me = useMe();
   if (me.isLoading) return <FullScreenSpinner />;
   if (!me.data?.user) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+// Admin-only pages: signed-in non-admins are bounced home.
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+  const me = useMe();
+  if (me.isLoading) return <FullScreenSpinner />;
+  if (!me.data?.user) return <Navigate to="/login" replace />;
+  if (!me.data.user.is_admin) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
@@ -129,7 +139,9 @@ const router = createBrowserRouter([
       { path: "queue", element: <RequireAuth><Queue /></RequireAuth> },
       { path: "subscriptions", element: <RequireAuth><Subscriptions /></RequireAuth> },
       { path: "stats", element: <RequireAuth><Stats /></RequireAuth> },
-      { path: "settings", element: <RequireAuth><Settings /></RequireAuth> },
+      // Admin-only.
+      { path: "settings", element: <RequireAdmin><Settings /></RequireAdmin> },
+      { path: "admin", element: <RequireAdmin><Admin /></RequireAdmin> },
     ],
   },
 ]);

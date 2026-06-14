@@ -21,12 +21,14 @@ export function Queue() {
   const items = queue.data ?? [];
   const active = items.filter((i) => i.status !== "error");
   const failed = items.filter((i) => i.status === "error");
+  const queueTotal = items.find((i) => i.queue_total != null)?.queue_total;
 
   return (
     <div>
       <h1 className="mb-1 text-2xl font-semibold">Queue</h1>
       <p className="mb-6 text-sm text-muted-foreground">
         {active.length} processing · {failed.length} failed
+        {queueTotal ? ` · ${queueTotal} item${queueTotal === 1 ? "" : "s"} pending site-wide` : ""}
       </p>
 
       {items.length === 0 ? (
@@ -52,6 +54,8 @@ function QueueRow({ item, onRetry }: { item: QueueItem; onRetry: () => void }) {
       : item.current_stage
         ? item.current_stage
         : item.status;
+  // Show the position only while still waiting in line (not actively running).
+  const waiting = item.status === "queued" && item.queue_position != null;
 
   return (
     <Card className="flex items-center justify-between gap-4 p-4">
@@ -59,6 +63,11 @@ function QueueRow({ item, onRetry }: { item: QueueItem; onRetry: () => void }) {
         <div className="mb-1 flex items-center gap-2">
           <PlatformBadge platform={item.platform} />
           <StatusBadge status={item.status} />
+          {waiting && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              #{item.queue_position}{item.queue_total ? ` of ${item.queue_total}` : ""} in line
+            </span>
+          )}
         </div>
         <Link to={`/items/${item.id}`} className="block truncate font-medium hover:underline">
           {item.title || item.source_url}

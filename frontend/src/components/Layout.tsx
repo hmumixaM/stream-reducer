@@ -16,6 +16,7 @@ import {
   Sun,
   Menu,
   LogOut,
+  Shield,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/auth";
@@ -33,7 +34,9 @@ const NAV = [
   { to: "/queue", label: "Queue", icon: ListChecks },
   { to: "/subscriptions", label: "Subscriptions", icon: Rss },
   { to: "/stats", label: "Stats", icon: BarChart3 },
-  { to: "/settings", label: "Settings", icon: SettingsIcon },
+  // Admin-only entries (settings exposes provider endpoint/keys).
+  { to: "/admin", label: "Admin", icon: Shield, admin: true },
+  { to: "/settings", label: "Settings", icon: SettingsIcon, admin: true },
 ];
 
 // The public mirror is read-only: browsing, search, and the unified graph are
@@ -111,6 +114,7 @@ export function Layout() {
   
   const me = useMe();
   const authed = !!me.data?.user;
+  const isAdmin = !!me.data?.user?.is_admin;
 
   const queue = useQuery({
     queryKey: ["queue"],
@@ -123,7 +127,7 @@ export function Layout() {
   const navItems = MIRROR
     ? NAV.filter((item) => MIRROR_NAV.has(item.to))
     : authed
-      ? NAV
+      ? NAV.filter((item) => !item.admin || isAdmin)
       : NAV.filter((item) => PUBLIC_NAV.has(item.to));
 
   const logout = async () => {

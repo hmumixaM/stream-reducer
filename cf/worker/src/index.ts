@@ -11,6 +11,7 @@ import { graphRoutes } from "./routes/graph";
 import { statsRoutes } from "./routes/stats";
 import { queueRoutes } from "./routes/queue";
 import { settingsRoutes } from "./routes/settings";
+import { adminRoutes } from "./routes/admin";
 import { handleMessage } from "./pipeline/consumer";
 import { pollDueSubscriptions } from "./pipeline/subscriptions";
 
@@ -32,6 +33,7 @@ app.route("/api/graph", graphRoutes);
 app.route("/api/stats", statsRoutes);
 app.route("/api/queue", queueRoutes);
 app.route("/api/settings", settingsRoutes);
+app.route("/api/admin", adminRoutes);
 
 // Unknown API paths -> JSON 404 (don't fall through to the SPA shell).
 app.all("/api/*", (c) => c.json({ error: "not found" }, 404));

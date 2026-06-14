@@ -75,7 +75,14 @@ authRoutes.post("/verify", async (c) => {
 authRoutes.get("/me", async (c) => {
   const user = await resolveUser(c.env, c);
   if (!user) return c.json({ user: null });
-  return c.json({ user: { id: user.id, email: user.email, created_at: user.created_at } });
+  return c.json({
+    user: {
+      id: user.id,
+      email: user.email,
+      is_admin: !!user.is_admin,
+      created_at: user.created_at,
+    },
+  });
 });
 
 authRoutes.post("/logout", async (c) => {

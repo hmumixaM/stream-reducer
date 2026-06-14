@@ -5,6 +5,7 @@ import type { Env } from "./env";
 export interface UserRow {
   id: number;
   email: string;
+  is_admin: number;
   created_at: string;
 }
 

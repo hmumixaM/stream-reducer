@@ -61,13 +61,32 @@ export interface Item {
 export interface User {
   id: number;
   email: string;
+  is_admin: boolean;
   created_at: string;
+}
+
+export interface AdminUser {
+  id: number;
+  email: string;
+  is_admin: boolean;
+  created_at: string;
+  library_count: number;
+  queued_count: number;
+  subscription_count: number;
+}
+
+export interface AdminQueueItem extends Item {
+  owners: string[];
+  owner_count: number;
+  queue_position: number;
 }
 
 export interface QueueItem extends Item {
   current_stage?: string | null;
   chunk_done: number;
   chunk_count: number;
+  queue_position?: number;
+  queue_total?: number;
 }
 
 export interface StageRun {
@@ -646,6 +665,23 @@ export const api = {
 
   getStats: (refresh?: boolean) =>
     req<Stats>(`/api/stats${refresh ? "?refresh=true" : ""}`),
+  // --- admin ---
+  adminListUsers: () => req<AdminUser[]>("/api/admin/users"),
+  adminSetUserAdmin: (id: number, is_admin: boolean) =>
+    req<{ ok: boolean }>(`/api/admin/users/${id}/admin`, {
+      method: "POST",
+      body: JSON.stringify({ is_admin }),
+    }),
+  adminDeleteUser: (id: number) =>
+    req<{ ok: boolean }>(`/api/admin/users/${id}`, { method: "DELETE" }),
+  adminQueue: () => req<AdminQueueItem[]>("/api/admin/queue"),
+  adminBumpQueue: (id: number) =>
+    req<{ ok: boolean }>(`/api/admin/queue/${id}/bump`, { method: "POST" }),
+  adminRetryQueue: (id: number) =>
+    req<{ ok: boolean }>(`/api/admin/queue/${id}/retry`, { method: "POST" }),
+  adminDeleteQueue: (id: number) =>
+    req<{ ok: boolean }>(`/api/admin/queue/${id}`, { method: "DELETE" }),
+
   getSettings: () => req<AppSettings>("/api/settings"),
   updateSettings: (payload: SettingsUpdate) =>
     req<AppSettings>("/api/settings", {

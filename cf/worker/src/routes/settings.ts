@@ -1,14 +1,13 @@
 import { Hono } from "hono";
 import type { AppContext } from "../auth";
-import { requireAuth } from "../auth";
+import { requireAdmin } from "../auth";
 
-// Minimal settings surface. Model selection is configured via Worker vars /
-// secrets (not editable at runtime in the multi-user deployment), so this is
-// effectively read-only; PUT echoes the effective config back.
+// Settings expose the LLM/STT provider endpoint + key status, so they are
+// admin-only — normal users never see this surface.
 export const settingsRoutes = new Hono<AppContext>();
-settingsRoutes.use("*", requireAuth);
+settingsRoutes.use("*", requireAdmin);
 
-function effective(c: Parameters<typeof requireAuth>[0]) {
+function effective(c: Parameters<typeof requireAdmin>[0]) {
   const env = c.env;
   return {
     llm_base_url: env.LLM_BASE_URL,

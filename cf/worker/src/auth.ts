@@ -73,6 +73,14 @@ export async function verifyMagicLink(env: Env, token: string): Promise<string |
   await env.DB.prepare("INSERT INTO user (email) VALUES (?) ON CONFLICT(email) DO NOTHING")
     .bind(row.email)
     .run();
+  // Auto-grant admin to configured admin emails.
+  const admins = (env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  if (admins.includes(row.email.toLowerCase())) {
+    await env.DB.prepare("UPDATE user SET is_admin = 1 WHERE email = ?").bind(row.email).run();
+  }
   const user = await first<UserRow>(
     env.DB.prepare("SELECT * FROM user WHERE email = ?").bind(row.email),
   );
@@ -124,6 +132,15 @@ export async function clearSession(env: Env, c: Context<AppContext>): Promise<vo
 export async function requireAuth(c: Context<AppContext>, next: Next) {
   const user = await resolveUser(c.env, c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
+  c.set("user", user);
+  await next();
+}
+
+// Middleware: requires an authenticated admin, else 401/403.
+export async function requireAdmin(c: Context<AppContext>, next: Next) {
+  const user = await resolveUser(c.env, c);
+  if (!user) return c.json({ error: "unauthorized" }, 401);
+  if (!user.is_admin) return c.json({ error: "forbidden" }, 403);
   c.set("user", user);
   await next();
 }
