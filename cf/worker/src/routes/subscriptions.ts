@@ -6,30 +6,13 @@ import { toItemRead } from "../lib/serialize";
 import { detectPlatform } from "../lib/url";
 import { isoNow } from "../lib/crypto";
 import { recomputePriority } from "../lib/ingest";
+import { resolveFeedUrl } from "../lib/feed";
 
 export const subscriptionRoutes = new Hono<AppContext>();
 subscriptionRoutes.use("*", requireAuth);
 
 function serialize(s: SubscriptionRow) {
   return { ...s, enabled: !!s.enabled };
-}
-
-function subscriptionFeedUrl(input: string): string {
-  let url: URL;
-  try {
-    url = new URL(input);
-  } catch {
-    return input;
-  }
-
-  const host = url.hostname.toLowerCase();
-  if (host.includes("youtube.com") || host.includes("youtube-nocookie.com")) {
-    const channelMatch = url.pathname.match(/^\/channel\/([^/?#]+)/);
-    if (channelMatch?.[1]) {
-      return `https://www.youtube.com/feeds/videos.xml?channel_id=${channelMatch[1]}`;
-    }
-  }
-  return input;
 }
 
 // Subscribing/unsubscribing changes the subscriber-demand signal for every item
@@ -57,8 +40,10 @@ subscriptionRoutes.post("/", async (c) => {
     interval_minutes?: number;
     window_days?: number;
   };
-  const feed = subscriptionFeedUrl((b.feed_url || "").trim());
-  if (!feed) return c.json({ error: "feed_url required" }, 400);
+  const raw = (b.feed_url || "").trim();
+  if (!raw) return c.json({ error: "feed_url required" }, 400);
+  // Built-in: convert channel pages / @handles into their pollable RSS feed.
+  const feed = await resolveFeedUrl(raw);
 
   const existing = await first<SubscriptionRow>(
     c.env.DB.prepare("SELECT * FROM subscription WHERE user_id = ? AND feed_url = ?").bind(userId, feed),
