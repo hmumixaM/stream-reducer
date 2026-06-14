@@ -7,7 +7,7 @@
 // The season/space APIs require a logged-in cookie to pass risk control
 // (BILIBILI_COOKIE secret); series works without one.
 import type { Env } from "../env";
-import type { FeedEntry } from "./feed";
+import { parseDuration, type FeedEntry } from "./feed";
 
 export interface BiliSource {
   kind: "space" | "season" | "series";
@@ -57,13 +57,14 @@ async function biliGet(env: Env, url: string, referer: string): Promise<Record<s
   return (await res.json()) as Record<string, unknown>;
 }
 
-function videoEntry(bvid: string, title: string, tsSeconds: number | null): FeedEntry {
+function videoEntry(bvid: string, title: string, tsSeconds: number | null, duration?: string | number | null): FeedEntry {
   return {
     title,
     link: `https://www.bilibili.com/video/${bvid}`,
     guid: bvid,
     published: tsSeconds ? new Date(tsSeconds * 1000).toISOString() : null,
     audio: null,
+    duration_s: parseDuration(duration),
   };
 }
 
@@ -73,14 +74,14 @@ export async function fetchBilibiliEntries(env: Env, src: BiliSource): Promise<F
     const url = `https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=${src.mid}&season_id=${src.sid}&sort_reverse=false&page_num=1&page_size=30`;
     const d = await biliGet(env, url, `https://space.bilibili.com/${src.mid}`);
     const archives = (((d.data as Record<string, unknown>)?.archives as Record<string, unknown>[]) ?? []);
-    return archives.map((a) => videoEntry(String(a.bvid), String(a.title ?? ""), Number(a.pubdate) || null));
+    return archives.map((a) => videoEntry(String(a.bvid), String(a.title ?? ""), Number(a.pubdate) || null, a.duration as string | number));
   }
 
   if (src.kind === "series") {
     const url = `https://api.bilibili.com/x/series/archives?mid=${src.mid}&series_id=${src.sid}&only_normal=true&sort=desc&pn=1&ps=30`;
     const d = await biliGet(env, url, `https://space.bilibili.com/${src.mid}`);
     const archives = (((d.data as Record<string, unknown>)?.archives as Record<string, unknown>[]) ?? []);
-    return archives.map((a) => videoEntry(String(a.bvid), String(a.title ?? ""), Number(a.pubdate) || null));
+    return archives.map((a) => videoEntry(String(a.bvid), String(a.title ?? ""), Number(a.pubdate) || null, a.duration as string | number));
   }
 
   // space: the UP主's dynamic feed, filtered to video posts.
@@ -95,7 +96,7 @@ export async function fetchBilibiliEntries(env: Env, src: BiliSource): Promise<F
     const archive = major.archive as Record<string, unknown> | undefined;
     if (!archive?.bvid) continue;
     const author = (modules.module_author as Record<string, unknown>) ?? {};
-    out.push(videoEntry(String(archive.bvid), String(archive.title ?? ""), Number(author.pub_ts) || null));
+    out.push(videoEntry(String(archive.bvid), String(archive.title ?? ""), Number(author.pub_ts) || null, archive.duration_text as string));
   }
   return out;
 }

@@ -9,6 +9,19 @@ export interface FeedEntry {
   guid: string | null;
   published: string | null; // ISO string when parseable
   audio: string | null;
+  duration_s?: number | null; // when the feed exposes it (podcasts, Bilibili)
+}
+
+// Parse a duration that may be a number of seconds or "HH:MM:SS" / "MM:SS".
+export function parseDuration(raw: string | number | null | undefined): number | null {
+  if (raw == null) return null;
+  if (typeof raw === "number") return raw > 0 ? Math.round(raw) : null;
+  const s = raw.trim();
+  if (/^\d+$/.test(s)) return Number(s);
+  if (/^\d{1,2}(:\d{2}){1,2}$/.test(s)) {
+    return s.split(":").reduce((acc, p) => acc * 60 + Number(p), 0);
+  }
+  return null;
 }
 
 export interface ParsedFeed {
@@ -151,6 +164,7 @@ export function parseFeed(xml: string): ParsedFeed {
       guid: tag(block, "guid") || tag(block, "link"),
       published: toIso(tag(block, "pubDate") || tag(block, "dc:date")),
       audio,
+      duration_s: parseDuration(tag(block, "itunes:duration")),
     });
   }
 

@@ -6,6 +6,11 @@ import { detectPlatform } from "../lib/url";
 import { fetchFeed, type FeedEntry } from "../lib/feed";
 
 const MAX_NEW_PER_POLL = 10;
+// Subscriptions skip videos shorter than this (avoids flooding a library with
+// shorts/clips). Manual adds are NOT affected. Override with env.
+const DEFAULT_MIN_DURATION_S = 600;
+const YT_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
 // Pick the best processing URL + platform for a feed entry (prefer a supported
 // video page over a raw audio enclosure for richer metadata / native captions).
@@ -16,6 +21,28 @@ function entryUrl(entry: FeedEntry): { url: string | null; platform: string } {
   }
   if (entry.audio) return { url: entry.audio, platform: "rss" };
   return { url: entry.link, platform: entry.link ? detectPlatform(entry.link) : "rss" };
+}
+
+// YouTube channel feeds carry no duration, so read it from the watch page.
+async function youtubeDuration(link: string | null): Promise<number | null> {
+  const m = link?.match(/[?&]v=([\w-]{6,})/) || link?.match(/youtu\.be\/([\w-]{6,})/);
+  if (!m) return null;
+  try {
+    const html = await (await fetch(`https://www.youtube.com/watch?v=${m[1]}`, {
+      headers: { "user-agent": YT_UA, "accept-language": "en-US,en;q=0.9" },
+    })).text();
+    const dm = html.match(/"lengthSeconds":"(\d+)"/);
+    return dm ? Number(dm[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Best-effort duration (seconds) for a feed entry; null when unknown.
+async function entryDuration(entry: FeedEntry, platform: string): Promise<number | null> {
+  if (entry.duration_s != null) return entry.duration_s;
+  if (platform === "youtube") return youtubeDuration(entry.link);
+  return null;
 }
 
 export async function pollSubscription(env: Env, subId: number): Promise<number> {
@@ -45,7 +72,15 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
     fresh.push(e);
   }
   const minPublished = sub.min_published_at; // window cutoff (last 3 months)
-  const within = fresh.filter((e) => !minPublished || !e.published || e.published >= minPublished);
+  const inWindow = fresh.filter((e) => !minPublished || !e.published || e.published >= minPublished);
+
+  // Skip short videos: subscriptions only pull in items >= the duration floor.
+  // Entries with an unknown duration are kept (we can't tell). Manual adds don't
+  // go through here, so they're unaffected.
+  const minDuration = Number(env.SUBSCRIPTION_MIN_DURATION_S || DEFAULT_MIN_DURATION_S);
+  const durations = await Promise.all(inWindow.map((e) => entryDuration(e, entryUrl(e).platform)));
+  const within = inWindow.filter((_, i) => durations[i] == null || durations[i]! >= minDuration);
+
   // Drain the backfill window from oldest -> newest. When the window is larger
   // than one poll batch, move last_seen_guid only up to the newest item actually
   // processed so later polls continue with the remaining recent entries.

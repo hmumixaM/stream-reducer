@@ -25,6 +25,7 @@ export interface Env {
   STT_MODEL: string;
   EMBEDDING_DIM: string;
   SUBSCRIPTION_WINDOW_DAYS: string;
+  SUBSCRIPTION_MIN_DURATION_S?: string;
   GRAPH_KNN_K: string;
   GRAPH_SIM_THRESHOLD: string;
 
