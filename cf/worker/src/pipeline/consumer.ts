@@ -28,9 +28,23 @@ export async function handleMessage(env: Env, msg: PipelineMessage): Promise<voi
 // so it's safe to reclaim. Errors are NOT auto-reclaimed (need explicit retry).
 const STALE_IN_PROGRESS_MS = 20 * 60 * 1000;
 const IN_PROGRESS = ["fetching", "transcribing", "summarizing"];
+// Stop reclaiming an item that has been orphaned this many times (e.g. content
+// too long to finish within the invocation budget) so it can't loop forever.
+const MAX_RECLAIM = 3;
 
 function staleCutoff(): string {
   return new Date(Date.now() - STALE_IN_PROGRESS_MS).toISOString();
+}
+
+// SQL predicate (and its bind params) for an item that can be claimed: a fresh
+// 'queued' item, or one orphaned in-progress past the cutoff and under the
+// reclaim cap.
+function claimableClause(): string {
+  const ph = IN_PROGRESS.map(() => "?").join(",");
+  return `(status = 'queued' OR (status IN (${ph}) AND started_at < ? AND retry_count < ${MAX_RECLAIM}))`;
+}
+function claimableBinds(cutoff: string): unknown[] {
+  return [...IN_PROGRESS, cutoff];
 }
 
 async function processNextQueuedItem(env: Env): Promise<void> {
@@ -47,24 +61,26 @@ async function processNextQueuedItem(env: Env): Promise<void> {
 // concurrent claims can't grab the same item.
 async function claimNextQueuedItem(env: Env): Promise<ItemRow | null> {
   const cutoff = staleCutoff();
-  const placeholders = IN_PROGRESS.map(() => "?").join(",");
+  const clause = claimableClause();
   for (let attempt = 0; attempt < 5; attempt++) {
     const candidate = await first<ItemRow>(
       env.DB.prepare(
-        `SELECT * FROM item
-          WHERE status = 'queued'
-             OR (status IN (${placeholders}) AND started_at < ?)
-          ORDER BY priority_score DESC, request_count DESC, enqueued_at ASC
+        `SELECT * FROM item WHERE ${clause}
+          ORDER BY (CASE WHEN status = 'queued' THEN 0 ELSE 1 END),
+                   priority_score DESC, request_count DESC, enqueued_at ASC
           LIMIT 1`,
-      ).bind(...IN_PROGRESS, cutoff),
+      ).bind(...claimableBinds(cutoff)),
     );
     if (!candidate) return null;
 
+    // Reclaiming an orphaned in-progress item counts as an attempt (so it can't
+    // loop forever); a fresh queued claim does not.
     const res = await env.DB.prepare(
-      `UPDATE item SET status = 'fetching', started_at = ?, error = NULL
-        WHERE id = ? AND (status = 'queued' OR (status IN (${placeholders}) AND started_at < ?))`,
+      `UPDATE item SET status = 'fetching', started_at = ?, error = NULL,
+         retry_count = retry_count + (CASE WHEN status = 'queued' THEN 0 ELSE 1 END)
+        WHERE id = ? AND ${clause}`,
     )
-      .bind(isoNow(), candidate.id, ...IN_PROGRESS, cutoff)
+      .bind(isoNow(), candidate.id, ...claimableBinds(cutoff))
       .run();
     if ((res.meta.changes ?? 0) > 0) {
       return { ...candidate, status: "fetching", error: null, started_at: isoNow() };
@@ -76,13 +92,8 @@ async function claimNextQueuedItem(env: Env): Promise<ItemRow | null> {
 // Enqueue a continuation 'process' message when claimable work remains.
 async function enqueueNextIfWork(env: Env): Promise<void> {
   const cutoff = staleCutoff();
-  const placeholders = IN_PROGRESS.map(() => "?").join(",");
   const more = await first<{ id: number }>(
-    env.DB.prepare(
-      `SELECT id FROM item
-        WHERE status = 'queued' OR (status IN (${placeholders}) AND started_at < ?)
-        LIMIT 1`,
-    ).bind(...IN_PROGRESS, cutoff),
+    env.DB.prepare(`SELECT id FROM item WHERE ${claimableClause()} LIMIT 1`).bind(...claimableBinds(cutoff)),
   );
   if (more) await env.PIPELINE.send({ kind: "process", item_id: more.id });
 }
