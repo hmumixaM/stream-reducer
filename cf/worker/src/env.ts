@@ -31,6 +31,9 @@ export interface Env {
   // Secrets
   GEMINI_API_KEY: string;
   OPENROUTER_API_KEY: string;
+  // Bilibili web cookies (Netscape values joined as "name=value; …"), used to
+  // clear risk-control on the space/season/series feed APIs. Optional.
+  BILIBILI_COOKIE?: string;
 }
 
 // A unit of pipeline work. `kind` selects the action the queue consumer runs.

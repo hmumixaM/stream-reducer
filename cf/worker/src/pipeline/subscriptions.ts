@@ -3,7 +3,7 @@ import { first, type SubscriptionRow } from "../db";
 import { isoNow } from "../lib/crypto";
 import { addUrlToLibrary } from "../lib/ingest";
 import { detectPlatform } from "../lib/url";
-import { parseFeed, type FeedEntry } from "../lib/feed";
+import { fetchFeed, type FeedEntry } from "../lib/feed";
 
 const MAX_NEW_PER_POLL = 10;
 
@@ -24,15 +24,13 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
   );
   if (!sub || !sub.enabled) return 0;
 
-  let xml = "";
+  let feed: { title: string | null; entries: FeedEntry[] };
   try {
-    const res = await fetch(sub.feed_url, { headers: { "user-agent": "stream-reduce/1.0" } });
-    xml = await res.text();
+    feed = await fetchFeed(env, sub.feed_url);
   } catch {
     await env.DB.prepare("UPDATE subscription SET last_checked_at = ? WHERE id = ?").bind(isoNow(), subId).run();
     return 0;
   }
-  const feed = parseFeed(xml);
   const entries = feed.entries;
   if (!entries.length) {
     await env.DB.prepare("UPDATE subscription SET last_checked_at = ? WHERE id = ?").bind(isoNow(), subId).run();

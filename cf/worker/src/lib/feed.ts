@@ -1,3 +1,6 @@
+import type { Env } from "../env";
+import { parseBilibiliUrl, fetchBilibiliEntries } from "./bilibili";
+
 // Minimal RSS / Atom parser for Workers (no DOM). Handles the common shapes:
 // RSS <item> (link/guid/pubDate/enclosure) and Atom <entry> (link href/id/published).
 export interface FeedEntry {
@@ -54,19 +57,54 @@ export async function resolveFeedUrl(input: string): Promise<string> {
     return input;
   }
   const host = url.hostname.toLowerCase();
-  if (!host.includes("youtube.com") && !host.includes("youtube-nocookie.com")) {
+  // Apple Podcasts show page -> the show's RSS feed (via the iTunes lookup API).
+  if (host.endsWith("podcasts.apple.com") || host.endsWith("itunes.apple.com")) {
+    const idMatch = url.pathname.match(/\/id(\d+)/);
+    if (idMatch) {
+      const feed = await itunesFeedUrl(idMatch[1]);
+      if (feed) return feed;
+    }
     return input;
   }
-  if (url.pathname.startsWith("/feeds/videos.xml")) return input;
 
-  const byChannel = url.pathname.match(/^\/channel\/(UC[0-9A-Za-z_-]{22})/);
-  if (byChannel) return youtubeFeed(byChannel[1]);
+  // Bilibili space / playlist pages are resolved at poll time (no static feed
+  // URL); pass the canonical page URL through.
+  if (host.endsWith("space.bilibili.com")) return input;
 
-  if (/^\/(@[^/?#]+|c\/[^/?#]+|user\/[^/?#]+)/.test(url.pathname)) {
-    const channelId = await fetchYoutubeChannelId(input);
-    if (channelId) return youtubeFeed(channelId);
+  if (host.includes("youtube.com") || host.includes("youtube-nocookie.com")) {
+    if (url.pathname.startsWith("/feeds/videos.xml")) return input;
+
+    const byChannel = url.pathname.match(/^\/channel\/(UC[0-9A-Za-z_-]{22})/);
+    if (byChannel) return youtubeFeed(byChannel[1]);
+
+    if (/^\/(@[^/?#]+|c\/[^/?#]+|user\/[^/?#]+)/.test(url.pathname)) {
+      const channelId = await fetchYoutubeChannelId(input);
+      if (channelId) return youtubeFeed(channelId);
+    }
   }
   return input;
+}
+
+async function itunesFeedUrl(id: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://itunes.apple.com/lookup?id=${id}`);
+    const data = (await res.json()) as { results?: { feedUrl?: string }[] };
+    return data.results?.[0]?.feedUrl ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Fetch + parse a subscription feed. RSS/Atom (YouTube, Apple, generic) is
+// fetched and parsed; Bilibili sources are built from its JSON APIs.
+export async function fetchFeed(env: Env, feedUrl: string): Promise<ParsedFeed> {
+  const bili = parseBilibiliUrl(feedUrl);
+  if (bili) {
+    const entries = await fetchBilibiliEntries(env, bili);
+    return { title: null, entries };
+  }
+  const res = await fetch(feedUrl, { headers: { "user-agent": "stream-reduce/1.0" } });
+  return parseFeed(await res.text());
 }
 
 function youtubeFeed(channelId: string): string {
