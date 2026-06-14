@@ -20,6 +20,25 @@ const app = new Hono<AppContext>();
 
 app.get("/api/health", (c) => c.json({ status: "ok", llm_model: c.env.LLM_MODEL, stt_model: c.env.STT_MODEL }));
 
+// TEMP: diagnose bilibili reachability from the Worker's egress IP.
+app.get("/api/_debug/bili", async (c) => {
+  const hdr: Record<string, string> = {
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    referer: "https://www.bilibili.com",
+  };
+  if (c.env.BILIBILI_COOKIE) hdr["cookie"] = c.env.BILIBILI_COOKIE;
+  const out: Record<string, unknown> = { cookie: c.env.BILIBILI_COOKIE ? "set" : "missing" };
+  try {
+    const s = (await (await fetch("https://api.bilibili.com/x/series/archives?mid=14145636&series_id=4891774&only_normal=true&sort=desc&pn=1&ps=30", { headers: hdr })).json()) as Record<string, any>;
+    out.series = { code: s.code, msg: s.message, n: (s.data?.archives ?? []).length };
+  } catch (e) { out.series = String(e); }
+  try {
+    const d = (await (await fetch("https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?offset=&host_mid=505301413&timezone_offset=-480&features=itemOpusStyle", { headers: hdr })).json()) as Record<string, any>;
+    out.dynamic = { code: d.code, msg: d.message, n: (d.data?.items ?? []).length };
+  } catch (e) { out.dynamic = String(e); }
+  return c.json(out);
+});
+
 app.route("/api/auth", authRoutes);
 // Folders live under /api/items/groups; register before the /:id catch-all.
 app.route("/api/items/groups", folderRoutes);
