@@ -326,14 +326,30 @@ def target_language_directive(code: str) -> str:
 def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang: str | None = None) -> dict:
     segments = transcript.get("segments") or []
     chunks = _chunk_segments(segments, SUMMARY_CHUNK_CHARS)
-    lang = target_language_directive(target_lang) if target_lang else language_directive(transcript.get("text") or "")
+
+    map_system, reduce_system = MAP_SYSTEM, REDUCE_SYSTEM
+    if target_lang:
+        lang = target_language_directive(target_lang)
+        # The system prompts default to "write in the SAME language as the
+        # transcript", which would otherwise win over the per-request language.
+        # Append an explicit override so the model translates to the target.
+        name = "简体中文 (Simplified Chinese)" if target_lang == "zh" else _LANG_NAMES.get(target_lang, target_lang)
+        override = (
+            f" CRITICAL LANGUAGE OVERRIDE: Disregard any earlier instruction to keep the source language. "
+            f"You MUST write ALL prose and text fields in {name}, fully translating from the source "
+            f"(JSON keys stay in English). This language requirement takes absolute priority."
+        )
+        map_system = MAP_SYSTEM + override
+        reduce_system = REDUCE_SYSTEM + override
+    else:
+        lang = language_directive(transcript.get("text") or "")
 
     with Stage("summarize", provider="gemini", model=os.environ.get("GEMINI_MODEL")) as st:
         note_blocks: list[str] = []
         for i, chunk in enumerate(chunks, start=1):
             res = llm.generate_text(
                 MAP_TEMPLATE.format(index=i, total=len(chunks), chunk=chunk, language_instruction=lang),
-                system=MAP_SYSTEM, max_tokens=SUMMARY_MAP_MAX_TOKENS,
+                system=map_system, max_tokens=SUMMARY_MAP_MAX_TOKENS,
             )
             st.request_count += 1
             st.total_tokens += res.total_tokens
@@ -342,7 +358,7 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
 
         reduce_res = llm.generate_text(
             REDUCE_TEMPLATE.format(context=_build_context(item), notes=walkthrough, language_instruction=lang),
-            system=REDUCE_SYSTEM, max_tokens=SUMMARY_REDUCE_MAX_TOKENS,
+            system=reduce_system, max_tokens=SUMMARY_REDUCE_MAX_TOKENS,
         )
         st.request_count += 1
         st.total_tokens += reduce_res.total_tokens
