@@ -34,12 +34,13 @@
           <span>stream-reduce</span>
         </a>
         <nav class="nav-links">
+          <a href="https://reducer.xgoose.org">Live app</a>
           <a href="https://stream-reduce-mirror.pages.dev">Browse library</a>
           <a href="#features">Features</a>
           <a href="#how">How it works</a>
           <a href="#screens">Screenshots</a>
           <a href="#start">Self-host</a>
-          <a class="btn btn-primary" href="https://github.com/hmumixaM/stream-reduce">
+          <a class="btn btn-primary" href="https://github.com/hmumixaM/stream-reducer">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2 0-.4-.5-1.6.2-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17 4.7 18 5 18 5c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5Z"/></svg>
             GitHub
           </a>
@@ -50,7 +51,7 @@
     <!-- HERO -->
     <main id="top">
       <section class="hero wrap">
-        <span class="eyebrow"><span class="dot"></span> Open source · self-hosted · no GPU required</span>
+        <span class="eyebrow"><span class="dot"></span> Open source · hosted or self-hosted · no GPU required</span>
         <h1>Turn videos &amp; podcasts into<br /><span class="grad">source-traceable summaries</span></h1>
         <p class="lead">
           stream-reduce ingests YouTube, Bilibili, Apple Podcasts, 小宇宙 and any RSS feed,
@@ -58,11 +59,12 @@
           moment in the source — all kept in a searchable, folder-organized library.
         </p>
         <div class="cta">
-          <a class="btn btn-primary" href="https://stream-reduce-mirror.pages.dev">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-            Browse the live library
+          <a class="btn btn-primary" href="https://reducer.xgoose.org">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Try the live app — sign up free
           </a>
-          <a class="btn btn-ghost" href="https://github.com/hmumixaM/stream-reduce">View on GitHub →</a>
+          <a class="btn btn-ghost" href="https://stream-reduce-mirror.pages.dev">Browse the public library →</a>
+          <a class="btn btn-ghost" href="https://github.com/hmumixaM/stream-reducer">View on GitHub →</a>
         </div>
         <div class="sources">
           <span><b>YouTube</b></span>
@@ -84,8 +86,8 @@
       <section id="browse" class="wrap">
         <div class="section-head">
           <span class="kicker">Public library</span>
-          <h2>Read the summaries — or request one</h2>
-          <p>A read-only mirror of the library is published for everyone. Browse and search existing summaries, and suggest new videos or podcasts to add.</p>
+          <h2>Read the summaries — or build your own library</h2>
+          <p>A read-only mirror of the library is published for everyone. Browse and search existing summaries, or <a href="https://reducer.xgoose.org">sign up for the live app</a> to add your own content and build a personal knowledge graph.</p>
         </div>
         <div class="features" style="grid-template-columns: repeat(2, 1fr);">
           <div class="feature">
@@ -98,7 +100,7 @@
             <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
             <h3>Request a summary</h3>
             <p>Want something summarized? Open a GitHub issue with the link. The maintainer reviews requests and may add them to the summarization queue — once processed, it appears on the mirror.</p>
-            <a class="btn btn-ghost" href="https://github.com/hmumixaM/stream-reduce/issues/new?template=summarize-request.yml" style="margin-top: 14px;">Request on GitHub →</a>
+            <a class="btn btn-ghost" href="https://github.com/hmumixaM/stream-reducer/issues/new?template=summarize-request.yml" style="margin-top: 14px;">Request on GitHub →</a>
           </div>
         </div>
       </section>
@@ -225,8 +227,8 @@
         </div>
         <div class="start">
           <div class="code"><pre><span class="c"># clone &amp; configure</span>
-git clone https://github.com/hmumixaM/stream-reduce
-cd stream-reduce
+git clone https://github.com/hmumixaM/stream-reducer
+cd stream-reducer
 cp .env.example .env   <span class="c"># add your API keys</span>
 
 <span class="c"># pull the prebuilt image &amp; launch</span>
@@ -241,7 +243,7 @@ docker compose up -d
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><span><b>Your data stays yours.</b> SQLite + retained media live in a local volume.</span></li>
               <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><span><b>Bilibili-ready.</b> Drop a cookies file in <code>./cookies/</code> to unlock gated streams.</span></li>
             </ul>
-            <a class="btn btn-primary" href="https://github.com/hmumixaM/stream-reduce#readme" style="margin-top: 10px;">Read the docs →</a>
+            <a class="btn btn-primary" href="https://github.com/hmumixaM/stream-reducer#readme" style="margin-top: 10px;">Read the docs →</a>
           </div>
         </div>
       </section>
@@ -252,9 +254,10 @@ docker compose up -d
       <div class="wrap foot-inner">
         <a class="brand" href="#top"><img src="./assets/favicon-32.png" alt="" style="width:24px;height:24px;border-radius:6px" /> stream-reduce</a>
         <span class="spacer"></span>
+        <a href="https://reducer.xgoose.org">Live app</a>
         <a href="https://stream-reduce-mirror.pages.dev">Library</a>
-        <a href="https://github.com/hmumixaM/stream-reduce">GitHub</a>
-        <a href="https://github.com/hmumixaM/stream-reduce#readme">Docs</a>
+        <a href="https://github.com/hmumixaM/stream-reducer">GitHub</a>
+        <a href="https://github.com/hmumixaM/stream-reducer#readme">Docs</a>
         <span>Built with FastAPI · React · yt-dlp · Whisper · Gemini</span>
       </div>
     </footer>
