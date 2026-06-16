@@ -168,20 +168,24 @@ adminRoutes.post("/backfill-headlines", async (c) => {
 
 // Backfill on-demand infographics for summarized items that don't have one yet.
 // Paid (~$0.13/image), so it's admin-only and supports a dry run + a batch cap:
-//   ?dry_run=true  -> report how many would be enqueued, spend nothing
-//   ?limit=N       -> only enqueue the N most recent (test batch before going wide)
+//   ?dry_run=true     -> report how many would be enqueued, spend nothing
+//   ?limit=N          -> only enqueue the first N (test batch before going wide)
+//   ?order=views      -> prioritize by view count desc (default: newest item first)
 adminRoutes.post("/backfill-infographics", async (c) => {
   const dryRun = c.req.query("dry_run") === "true";
   const limitParam = Number(c.req.query("limit"));
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.floor(limitParam) : null;
+  // SQLite sorts NULL as smallest, so DESC naturally puts un-counted items last.
+  const orderBy = c.req.query("order") === "views" ? "i.view_count DESC" : "s.item_id DESC";
 
   const rows = await all<{ item_id: number }>(
     c.env.DB.prepare(
       `SELECT s.item_id
          FROM summary s
+         JOIN item i ON i.id = s.item_id
          LEFT JOIN item_infographic ig ON ig.item_id = s.item_id
         WHERE ig.item_id IS NULL OR ig.status = 'error'
-        ORDER BY s.item_id DESC
+        ORDER BY ${orderBy}
         ${limit ? "LIMIT ?" : ""}`,
     ).bind(...(limit ? [limit] : [])),
   );
