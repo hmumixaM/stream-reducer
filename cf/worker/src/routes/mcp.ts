@@ -41,6 +41,81 @@ function text(payload: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
 }
 
+interface SearchArgs {
+  query: string;
+  k: number;
+  source?: string;
+  item_id?: number;
+}
+
+// Semantic search over chunk embeddings. When `libraryUserId` is set, results
+// are restricted to that user's saved items; otherwise the whole catalog is
+// searched. Over-fetches from Vectorize so post-filtering (library / source /
+// item) still returns up to `k` hits.
+async function runSearch(
+  env: Env,
+  { query, k, source, item_id }: SearchArgs,
+  libraryUserId: number | null,
+) {
+  if (!query.trim()) return text([]);
+  const safeK = Math.min(Math.max(k, 1), 50);
+
+  const [qvec] = await embedTexts(env, [query]);
+  if (!qvec) return text([]);
+
+  const matches = await env.VECTORIZE.query(qvec, { topK: safeK * 4, returnMetadata: "all" });
+
+  let savedIds: Set<number> | null = null;
+  if (libraryUserId != null) {
+    const saved = await all<{ item_id: number }>(
+      env.DB.prepare("SELECT item_id FROM user_item WHERE user_id = ?").bind(libraryUserId),
+    );
+    savedIds = new Set(saved.map((r) => r.item_id));
+  }
+
+  const hits: Record<string, unknown>[] = [];
+  for (const m of matches.matches) {
+    const meta = (m.metadata || {}) as Record<string, unknown>;
+    const itemId = Number(meta.item_id);
+    if (savedIds && !savedIds.has(itemId)) continue;
+    if (item_id && itemId !== item_id) continue;
+    if (source && meta.source !== source) continue;
+
+    const row = await first<{
+      chunk_id: number;
+      item_id: number;
+      source: string;
+      field: string;
+      text: string;
+      start_s: number | null;
+      end_s: number | null;
+      title: string | null;
+      source_url: string;
+      platform: string;
+      author: string | null;
+    }>(
+      env.DB.prepare(
+        `SELECT ch.id AS chunk_id, ch.item_id, ch.source, ch.field, ch.text,
+                ch.start_s, ch.end_s, i.title, i.source_url, i.platform, i.author
+           FROM chunk ch JOIN item i ON i.id = ch.item_id
+          WHERE ch.id = ?`,
+      ).bind(Number(m.id)),
+    );
+    if (!row) continue;
+
+    hits.push({ ...row, score: m.score, deep_link: deepLink(row) });
+    if (hits.length >= safeK) break;
+  }
+  return text(hits);
+}
+
+const SEARCH_INPUT_SCHEMA = {
+  query: z.string().min(1),
+  k: z.number().int().default(10),
+  source: z.string().optional(),
+  item_id: z.number().int().optional(),
+} as const;
+
 // Build the per-request MCP server. A fresh instance per request is required
 // for stateless MCP on Workers (shared instances can leak one client's response
 // to another), and it lets the tools close over the authenticated `userId`.
@@ -119,68 +194,30 @@ function buildServer(env: Env, userId: number): McpServer {
     "search_content",
     {
       description:
-        "Semantic search across the transcripts + summaries of items in your library. " +
+        "Semantic search across the transcripts + summaries of items in YOUR library only. " +
         "Returns the most relevant chunks (not whole items), each with the chunk `text`, " +
         "its `item_id`/`title`/`source_url`, a `source` (transcript/summary) + `field` tag, " +
         "a similarity `score`, and — for transcript hits — `start_s` plus a `deep_link` that " +
         "jumps to that moment. Optional filters: `source` (\"transcript\"/\"summary\") and " +
-        "`item_id` (restrict to one item).",
-      inputSchema: {
-        query: z.string().min(1),
-        k: z.number().int().default(10),
-        source: z.string().optional(),
-        item_id: z.number().int().optional(),
-      },
+        "`item_id` (restrict to one item). Use `search_all_content` to search every item in " +
+        "the catalog, not just your library.",
+      inputSchema: SEARCH_INPUT_SCHEMA,
     },
-    async ({ query, k, source, item_id }) => {
-      if (!query.trim()) return text([]);
-      const safeK = Math.min(Math.max(k, 1), 50);
+    async (args) => runSearch(env, args, userId),
+  );
 
-      const [qvec] = await embedTexts(env, [query]);
-      if (!qvec) return text([]);
-
-      const matches = await env.VECTORIZE.query(qvec, { topK: safeK * 4, returnMetadata: "all" });
-
-      const saved = await all<{ item_id: number }>(
-        env.DB.prepare("SELECT item_id FROM user_item WHERE user_id = ?").bind(userId),
-      );
-      const savedIds = new Set(saved.map((r) => r.item_id));
-
-      const hits: Record<string, unknown>[] = [];
-      for (const m of matches.matches) {
-        const meta = (m.metadata || {}) as Record<string, unknown>;
-        const itemId = Number(meta.item_id);
-        if (!savedIds.has(itemId)) continue;
-        if (item_id && itemId !== item_id) continue;
-        if (source && meta.source !== source) continue;
-
-        const row = await first<{
-          chunk_id: number;
-          item_id: number;
-          source: string;
-          field: string;
-          text: string;
-          start_s: number | null;
-          end_s: number | null;
-          title: string | null;
-          source_url: string;
-          platform: string;
-          author: string | null;
-        }>(
-          env.DB.prepare(
-            `SELECT ch.id AS chunk_id, ch.item_id, ch.source, ch.field, ch.text,
-                    ch.start_s, ch.end_s, i.title, i.source_url, i.platform, i.author
-               FROM chunk ch JOIN item i ON i.id = ch.item_id
-              WHERE ch.id = ?`,
-          ).bind(Number(m.id)),
-        );
-        if (!row) continue;
-
-        hits.push({ ...row, score: m.score, deep_link: deepLink(row) });
-        if (hits.length >= safeK) break;
-      }
-      return text(hits);
+  server.registerTool(
+    "search_all_content",
+    {
+      description:
+        "Semantic search across the transcripts + summaries of EVERY item in the whole " +
+        "stream-reduce catalog (shared across all users), not just your own library. " +
+        "Same result shape and filters as `search_content`: returns matching chunks with " +
+        "`text`, `item_id`/`title`/`source_url`, `source`/`field`, `score`, and a `deep_link` " +
+        "for transcript hits. Optional filters: `source` and `item_id`.",
+      inputSchema: SEARCH_INPUT_SCHEMA,
     },
+    async (args) => runSearch(env, args, null),
   );
 
   server.registerTool(
