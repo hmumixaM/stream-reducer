@@ -166,6 +166,38 @@ adminRoutes.post("/backfill-headlines", async (c) => {
   return c.json({ affected: itemIds.length, enqueued: dryRun ? 0 : itemIds.length });
 });
 
+// Backfill on-demand infographics for summarized items that don't have one yet.
+// Paid (~$0.13/image), so it's admin-only and supports a dry run + a batch cap:
+//   ?dry_run=true  -> report how many would be enqueued, spend nothing
+//   ?limit=N       -> only enqueue the N most recent (test batch before going wide)
+adminRoutes.post("/backfill-infographics", async (c) => {
+  const dryRun = c.req.query("dry_run") === "true";
+  const limitParam = Number(c.req.query("limit"));
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.floor(limitParam) : null;
+
+  const rows = await all<{ item_id: number }>(
+    c.env.DB.prepare(
+      `SELECT s.item_id
+         FROM summary s
+         LEFT JOIN item_infographic ig ON ig.item_id = s.item_id
+        WHERE ig.item_id IS NULL OR ig.status = 'error'
+        ORDER BY s.item_id DESC
+        ${limit ? "LIMIT ?" : ""}`,
+    ).bind(...(limit ? [limit] : [])),
+  );
+  const itemIds = rows.map((r) => r.item_id);
+  if (!dryRun) {
+    for (const id of itemIds) {
+      await c.env.DB.prepare(
+        `INSERT INTO item_infographic (item_id, status) VALUES (?, 'queued')
+         ON CONFLICT(item_id) DO UPDATE SET status='queued', error=NULL, updated_at=excluded.updated_at`,
+      ).bind(id).run();
+      await c.env.PIPELINE.send({ kind: "infographic", item_id: id });
+    }
+  }
+  return c.json({ candidates: itemIds.length, enqueued: dryRun ? 0 : itemIds.length });
+});
+
 // Remove an item from the global catalog entirely (drops it for all users).
 adminRoutes.delete("/queue/:id", async (c) => {
   const id = Number(c.req.param("id"));

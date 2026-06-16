@@ -68,7 +68,9 @@ jobs:
             GEMINI_API_KEY
             OPENROUTER_API_KEY
             GEMINI_IMAGE_API_KEY
+            ADMIN_TOKEN
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_IMAGE_API_KEY: ${{ secrets.GEMINI_IMAGE_API_KEY }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
