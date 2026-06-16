@@ -29,6 +29,7 @@ import { useMe } from "@/lib/auth";
 import { Button, Card, Select, Spinner } from "@/components/ui";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { RelatedArticles } from "@/components/RelatedArticles";
+import { Mindmap } from "@/components/Mindmap";
 import { HighlightableMarkdown, HighlightLayer, hlClass } from "@/components/Highlightable";
 import {
   formatBytes,
@@ -51,6 +52,7 @@ export function ItemDetail() {
   // need a session; anonymous visitors get a read-only view.
   const canEdit = !MIRROR && !!me.data?.user;
   const [showTranscript, setShowTranscript] = useState(false);
+  const [showMindmap, setShowMindmap] = useState(false);
   const [showComments, setShowComments] = useState(false);
   
   const [readMode, setReadMode] = useState(() => {
@@ -270,6 +272,25 @@ export function ItemDetail() {
                 <>
                   <Spinner /> Processing… the summary will appear here.
                 </>
+              )}
+            </Card>
+          )}
+
+          {d.summary?.structured?.mindmap && (
+            <Card className={cn("mt-4 p-4", readMode && "border-dashed bg-transparent shadow-none")}>
+              <button
+                onClick={() => setShowMindmap((s) => !s)}
+                className="flex w-full items-center justify-between text-sm font-medium"
+              >
+                <span>Mindmap</span>
+                <ChevronDown
+                  className={`h-4 w-4 transition-transform ${showMindmap ? "rotate-180" : ""}`}
+                />
+              </button>
+              {showMindmap && (
+                <div className="mt-4 border-t border-border pt-4">
+                  <Mindmap chart={d.summary.structured.mindmap as string} />
+                </div>
               )}
             </Card>
           )}
