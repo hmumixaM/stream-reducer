@@ -33,6 +33,10 @@ def _gemini_model() -> str:
     return os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 
 
+def _mindmap_model() -> str:
+    return os.environ.get("GEMINI_MODEL_MINDMAP", _gemini_model())
+
+
 def generate_text(
     prompt: str,
     *,

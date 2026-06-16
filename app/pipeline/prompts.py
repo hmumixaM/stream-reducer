@@ -339,8 +339,8 @@ Syntax Rules for `flowchart` (Hierarchical / Tree / Fishbone / Flow Maps):
 - First line MUST be exactly `flowchart LR` (preferred for layout) or `flowchart TD`.
 - Use format: `A[Node A] --> B[Node B]`
 - You can add edge labels: `A -->|Label| B`
-- Group into subgraphs if helpful: `subgraph Name ... end`
 - Use brackets to make nodes explicitly rectangular: `id[Text inside node]`
+- If you group nodes, use a single-word id and CLOSE the block with `end` (never `</subgraph>`): `subgraph s1[Group Label]` ... `end`
 
 Syntax Rules for `timeline` (Chronological sequences):
 - First line MUST be exactly `timeline`

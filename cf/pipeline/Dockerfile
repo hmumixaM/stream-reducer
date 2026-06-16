@@ -11,6 +11,9 @@ RUN apt-get update \
 
 WORKDIR /srv
 
+# Rotate worker to get new IP / latest yt-dlp
+ENV ROTATE_WORKER=1
+
 COPY cf/pipeline/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 

@@ -36,6 +36,30 @@ interface MindmapProps {
   chart: string;
 }
 
+// LLMs frequently emit small Mermaid syntax mistakes. Repair the most common
+// ones client-side so a single bad token doesn't blank the whole diagram.
+function sanitizeChart(raw: string): string {
+  let text = raw.trim();
+
+  // Strip markdown code fences if any slipped through.
+  text = text.replace(/^```(?:mermaid)?\s*/i, "").replace(/```\s*$/i, "").trim();
+
+  // Drop conversational preamble before the diagram keyword.
+  const startMatch = text.match(/\b(mindmap|timeline|flowchart|graph)\b/i);
+  if (startMatch && startMatch.index! > 0) {
+    text = text.slice(startMatch.index!);
+  }
+
+  // Cut any trailing prose the model appended after the diagram (e.g.
+  // "By the way, ..." postscripts that Gemini sometimes adds).
+  text = text.replace(/\n\s*By the way[\s\S]*$/i, "").trim();
+
+  // `</subgraph>` / `</subgraph` is invalid — Mermaid closes blocks with `end`.
+  text = text.replace(/<\/subgraph>?/gi, "end");
+
+  return text.trim();
+}
+
 export function Mindmap({ chart }: MindmapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +79,7 @@ export function Mindmap({ chart }: MindmapProps) {
         
         // Generate a unique ID for this render to avoid conflicts
         const id = `mindmap-${Math.random().toString(36).substr(2, 9)}`;
-        const { svg } = await mermaid.render(id, chart);
+        const { svg } = await mermaid.render(id, sanitizeChart(chart));
         
         if (isMounted && containerRef.current) {
           containerRef.current.innerHTML = svg;

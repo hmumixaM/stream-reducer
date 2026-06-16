@@ -172,6 +172,19 @@ itemsRoutes.post("/library", requireAuth, async (c) => {
 
 // Item detail: global content + this user's comments/highlights + user_item.
 // Public: anonymous visitors get the global content with empty personal state.
+itemsRoutes.get("/trigger-mindmap-backfill-temp", async (c) => {
+  const rows = await c.env.DB.prepare(
+    `SELECT item_id, COALESCE(json_extract(structured, '$.mindmap'), '') AS mm FROM summary`
+  ).all<{ item_id: number; mm: string }>();
+  const itemIds = rows.results
+    .filter((r) => !r.mm || r.mm.includes("</subgraph") || /by the way/i.test(r.mm))
+    .map((r) => r.item_id);
+  for (const id of itemIds) {
+    await c.env.PIPELINE.send({ kind: "mindmap_backfill", item_id: id });
+  }
+  return c.json({ enqueued: itemIds.length, itemIds });
+});
+
 itemsRoutes.get("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const user = await resolveUser(c.env, c);

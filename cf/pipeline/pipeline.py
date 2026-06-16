@@ -566,6 +566,11 @@ def generate_mindmap(
         st.total_tokens += res.total_tokens
 
         text = _strip_fences(res.text).strip()
+        # Ensure no conversational preamble/postscript is included
+        text = re.sub(r"(?i)^(here is|sure|okay|below is|by the way|i have|i've).*?\n", "", text, flags=re.DOTALL)
+        text = re.sub(r"(?i)\n+by the way,.*", "", text, flags=re.DOTALL)
+        text = text.strip()
+        
         if text.startswith(("mindmap", "timeline", "flowchart", "graph")):
             stages.append(st)
             return text
