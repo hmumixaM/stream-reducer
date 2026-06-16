@@ -297,59 +297,58 @@ DANMAKU_TEMPLATE = """以下是观众在视频时间轴上发布的弹幕列表�
 - 用与弹幕相同的语言书写所有文本字段。
 """
 
-MINDMAP_SYSTEM = (
-    "You are an expert at creating structured visual summaries. You are given page "
-    "metadata and a detailed set of source notes. Your task is to extract the core "
-    "logic and represent it strictly as a Mermaid diagram.\n\n"
-    "First, analyze the logical structure of the content. There are three main categories of structures:\n"
-    "1. Classic & Expansion (e.g., Spider map, Circle map, Bubble map, Double bubble map). "
-    "Best for creativity, definitions, feature descriptions, and brainstorming.\n"
-    "2. Logical & Hierarchical (e.g., Tree map, Brace map, Fishbone/Cause-and-effect map, Matrix map, Bridge map). "
-    "Best for classifications, comparisons, systemic analysis, and problem attribution.\n"
-    "3. Process & Timeline (e.g., Flow map, Multi-flow map, Timeline, Org chart). "
-    "Best for executions, evolutions, project tracking, and algorithmic steps.\n\n"
-    "Based on the content's core nature, choose the single most appropriate structural category, "
-    "and then translate it into the closest supported Mermaid diagram type:\n"
-    "- Use `mindmap` for Classic & Expansion structures.\n"
-    "- Use `flowchart LR` or `flowchart TD` for Logical, Hierarchical, and Process structures (Tree, Fishbone, Flow, Multi-flow). `flowchart LR` (Left-to-Right) is usually best for readability.\n"
-    "- Use `timeline` for pure Timeline/Chronological structures.\n\n"
-    "Respond with ONLY the raw Mermaid text. Do NOT use markdown code blocks or backticks. "
-    "Do NOT add any explanations."
+# --- Infographic poster (image model) -------------------------------------
+# Rendered by an image-generation model (Gemini 3 Pro Image) on demand. The
+# system prompt fixes the visual style; the template carries the article's
+# structured content. Text is rendered in the SAME language as the content.
+INFOGRAPHIC_SYSTEM = (
+    "You are a senior editorial information designer. You produce a single, "
+    "polished INFOGRAPHIC POSTER image that visually summarizes an article.\n\n"
+    "Visual style (follow strictly):\n"
+    "- Flat, modern, professional business/editorial aesthetic (think a McKinsey or "
+    "Bloomberg explainer card).\n"
+    "- Clean colour scheme: deep navy (#1b3a6b) and royal blue (#2f6fed) accents on "
+    "white rounded cards over a very light gray grid background; thin connector lines; "
+    "subtle, minimal iconography.\n"
+    "- Clear visual hierarchy: a bold title + thin subtitle at the top, then 3-5 "
+    "well-separated sections laid out in cards (hero stat/number box, supporting "
+    "points, a risk/insight row, and a quotes band).\n"
+    "- Use large numbers, short labels, simple icons and arrows to make it skimmable. "
+    "Keep body text short (phrases, not paragraphs).\n"
+    "- Every piece of text MUST be crisp and legible and spelled correctly.\n\n"
+    "CRITICAL: Render ALL text in the SAME language as the article content provided. "
+    "Do not translate. Output ONLY the image."
 )
 
-MINDMAP_TEMPLATE = """## Page background
+INFOGRAPHIC_TEMPLATE = """Create an infographic poster that summarizes the following article.
+
+## Article metadata
 {context}
 
-## Source notes
-{source}
+## Headline
+{headline}
+
+## Subhead
+{subhead}
+
+## One-paragraph summary (TL;DR)
+{tldr}
+
+## Key points (use the strongest 4-8 as stat blocks / bullets)
+{key_points}
+
+## Notable quotes (render 1-2 as a quote band)
+{quotes}
+
+## Key entities / who & what
+{entities}
 
 ---
-Analyze the logical structure of the content above and create the most appropriate Mermaid diagram to visualize it.
-
-Step 1: Choose the visual framework (Expansion, Hierarchical, or Process) that best captures the essence of the content.
-
-Step 2: Generate the Mermaid code.
-
-Syntax Rules for `mindmap` (Expansion / Bubble Maps):
-- First line MUST be exactly `mindmap`
-- Use spaces (indentation) to define hierarchy.
-- Root node -> 3-8 main branches -> 2-5 sub-nodes.
-
-Syntax Rules for `flowchart` (Hierarchical / Tree / Fishbone / Flow Maps):
-- First line MUST be exactly `flowchart LR` (preferred for layout) or `flowchart TD`.
-- Use format: `A[Node A] --> B[Node B]`
-- You can add edge labels: `A -->|Label| B`
-- Use brackets to make nodes explicitly rectangular: `id[Text inside node]`
-- If you group nodes, use a single-word id and CLOSE the block with `end` (never `</subgraph>`): `subgraph s1[Group Label]` ... `end`
-
-Syntax Rules for `timeline` (Chronological sequences):
-- First line MUST be exactly `timeline`
-- Use format: `[Time period or Step] : [Event 1] : [Event 2]`
-
-General Rules:
-- Keep the text in each node EXTREMELY CONCISE (1-10 words).
-- Extract the most insightful, defining characteristics or the core logical flow.
-- Avoid special characters that break Mermaid (do NOT use parentheses `()`, brackets `[]`, braces `{{}}`, semicolons `;`, or quotes `"`). Use full-width equivalents like `（` or `”` if absolutely necessary.
-- Respond with the raw Mermaid text only. No markdown formatting.
-- LANGUAGE: {language_instruction}
+Design a balanced, single poster image:
+- Top: a short category pill, the headline (large, bold) and the subhead (one line).
+- A hero section highlighting the single most striking number/fact as a big stat.
+- 1-2 cards breaking down the main points or mechanism (short labels + icons).
+- A row of 1-3 insights or a risk/takeaway callout.
+- A bottom band with 1-2 of the notable quotes.
+LANGUAGE: render ALL text in {language_instruction}
 """

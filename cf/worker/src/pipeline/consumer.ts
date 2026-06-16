@@ -16,8 +16,8 @@ export async function handleMessage(env: Env, msg: PipelineMessage): Promise<voi
       return backfillStructuredItem(env, msg.item_id, "structured_backfill");
     case "headline_backfill":
       return backfillStructuredItem(env, msg.item_id, "headline_backfill");
-    case "mindmap_backfill":
-      return backfillStructuredItem(env, msg.item_id, "mindmap_backfill");
+    case "infographic":
+      return generateInfographic(env, msg.item_id);
     case "translate":
       return translateItem(env, msg.item_id, msg.lang);
     case "poll":
@@ -162,6 +162,76 @@ async function translateItem(env: Env, itemId: number, lang: string): Promise<vo
         itemId,
         lang,
       )
+      .run();
+  } catch (err) {
+    await fail(err instanceof Error ? `${err.name}: ${err.message}` : String(err));
+    throw err;
+  }
+}
+
+// Generate a shared, on-demand infographic poster: render the existing
+// structured summary into an image with the image model and store it in R2.
+// Result row (item_infographic) is keyed by item and shown to every user.
+async function generateInfographic(env: Env, itemId: number): Promise<void> {
+  const fail = async (msg: string) => {
+    await env.DB.prepare(
+      "UPDATE item_infographic SET status = 'error', error = ?, updated_at = ? WHERE item_id = ?",
+    ).bind(msg.slice(0, 2000), isoNow(), itemId).run();
+  };
+
+  const item = await first<ItemRow>(env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(itemId));
+  const summary = await first<{ structured: string }>(
+    env.DB.prepare("SELECT structured FROM summary WHERE item_id = ?").bind(itemId),
+  );
+  if (!item || !summary) return fail("item has no summary to render");
+
+  await env.DB.prepare(
+    "UPDATE item_infographic SET status = 'processing', error = NULL, updated_at = ? WHERE item_id = ?",
+  ).bind(isoNow(), itemId).run();
+
+  try {
+    const structured = JSON.parse(summary.structured || "{}") as Record<string, unknown>;
+    const result = await runPipeline(env, {
+      item_id: itemId,
+      source_url: item.source_url,
+      platform: item.platform,
+      mode: "infographic",
+      summary: structured,
+      item: {
+        title: item.title,
+        author: item.author,
+        description: item.description,
+        duration_s: item.duration_s,
+        published_at: item.published_at,
+        view_count: item.view_count,
+        like_count: item.like_count,
+      },
+    });
+    if (result.error || !result.infographic) throw new Error(result.error || "no infographic produced");
+
+    const ig = result.infographic;
+    const ext = ig.mime_type.includes("jpeg") || ig.mime_type.includes("jpg") ? "jpg" : "png";
+    const key = `infographic/${itemId}.${ext}`;
+    const bytes = Uint8Array.from(atob(ig.image_b64), (ch) => ch.charCodeAt(0));
+    await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: ig.mime_type } });
+
+    await env.DB.prepare(
+      `UPDATE item_infographic SET status = 'done', model = ?, image_key = ?, mime_type = ?,
+         total_tokens = ?, cost_usd = ?, error = NULL, updated_at = ? WHERE item_id = ?`,
+    )
+      .bind(ig.model, key, ig.mime_type, ig.total_tokens, ig.cost_usd, isoNow(), itemId)
+      .run();
+
+    // Roll the image stage's cost/tokens into the item totals (same as backfills).
+    const totals = await persistStageRuns(env, itemId, result.stages);
+    await env.DB.prepare(
+      `UPDATE item SET total_processing_ms = total_processing_ms + ?,
+         total_api_requests = total_api_requests + ?,
+         total_tokens = total_tokens + ?,
+         total_cost_usd = total_cost_usd + ?
+       WHERE id = ?`,
+    )
+      .bind(totals.totalMs, totals.totalReq, totals.totalTok, totals.totalCost, itemId)
       .run();
   } catch (err) {
     await fail(err instanceof Error ? `${err.name}: ${err.message}` : String(err));

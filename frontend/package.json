@@ -14,7 +14,6 @@
     "clsx": "^2.1.1",
     "firebase": "^12.14.0",
     "lucide-react": "^0.456.0",
-    "mermaid": "^11.15.0",
     "minisearch": "^7.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

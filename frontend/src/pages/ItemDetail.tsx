@@ -15,7 +15,8 @@ import {
   BookOpen,
   Highlighter,
   Languages,
-  Network,
+  Sparkles,
+  Image as ImageIcon,
 } from "lucide-react";
 import {
   api,
@@ -24,13 +25,13 @@ import {
   type Comment,
   type Highlight,
   type NewHighlight,
+  type Infographic,
 } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
 import { useMe } from "@/lib/auth";
 import { Button, Card, Select, Spinner } from "@/components/ui";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { RelatedArticles } from "@/components/RelatedArticles";
-import { Mindmap } from "@/components/Mindmap";
 import { HighlightableMarkdown, HighlightLayer, hlClass } from "@/components/Highlightable";
 import {
   formatBytes,
@@ -251,25 +252,13 @@ export function ItemDetail() {
 
       <div className={readMode ? "block" : "grid grid-cols-1 gap-6 lg:grid-cols-3"}>
         <div className={readMode ? "" : "lg:col-span-2"}>
-          {typeof d.summary?.structured?.mindmap === "string" && d.summary.structured.mindmap && (
-            <div className={cn("mb-6 relative group rounded-2xl overflow-hidden transition-all duration-700 hover:shadow-[0_0_40px_rgba(59,130,246,0.15)]", readMode ? "border-dashed bg-transparent shadow-none" : "")}>
-              {!readMode && (
-                <>
-                  <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 via-purple-500/10 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-700 blur-xl"></div>
-                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/30 via-transparent to-pink-500/20"></div>
-                </>
-              )}
-              <div className={cn("relative w-full overflow-hidden flex flex-col bg-slate-950/80 backdrop-blur-xl border", readMode ? "border-dashed border-border" : "border-white/10 rounded-2xl")}>
-                <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between z-10 bg-gradient-to-r from-blue-500/10 to-transparent">
-                  <h3 className="text-sm font-semibold flex items-center gap-2 text-blue-100 tracking-wide">
-                    <Network className="h-4 w-4 text-blue-400" /> Visual Summary
-                  </h3>
-                </div>
-                <div className="p-4 sm:p-6 lg:p-8 z-10 w-full overflow-x-auto min-h-[200px] flex items-center justify-center">
-                  <Mindmap chart={d.summary.structured.mindmap as string} />
-                </div>
-              </div>
-            </div>
+          {d.summary && (
+            <InfographicView
+              itemId={itemId}
+              initial={d.infographic ?? null}
+              authed={!!me.data?.user}
+              readMode={readMode}
+            />
           )}
 
           {d.summary ? (
@@ -540,6 +529,129 @@ function SummaryView({
         </div>
       )}
     </Card>
+  );
+}
+
+// On-demand infographic poster: instead of auto-generating a visual for every
+// item, a signed-in user clicks "Generate" to render a paid image-model poster,
+// which is then cached + shared with everyone.
+function InfographicView({
+  itemId,
+  initial,
+  authed,
+  readMode,
+}: {
+  itemId: number;
+  initial: Infographic | null;
+  authed: boolean;
+  readMode: boolean;
+}) {
+  const qc = useQueryClient();
+  // Only poll once a row exists (initial detail payload, or after a request).
+  const [started, setStarted] = useState(!!initial);
+
+  const ig = useQuery({
+    queryKey: ["infographic", itemId],
+    queryFn: () => api.getInfographic(itemId),
+    initialData: initial ?? undefined,
+    enabled: started,
+    retry: false,
+    refetchInterval: (q) => {
+      const s = q.state.data?.status;
+      return s === "queued" || s === "processing" ? 3000 : false;
+    },
+  });
+
+  const request = useMutation({
+    mutationFn: () => api.requestInfographic(itemId),
+    onSuccess: (data) => {
+      qc.setQueryData(["infographic", itemId], data);
+      setStarted(true);
+      qc.invalidateQueries({ queryKey: ["item", itemId] });
+    },
+  });
+
+  const data = ig.data ?? initial ?? null;
+  const status = data?.status;
+  const pending = request.isPending || status === "queued" || status === "processing";
+
+  const Header = (
+    <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between z-10 bg-gradient-to-r from-blue-500/10 to-transparent">
+      <h3 className="text-sm font-semibold flex items-center gap-2 text-blue-100 tracking-wide">
+        <ImageIcon className="h-4 w-4 text-blue-400" /> Infographic
+      </h3>
+      {status === "done" && authed && (
+        <button
+          onClick={() => request.mutate()}
+          disabled={pending}
+          className="text-xs text-blue-300/70 hover:text-blue-200 flex items-center gap-1 disabled:opacity-50"
+        >
+          <RefreshCw className="h-3 w-3" /> Regenerate
+        </button>
+      )}
+    </div>
+  );
+
+  // Nothing rendered yet: invite a generation (or prompt sign-in).
+  const Body = () => {
+    if (status === "done" && data?.image_url) {
+      return (
+        <img
+          src={data.image_url}
+          alt="Generated infographic summary"
+          className="w-full h-auto rounded-lg shadow-lg"
+          loading="lazy"
+        />
+      );
+    }
+    if (pending) {
+      return (
+        <div className="flex flex-col items-center gap-3 py-10 text-sm text-muted-foreground">
+          <Spinner />
+          Rendering infographic… generated once and shared with everyone. This can take ~30s.
+        </div>
+      );
+    }
+    if (status === "error") {
+      return (
+        <div className="flex flex-col items-center gap-3 py-8 text-sm text-red-400">
+          <p>Infographic generation failed.{data?.error ? ` ${data.error}` : ""}</p>
+          {authed && (
+            <Button size="sm" variant="outline" onClick={() => request.mutate()} disabled={pending}>
+              <RefreshCw className="h-4 w-4" /> Retry
+            </Button>
+          )}
+        </div>
+      );
+    }
+    // No infographic yet.
+    return (
+      <div className="flex flex-col items-center gap-3 py-10 text-center">
+        <Sparkles className="h-7 w-7 text-blue-400/80" />
+        <p className="text-sm text-muted-foreground max-w-sm">
+          Turn this summary into a shareable infographic poster, rendered by an
+          image model on request.
+        </p>
+        {authed ? (
+          <Button size="sm" onClick={() => request.mutate()} disabled={request.isPending}>
+            {request.isPending ? <Spinner /> : <Sparkles className="h-4 w-4" />} Generate infographic
+          </Button>
+        ) : (
+          <span className="text-xs text-muted-foreground">Sign in to generate an infographic</span>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className={cn("mb-6 relative group rounded-2xl overflow-hidden", readMode ? "border-dashed bg-transparent shadow-none" : "")}>
+      <div className={cn("relative w-full overflow-hidden flex flex-col bg-slate-950/80 backdrop-blur-xl border", readMode ? "border-dashed border-border" : "border-white/10 rounded-2xl")}>
+        {Header}
+        <div className="p-4 sm:p-6 z-10 w-full">
+          <Body />
+        </div>
+      </div>
+    </div>
   );
 }
 

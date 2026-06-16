@@ -166,26 +166,6 @@ adminRoutes.post("/backfill-headlines", async (c) => {
   return c.json({ affected: itemIds.length, enqueued: dryRun ? 0 : itemIds.length });
 });
 
-// Re-generate ONLY the mindmap for every summarized item, from the
-// stored walkthrough/summary JSON. `?dry_run=true` reports the count.
-adminRoutes.post("/backfill-mindmaps", async (c) => {
-  const dryRun = c.req.query("dry_run") === "true";
-  const rows = await all<{ item_id: number }>(
-    c.env.DB.prepare(
-      `SELECT item_id FROM summary 
-        WHERE COALESCE(json_extract(structured, '$.mindmap'), '') = ''
-        ORDER BY item_id`
-    ),
-  );
-  const itemIds = rows.map((r) => r.item_id);
-  if (!dryRun) {
-    for (const id of itemIds) {
-      await c.env.PIPELINE.send({ kind: "mindmap_backfill", item_id: id });
-    }
-  }
-  return c.json({ affected: itemIds.length, enqueued: dryRun ? 0 : itemIds.length });
-});
-
 // Remove an item from the global catalog entirely (drops it for all users).
 adminRoutes.delete("/queue/:id", async (c) => {
   const id = Number(c.req.param("id"));

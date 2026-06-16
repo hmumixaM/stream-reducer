@@ -5,3 +5,6 @@
 GEMINI_API_KEY=replace-with-gemini-proxy-token
 # OpenRouter key for Whisper speech-to-text.
 OPENROUTER_API_KEY=sk-or-v1-your-key
+# Google AI Studio key for on-demand infographic image generation (native
+# generateContent). Optional — falls back to GEMINI_API_KEY when unset.
+GEMINI_IMAGE_API_KEY=replace-with-google-ai-studio-key

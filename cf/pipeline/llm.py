@@ -33,10 +33,6 @@ def _gemini_model() -> str:
     return os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 
 
-def _mindmap_model() -> str:
-    return os.environ.get("GEMINI_MODEL_MINDMAP", _gemini_model())
-
-
 def generate_text(
     prompt: str,
     *,
@@ -73,6 +69,95 @@ def generate_text(
         prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
         completion_tokens=int(usage.get("completion_tokens", 0) or 0),
         total_tokens=int(usage.get("total_tokens", 0) or 0),
+        latency_ms=int((time.monotonic() - start) * 1000),
+    )
+
+
+@dataclass
+class ImageResult:
+    image_b64: str
+    mime_type: str
+    model: str
+    prompt_tokens: int = 0
+    image_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    latency_ms: int = 0
+
+
+def _image_model() -> str:
+    return os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3-pro-image-preview")
+
+
+def _image_base() -> str:
+    # Native Gemini (generateContent) endpoint. The OpenAI-compatible proxy used
+    # for text can't return image output (it rejects the image mime), so image
+    # generation talks to AI Studio directly.
+    return os.environ.get("GEMINI_IMAGE_BASE_URL", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+
+
+def _image_key() -> str:
+    # A dedicated Google AI Studio key for image generation; fall back to the
+    # general Gemini key when a separate one isn't configured.
+    return os.environ.get("GEMINI_IMAGE_API_KEY") or os.environ["GEMINI_API_KEY"]
+
+
+# Gemini 3 Pro Image pricing (USD). Image output is a flat per-image rate at the
+# default <=2K resolution (1120 output image tokens); text in/out are token-based.
+_IMG_TOKEN_USD = 0.134 / 1120.0
+_TEXT_OUT_USD = 12.0 / 1_000_000.0
+_TEXT_IN_USD = 2.0 / 1_000_000.0
+
+
+def generate_image(prompt: str, *, system: str | None = None) -> ImageResult:
+    model = _image_model()
+    payload: dict = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
+    }
+    if system:
+        payload["systemInstruction"] = {"parts": [{"text": system}]}
+    start = time.monotonic()
+    with httpx.Client(timeout=300) as client:
+        resp = client.post(
+            f"{_image_base()}/models/{model}:generateContent",
+            json=payload,
+            headers={"x-goog-api-key": _image_key(), "Content-Type": "application/json"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or []
+    image_b64 = ""
+    mime_type = "image/png"
+    for part in parts:
+        inline = part.get("inlineData") or part.get("inline_data")
+        if inline and inline.get("data"):
+            image_b64 = inline["data"]
+            mime_type = inline.get("mimeType") or inline.get("mime_type") or mime_type
+            break
+    if not image_b64:
+        raise RuntimeError("image model returned no image data")
+
+    usage = data.get("usageMetadata") or {}
+    prompt_tokens = int(usage.get("promptTokenCount", 0) or 0)
+    total_tokens = int(usage.get("totalTokenCount", 0) or 0)
+    image_tokens = 0
+    for detail in usage.get("candidatesTokensDetails") or []:
+        if (detail.get("modality") or "").upper() == "IMAGE":
+            image_tokens += int(detail.get("tokenCount", 0) or 0)
+    thoughts = int(usage.get("thoughtsTokenCount", 0) or 0)
+    text_out = max(0, int(usage.get("candidatesTokenCount", 0) or 0) - image_tokens) + thoughts
+    cost = image_tokens * _IMG_TOKEN_USD + text_out * _TEXT_OUT_USD + prompt_tokens * _TEXT_IN_USD
+
+    return ImageResult(
+        image_b64=image_b64,
+        mime_type=mime_type,
+        model=model,
+        prompt_tokens=prompt_tokens,
+        image_tokens=image_tokens,
+        total_tokens=total_tokens,
+        cost_usd=round(cost, 6),
         latency_ms=int((time.monotonic() - start) * 1000),
     )
 

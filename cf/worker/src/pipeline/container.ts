@@ -15,7 +15,10 @@ export class PipelineContainer extends Container<Env> {
     GEMINI_API_KEY: this.env.GEMINI_API_KEY,
     GEMINI_BASE_URL: this.env.LLM_BASE_URL,
     GEMINI_MODEL: this.env.LLM_MODEL,
-    GEMINI_MODEL_MINDMAP: this.env.LLM_MODEL_MINDMAP,
+    // Image generation: model + a dedicated AI Studio key (falls back to
+    // GEMINI_API_KEY inside the container when not set).
+    GEMINI_IMAGE_MODEL: this.env.LLM_MODEL_INFOGRAPHIC,
+    GEMINI_IMAGE_API_KEY: this.env.GEMINI_IMAGE_API_KEY ?? "",
     OPENROUTER_API_KEY: this.env.OPENROUTER_API_KEY,
     STT_MODEL: this.env.STT_MODEL,
   };
@@ -28,8 +31,8 @@ export interface PipelineJob {
   // resummarize re-runs only the summary using a provided transcript.
   // structured_backfill re-generates structured summary fields from stored summary JSON.
   // headline_backfill re-generates only the headline/subhead from stored summary JSON.
-  // mindmap_backfill re-generates only the mindmap from stored summary JSON.
-  mode: "process" | "resummarize" | "structured_backfill" | "headline_backfill" | "mindmap_backfill";
+  // infographic renders an image poster from stored summary JSON (image model).
+  mode: "process" | "resummarize" | "structured_backfill" | "headline_backfill" | "infographic";
   transcript?: { language: string | null; source: string; segments: unknown[]; text: string } | null;
   summary?: Record<string, unknown> | null;
   // When set, the summary is regenerated in this language (on-demand translation).
@@ -77,6 +80,8 @@ export interface PipelineResult {
   };
   transcript: { language: string | null; source: string; segments: unknown[]; text: string } | null;
   summary: { model: string; prompt_version: string; markdown: string; structured: Record<string, unknown> } | null;
+  // Present only for mode: "infographic". The base64 image plus usage/cost.
+  infographic?: { image_b64: string; mime_type: string; model: string; total_tokens: number; cost_usd: number } | null;
   chunks: ChunkOut[];
   media: { bytes: number; duration_s: number | null; audio_b64: string | null; format: string | null };
   stages: { stage: string; provider: string | null; model: string | null; duration_ms: number; request_count: number; total_tokens: number; cost_usd: number; error?: string | null }[];
@@ -88,7 +93,11 @@ export interface PipelineResult {
 // caused head-of-line blocking); instances spin down fast via `sleepAfter` to
 // stay under the max_instances cap.
 export async function runPipeline(env: Env, job: PipelineJob): Promise<PipelineResult> {
-  const key = job.target_lang ? `tr-${job.item_id}-${job.target_lang}` : `job-${job.item_id}`;
+  const key = job.target_lang
+    ? `tr-${job.item_id}-${job.target_lang}`
+    : job.mode === "infographic"
+      ? `ig-${job.item_id}`
+      : `job-${job.item_id}`;
   const instance = getContainer(env.PIPELINE_CONTAINER, key);
   const res = await instance.fetch(
     new Request("http://pipeline/process", {

@@ -172,19 +172,6 @@ itemsRoutes.post("/library", requireAuth, async (c) => {
 
 // Item detail: global content + this user's comments/highlights + user_item.
 // Public: anonymous visitors get the global content with empty personal state.
-itemsRoutes.get("/trigger-mindmap-backfill-temp", async (c) => {
-  const rows = await c.env.DB.prepare(
-    `SELECT item_id, COALESCE(json_extract(structured, '$.mindmap'), '') AS mm FROM summary`
-  ).all<{ item_id: number; mm: string }>();
-  const itemIds = rows.results
-    .filter((r) => !r.mm || r.mm.includes("</subgraph") || /by the way/i.test(r.mm))
-    .map((r) => r.item_id);
-  for (const id of itemIds) {
-    await c.env.PIPELINE.send({ kind: "mindmap_backfill", item_id: id });
-  }
-  return c.json({ enqueued: itemIds.length, itemIds });
-});
-
 itemsRoutes.get("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const user = await resolveUser(c.env, c);
@@ -216,6 +203,10 @@ itemsRoutes.get("/:id", async (c) => {
   const translations = await all<{ lang: string; status: string }>(
     c.env.DB.prepare("SELECT lang, status FROM item_translation WHERE item_id = ? ORDER BY lang").bind(id),
   );
+  // On-demand infographic poster (shared). Null until a user requests one.
+  const infographic = await first<{ status: string; model: string; image_key: string | null; error: string | null }>(
+    c.env.DB.prepare("SELECT status, model, image_key, error FROM item_infographic WHERE item_id = ?").bind(id),
+  );
 
   return c.json({
     ...toItemRead(item, ui, { is_interested: interested != null }),
@@ -229,6 +220,14 @@ itemsRoutes.get("/:id", async (c) => {
     comments,
     highlights,
     translations,
+    infographic: infographic
+      ? {
+          status: infographic.status,
+          model: infographic.model,
+          error: infographic.error,
+          image_url: infographic.image_key ? `/media/${infographic.image_key}` : null,
+        }
+      : null,
   });
 });
 
@@ -274,6 +273,51 @@ itemsRoutes.post("/:id/translate", requireAuth, async (c) => {
     return c.json({ lang, status: "queued" });
   }
   return c.json({ lang, status: existing.status });
+});
+
+// Fetch the shared infographic's status + image URL (public). 404 when none.
+itemsRoutes.get("/:id/infographic", async (c) => {
+  const id = Number(c.req.param("id"));
+  const row = await first<{ status: string; model: string; image_key: string | null; error: string | null; updated_at: string }>(
+    c.env.DB.prepare(
+      "SELECT status, model, image_key, error, updated_at FROM item_infographic WHERE item_id = ?",
+    ).bind(id),
+  );
+  if (!row) return c.json({ error: "not found" }, 404);
+  return c.json({
+    status: row.status,
+    model: row.model,
+    error: row.error,
+    updated_at: row.updated_at,
+    image_url: row.image_key ? `/media/${row.image_key}` : null,
+  });
+});
+
+// Request an infographic (auth'd). Idempotent: returns the existing row, or
+// creates a queued one + enqueues the job. Shared across all users. Image
+// generation is paid (~$0.13/image), so it's only ever triggered on demand.
+itemsRoutes.post("/:id/infographic", requireAuth, async (c) => {
+  const id = Number(c.req.param("id"));
+  const item = await first<ItemRow>(c.env.DB.prepare("SELECT id FROM item WHERE id = ?").bind(id));
+  if (!item) return c.json({ error: "item not found" }, 404);
+  const summary = await first<{ item_id: number }>(
+    c.env.DB.prepare("SELECT item_id FROM summary WHERE item_id = ?").bind(id),
+  );
+  if (!summary) return c.json({ error: "item has no summary yet" }, 409);
+
+  const existing = await first<{ status: string }>(
+    c.env.DB.prepare("SELECT status FROM item_infographic WHERE item_id = ?").bind(id),
+  );
+  // Re-enqueue only when missing or previously errored (don't burn money twice).
+  if (!existing || existing.status === "error") {
+    await c.env.DB.prepare(
+      `INSERT INTO item_infographic (item_id, status) VALUES (?, 'queued')
+       ON CONFLICT(item_id) DO UPDATE SET status='queued', error=NULL, updated_at=excluded.updated_at`,
+    ).bind(id).run();
+    await c.env.PIPELINE.send({ kind: "infographic", item_id: id });
+    return c.json({ status: "queued", image_url: null });
+  }
+  return c.json({ status: existing.status, image_url: null });
 });
 
 // Related articles (global recommendations) for an item.

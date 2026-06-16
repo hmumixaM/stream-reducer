@@ -28,7 +28,8 @@ export interface Env {
   EMAIL_FROM: string;
   LLM_BASE_URL: string;
   LLM_MODEL: string;
-  LLM_MODEL_MINDMAP: string;
+  // Image model for on-demand infographics (Gemini 3 Pro Image / Nano Banana Pro).
+  LLM_MODEL_INFOGRAPHIC: string;
   STT_MODEL: string;
   EMBEDDING_DIM: string;
   SUBSCRIPTION_WINDOW_DAYS: string;
@@ -39,6 +40,10 @@ export interface Env {
   // Secrets
   GEMINI_API_KEY: string;
   OPENROUTER_API_KEY: string;
+  // Google AI Studio key for image generation (native generateContent). The
+  // text proxy can't emit images, so infographics talk to AI Studio directly.
+  // Falls back to GEMINI_API_KEY in the container when unset.
+  GEMINI_IMAGE_API_KEY?: string;
   // Bilibili web cookies (Netscape values joined as "name=value; …"), used to
   // clear risk-control on the space/season/series feed APIs. Optional.
   BILIBILI_COOKIE?: string;
@@ -57,7 +62,7 @@ export type PipelineMessage =
   | { kind: "resummarize"; item_id: number }
   | { kind: "structured_backfill"; item_id: number }
   | { kind: "headline_backfill"; item_id: number }
-  | { kind: "mindmap_backfill"; item_id: number }
+  | { kind: "infographic"; item_id: number }
   | { kind: "translate"; item_id: number; lang: string }
   | { kind: "poll"; subscription_id: number }
   | { kind: "graph_build"; force?: boolean };

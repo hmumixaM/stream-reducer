@@ -136,7 +136,7 @@
     "EMAIL_FROM": "noreply@xgoose.org",
     "LLM_BASE_URL": "https://xgoose-gemini-proxy-1.max-678.workers.dev/v1",
     "LLM_MODEL": "gemini-3.5-flash",
-    "LLM_MODEL_MINDMAP": "gemini-3.1-pro",
+    "LLM_MODEL_INFOGRAPHIC": "gemini-3-pro-image-preview",
     "STT_MODEL": "openai/whisper-large-v3-turbo",
     "EMBEDDING_DIM": "1024",
     "SUBSCRIPTION_WINDOW_DAYS": "90",
@@ -149,4 +149,7 @@
   // Secrets (set via `wrangler secret put`):
   //   GEMINI_API_KEY        - bearer token for the Gemini summary proxy
   //   OPENROUTER_API_KEY    - OpenRouter key for Whisper STT
+  //   GEMINI_IMAGE_API_KEY  - Google AI Studio key for infographic image gen
+  //                           (native generateContent; the text proxy can't emit
+  //                           images). Optional: falls back to GEMINI_API_KEY.
 }

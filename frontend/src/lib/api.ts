@@ -89,6 +89,8 @@ export interface QueueItem extends Item {
   chunk_count: number;
   queue_position?: number;
   queue_total?: number;
+  // In-progress but orphaned (container died); waiting to be reclaimed.
+  stalled?: boolean;
 }
 
 export interface StageRun {
@@ -208,6 +210,16 @@ export const TRANSLATE_LANGS: { code: string; label: string }[] = [
   { code: "ru", label: "Русский" },
 ];
 
+export type InfographicStatus = "queued" | "processing" | "done" | "error";
+
+export interface Infographic {
+  status: InfographicStatus;
+  model?: string | null;
+  error?: string | null;
+  updated_at?: string;
+  image_url?: string | null;
+}
+
 export interface ItemDetail extends Item {
   summary?: Summary | null;
   transcript?: Transcript | null;
@@ -215,6 +227,7 @@ export interface ItemDetail extends Item {
   comments: Comment[];
   highlights: Highlight[];
   translations?: TranslationRef[];
+  infographic?: Infographic | null;
   // Only present in the static mirror bundle (related articles embedded so the
   // recommendation grid works without a live API).
   related?: RelatedItem[];
@@ -241,6 +254,11 @@ export interface Subscription {
   enabled: boolean;
   last_checked_at?: string | null;
   last_seen_guid?: string | null;
+  last_status?: "ok" | "empty" | "error" | null;
+  last_error?: string | null;
+  last_entry_count?: number;
+  last_new_count?: number;
+  consecutive_failures?: number;
   created_at: string;
 }
 
@@ -690,6 +708,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ lang }),
     }),
+  getInfographic: (id: number) => req<Infographic>(`/api/items/${id}/infographic`),
+  requestInfographic: (id: number) =>
+    req<Infographic>(`/api/items/${id}/infographic`, { method: "POST" }),
   getRelated: (id: number) =>
     MIRROR ? mirrorRelated(id) : req<RelatedItem[]>(`/api/items/${id}/related`),
   getItemFocus: async (id: number): Promise<number | null> => {

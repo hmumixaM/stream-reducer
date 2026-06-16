@@ -33,8 +33,8 @@ from app.pipeline.prompts import (
     SECTION_SYSTEM,
     STRICT_JSON_SUFFIX,
     WALKTHROUGH_INDEX_TEMPLATE,
-    MINDMAP_SYSTEM,
-    MINDMAP_TEMPLATE,
+    INFOGRAPHIC_SYSTEM,
+    INFOGRAPHIC_TEMPLATE,
     language_directive,
 )
 from app.zh import to_simplified
@@ -543,39 +543,58 @@ def _generate_structured_sections(
     return structured
 
 
-def generate_mindmap(
-    item: ItemView,
-    structured: dict,
-    lang: str,
-    stages: list[Stage],
-) -> str:
-    source = _structured_to_source_notes(structured)
-    if not source.strip():
-        source = _build_context(item)
-    context = _build_context(item)
-    prompt = MINDMAP_TEMPLATE.format(context=context, source=source, language_instruction=lang)
+def _build_infographic_prompt(item: ItemView, structured: dict, lang: str) -> str:
+    def _points() -> str:
+        out: list[str] = []
+        for kp in (structured.get("key_points") or [])[:8]:
+            text = (kp.get("text") if isinstance(kp, dict) else str(kp)) or ""
+            if text.strip():
+                out.append(f"- {text.strip()}")
+        return "\n".join(out) or "(none)"
 
-    with Stage("mindmap", provider="gemini", model=llm._mindmap_model()) as st:
-        res = llm.generate_text(
-            prompt,
-            system=MINDMAP_SYSTEM,
-            model=llm._mindmap_model(),
-            max_tokens=SUMMARY_REDUCE_MAX_TOKENS,
-        )
+    def _quotes() -> str:
+        out: list[str] = []
+        for q in (structured.get("quotes") or [])[:3]:
+            text = (q.get("text") if isinstance(q, dict) else str(q)) or ""
+            who = q.get("speaker") if isinstance(q, dict) else None
+            if text.strip():
+                out.append(f"- \"{text.strip()}\"" + (f" — {who}" if who else ""))
+        return "\n".join(out) or "(none)"
+
+    entities = structured.get("entities") or []
+    return INFOGRAPHIC_TEMPLATE.format(
+        context=_build_context(item),
+        headline=structured.get("headline") or item.title or "(untitled)",
+        subhead=structured.get("subhead") or "",
+        tldr=structured.get("tldr") or "",
+        key_points=_points(),
+        quotes=_quotes(),
+        entities=", ".join(str(e) for e in entities) or "(none)",
+        language_instruction=lang,
+    )
+
+
+def generate_infographic(item: ItemView, structured: dict, stages: list[Stage]) -> dict:
+    # Render the poster in whatever language the summary is written in.
+    sample = " ".join(
+        str(structured.get(k) or "") for k in ("headline", "subhead", "tldr")
+    ).strip()
+    lang = language_directive(sample)
+    prompt = _build_infographic_prompt(item, structured, lang)
+
+    with Stage("infographic", provider="gemini", model=llm._image_model()) as st:
+        res = llm.generate_image(prompt, system=INFOGRAPHIC_SYSTEM)
         st.request_count += 1
         st.total_tokens += res.total_tokens
-
-        text = _strip_fences(res.text).strip()
-        # Ensure no conversational preamble/postscript is included
-        text = re.sub(r"(?i)^(here is|sure|okay|below is|by the way|i have|i've).*?\n", "", text, flags=re.DOTALL)
-        text = re.sub(r"(?i)\n+by the way,.*", "", text, flags=re.DOTALL)
-        text = text.strip()
-        
-        if text.startswith(("mindmap", "timeline", "flowchart", "graph")):
-            stages.append(st)
-            return text
+        st.cost_usd += res.cost_usd
     stages.append(st)
-    return ""
+    return {
+        "image_b64": res.image_b64,
+        "mime_type": res.mime_type,
+        "model": res.model,
+        "total_tokens": res.total_tokens,
+        "cost_usd": res.cost_usd,
+    }
 
 
 # --- summarize -------------------------------------------------------------
@@ -605,7 +624,6 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
             active_stage=st,
         )
     stages.append(st)
-    structured["mindmap"] = generate_mindmap(item, structured, lang, stages)
     return structured
 
 
@@ -630,7 +648,6 @@ def regenerate_structured(
         existing=existing,
         walkthrough=existing.get("walkthrough", ""),
     )
-    structured["mindmap"] = generate_mindmap(item, structured, lang, stages)
     return structured
 
 
@@ -669,19 +686,6 @@ def regenerate_headline(
     return out
 
 
-def regenerate_mindmap(
-    item: ItemView,
-    existing: dict,
-    stages: list[Stage],
-    target_lang: str | None = None,
-) -> dict:
-    """Re-generate only the mindmap from an existing summary."""
-    lang, _, _ = _language_setup("", target_lang)
-    out = dict(existing)
-    out["mindmap"] = generate_mindmap(item, out, lang, stages)
-    return out
-
-
 def _apply_supplied_metadata(item: ItemView, supplied: dict) -> None:
     item.title = supplied.get("title")
     item.author = supplied.get("author")
@@ -711,12 +715,24 @@ def run(job: dict) -> dict:
     transcript: dict | None = job.get("transcript")
     media = {"bytes": 0, "duration_s": None, "audio_b64": None, "format": None}
 
-    if mode in ("structured_backfill", "headline_backfill", "mindmap_backfill"):
+    if mode == "infographic":
+        existing = job.get("summary") or {}
+        infographic = generate_infographic(item, existing, stages)
+        return {
+            "metadata": metadata,
+            "transcript": None,
+            "summary": None,
+            "infographic": infographic,
+            "chunks": [],
+            "media": media,
+            "stages": [_stage_dict(s) for s in stages],
+            "error": None,
+        }
+
+    if mode in ("structured_backfill", "headline_backfill"):
         existing = job.get("summary") or {}
         if mode == "headline_backfill":
             structured = regenerate_headline(item, existing, stages, target_lang=target_lang)
-        elif mode == "mindmap_backfill":
-            structured = regenerate_mindmap(item, existing, stages, target_lang=target_lang)
         else:
             structured = regenerate_structured(item, existing, stages, target_lang=target_lang)
         markdown = render_markdown(item, structured)
