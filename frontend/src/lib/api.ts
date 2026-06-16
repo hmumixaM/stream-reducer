@@ -409,6 +409,9 @@ export interface SearchParams {
   k?: number;
   source?: string;
   item_id?: number;
+  // "library" (default) searches the user's saved items; "global" searches the
+  // whole catalog.
+  scope?: "library" | "global";
 }
 
 // --- Mirror (static) backend ---------------------------------------------
@@ -672,6 +675,7 @@ export const api = {
     if (params.k !== undefined) sp.set("k", String(params.k));
     if (params.source) sp.set("source", params.source);
     if (params.item_id !== undefined) sp.set("item_id", String(params.item_id));
+    if (params.scope) sp.set("scope", params.scope);
     return req<SearchHit[]>(`/api/search?${sp.toString()}`);
   },
 

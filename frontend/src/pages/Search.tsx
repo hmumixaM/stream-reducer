@@ -57,8 +57,9 @@ function HitCard({ hit }: { hit: SearchHit }) {
 export function Search() {
   const [text, setText] = useState("");
   const [source, setSource] = useState("");
+  const [scope, setScope] = useState<"library" | "global">("library");
   const search = useMutation({
-    mutationFn: (q: string) => api.search({ q, k: 20, source: source || undefined }),
+    mutationFn: (q: string) => api.search({ q, k: 20, source: source || undefined, scope }),
   });
 
   const submit = (e: React.FormEvent) => {
@@ -86,8 +87,16 @@ export function Search() {
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
+        <Select
+          value={scope}
+          onChange={(e) => setScope(e.target.value as "library" | "global")}
+          className="w-full sm:w-40"
+        >
+          <option value="library">My library</option>
+          <option value="global">All content</option>
+        </Select>
         <Select value={source} onChange={(e) => setSource(e.target.value)} className="w-full sm:w-40">
-          <option value="">All content</option>
+          <option value="">All sources</option>
           <option value="transcript">Transcript</option>
           <option value="summary">Summary</option>
         </Select>
@@ -105,8 +114,10 @@ export function Search() {
 
       {search.isSuccess && hits.length === 0 && (
         <Card className="p-10 text-center text-muted-foreground">
-          No matches. Try a different phrasing, or run the embedding backfill if you
-          have older content.
+          No matches.{" "}
+          {scope === "library"
+            ? "This only searches your library — switch to “All content” to search everything."
+            : "Try a different phrasing."}
         </Card>
       )}
 
