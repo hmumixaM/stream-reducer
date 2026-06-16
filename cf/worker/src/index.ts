@@ -57,6 +57,9 @@ app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 const oauthProvider = new OAuthProvider<Env>({
   authorizeEndpoint: "/oauth/authorize",
   tokenEndpoint: "/oauth/token",
+  // RFC 7591 dynamic client registration. MCP clients (Claude, Cursor,
+  // mcp-remote) self-register here, so users don't pre-create credentials.
+  clientRegistrationEndpoint: "/oauth/register",
   apiRoute: "/mcp",
   apiHandler: mcpHandler,
   defaultHandler: {

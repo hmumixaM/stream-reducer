@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { getCookie, deleteCookie } from "hono/cookie";
 import type { AppContext } from "../auth";
 import {
   isValidEmail,
@@ -8,8 +9,20 @@ import {
   resolveUser,
   clearSession,
 } from "../auth";
+import { OAUTH_RETURN_COOKIE } from "./oauth";
 
 export const authRoutes = new Hono<AppContext>();
+
+// After a successful sign-in, return the user to a pending OAuth authorize URL
+// if one was stashed (and only an on-site /oauth/ path, to avoid open redirect).
+function postLoginRedirect(c: Parameters<typeof setSessionCookie>[0]): string {
+  const pending = getCookie(c, OAUTH_RETURN_COOKIE);
+  if (pending && pending.startsWith("/oauth/")) {
+    deleteCookie(c, OAUTH_RETURN_COOKIE, { path: "/" });
+    return `${c.env.APP_ORIGIN}${pending}`;
+  }
+  return `${c.env.APP_ORIGIN}/`;
+}
 
 // Request a magic link. Always returns ok (don't leak which emails exist).
 authRoutes.post("/request", async (c) => {
@@ -69,7 +82,7 @@ authRoutes.post("/verify", async (c) => {
     return c.redirect(`${c.env.APP_ORIGIN}/login?error=invalid_or_expired`);
   }
   setSessionCookie(c, session);
-  return c.redirect(`${c.env.APP_ORIGIN}/`);
+  return c.redirect(postLoginRedirect(c));
 });
 
 authRoutes.get("/me", async (c) => {

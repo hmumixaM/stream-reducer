@@ -1,8 +1,13 @@
 import { Hono } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
 import type { AppContext } from "../auth";
-import { requireAuth } from "../auth";
+import { requireAuth, resolveUser } from "../auth";
 
 export const oauthRoutes = new Hono<AppContext>();
+
+// Short-lived cookie that remembers the OAuth authorize URL across a magic-link
+// sign-in, so an unauthenticated user is returned to consent after logging in.
+export const OAUTH_RETURN_COOKIE = "sr_oauth_return";
 
 // HTML-escape client-controlled text (client name / id) before rendering it in
 // the consent page, so a maliciously-registered client can't inject markup.
@@ -15,9 +20,24 @@ function escapeHtml(text: string): string {
     .replace(/'/g, "&#039;");
 }
 
-// Consent screen. Reached only with a valid session (requireAuth); the session
-// cookie is SameSite=Lax so the POST below can't be driven cross-site (CSRF).
-oauthRoutes.get("/authorize", requireAuth, async (c) => {
+// Consent screen. If the visitor has no session yet, stash the full authorize
+// URL in a cookie and bounce them to the SPA login; they return here after the
+// magic-link sign-in (see POST /api/auth/verify). The session cookie is
+// SameSite=Lax so the consent POST below can't be driven cross-site (CSRF).
+oauthRoutes.get("/authorize", async (c) => {
+  const user = await resolveUser(c.env, c);
+  if (!user) {
+    const returnTo = c.req.path + (new URL(c.req.url).search || "");
+    setCookie(c, OAUTH_RETURN_COOKIE, returnTo, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax",
+      path: "/",
+      maxAge: 900,
+    });
+    return c.redirect(`${c.env.APP_ORIGIN}/login`);
+  }
+
   const oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
   const clientInfo = await c.env.OAUTH_PROVIDER.lookupClient(oauthReqInfo.clientId);
   if (!clientInfo) return c.text("Invalid client_id", 400);
