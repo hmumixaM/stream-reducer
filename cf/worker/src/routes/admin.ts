@@ -124,6 +124,31 @@ adminRoutes.post("/repair-summaries", async (c) => {
   return c.json({ affected: itemIds.length, enqueued: dryRun ? 0 : itemIds.length, item_ids: itemIds });
 });
 
+// Regenerate prompt-versioned structured fields (including generated headline /
+// subhead) from the stored walkthrough/summary JSON, without re-downloading or
+// transcribing media. `?dry_run=true` reports the affected items.
+adminRoutes.post("/backfill-structured", async (c) => {
+  const dryRun = c.req.query("dry_run") === "true";
+  const rows = await all<{ item_id: number }>(
+    c.env.DB.prepare(
+      `SELECT s.item_id
+         FROM summary s
+         JOIN item i ON i.id = s.item_id
+        WHERE COALESCE(i.headline, '') = ''
+           OR COALESCE(i.subhead, '') = ''
+           OR COALESCE(json_extract(s.structured, '$.headline'), '') = ''
+           OR COALESCE(json_extract(s.structured, '$.subhead'), '') = ''`,
+    ),
+  );
+  const itemIds = rows.map((r) => r.item_id);
+  if (!dryRun) {
+    for (const id of itemIds) {
+      await c.env.PIPELINE.send({ kind: "structured_backfill", item_id: id });
+    }
+  }
+  return c.json({ affected: itemIds.length, enqueued: dryRun ? 0 : itemIds.length, item_ids: itemIds });
+});
+
 // Remove an item from the global catalog entirely (drops it for all users).
 adminRoutes.delete("/queue/:id", async (c) => {
   const id = Number(c.req.param("id"));

@@ -22,6 +22,8 @@ export interface Item {
   source_url: string;
   external_id?: string | null;
   title?: string | null;
+  headline?: string | null;
+  subhead?: string | null;
   author?: string | null;
   description?: string | null;
   duration_s?: number | null;

@@ -25,8 +25,10 @@ export interface PipelineJob {
   source_url: string;
   platform: string;
   // resummarize re-runs only the summary using a provided transcript.
-  mode: "process" | "resummarize";
+  // structured_backfill re-generates structured summary fields from stored summary JSON.
+  mode: "process" | "resummarize" | "structured_backfill";
   transcript?: { language: string | null; source: string; segments: unknown[]; text: string } | null;
+  summary?: Record<string, unknown> | null;
   // When set, the summary is regenerated in this language (on-demand translation).
   target_lang?: string;
   // Caller-supplied stored metadata used as summary context (title, show notes,

@@ -12,6 +12,8 @@ export async function handleMessage(env: Env, msg: PipelineMessage): Promise<voi
       return processNextQueuedItem(env);
     case "resummarize":
       return processItem(env, msg.item_id, true);
+    case "structured_backfill":
+      return backfillStructuredItem(env, msg.item_id);
     case "translate":
       return translateItem(env, msg.item_id, msg.lang);
     case "poll":
@@ -21,6 +23,12 @@ export async function handleMessage(env: Env, msg: PipelineMessage): Promise<voi
       await buildGraph(env, msg.force ?? false);
       return;
   }
+}
+
+function cleanGeneratedText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  return text ? text : null;
 }
 
 // An item still 'fetching'/'transcribing'/'summarizing' after this long was
@@ -157,6 +165,64 @@ async function translateItem(env: Env, itemId: number, lang: string): Promise<vo
   }
 }
 
+async function backfillStructuredItem(env: Env, itemId: number): Promise<void> {
+  const item = await first<ItemRow>(env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(itemId));
+  const summary = await first<{ model: string; prompt_version: string; markdown: string; structured: string }>(
+    env.DB.prepare("SELECT model, prompt_version, markdown, structured FROM summary WHERE item_id = ?").bind(itemId),
+  );
+  if (!item || !summary) return;
+
+  try {
+    const structured = JSON.parse(summary.structured || "{}") as Record<string, unknown>;
+    const result = await runPipeline(env, {
+      item_id: itemId,
+      source_url: item.source_url,
+      platform: item.platform,
+      mode: "structured_backfill",
+      summary: structured,
+      item: {
+        title: item.title,
+        author: item.author,
+        description: item.description,
+        duration_s: item.duration_s,
+        published_at: item.published_at,
+        view_count: item.view_count,
+        like_count: item.like_count,
+      },
+    });
+    if (result.error || !result.summary) throw new Error(result.error || "no structured summary produced");
+
+    await env.DB.prepare(
+      `UPDATE summary SET model = ?, prompt_version = ?, markdown = ?, structured = ?
+        WHERE item_id = ?`,
+    )
+      .bind(
+        result.summary.model,
+        result.summary.prompt_version,
+        result.summary.markdown,
+        JSON.stringify(result.summary.structured),
+        itemId,
+      )
+      .run();
+    await persistHeadlineFields(env, itemId, result.summary.structured);
+    const totals = await persistStageRuns(env, itemId, result.stages);
+    await env.DB.prepare(
+      `UPDATE item SET total_processing_ms = total_processing_ms + ?,
+         total_api_requests = total_api_requests + ?,
+         total_tokens = total_tokens + ?,
+         total_cost_usd = total_cost_usd + ?,
+         error = NULL
+       WHERE id = ?`,
+    )
+      .bind(totals.totalMs, totals.totalReq, totals.totalTok, totals.totalCost, itemId)
+      .run();
+  } catch (err) {
+    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    await env.DB.prepare("UPDATE item SET error = ? WHERE id = ?").bind(msg.slice(0, 4000), itemId).run();
+    throw err;
+  }
+}
+
 async function processItem(env: Env, itemId: number, resummarize = false): Promise<void> {
   const item = await first<ItemRow>(env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(itemId));
   if (!item) return;
@@ -228,6 +294,38 @@ async function persistMetadata(env: Env, itemId: number, m: PipelineResult["meta
   await persistItemMetadata(env, itemId, m);
 }
 
+async function persistHeadlineFields(env: Env, itemId: number, structured: Record<string, unknown>): Promise<void> {
+  const headline = cleanGeneratedText(structured.headline);
+  const subhead = cleanGeneratedText(structured.subhead);
+  await env.DB.prepare(
+    `UPDATE item SET headline = COALESCE(?, headline), subhead = COALESCE(?, subhead)
+      WHERE id = ?`,
+  )
+    .bind(headline, subhead, itemId)
+    .run();
+}
+
+async function persistStageRuns(
+  env: Env,
+  itemId: number,
+  stages: PipelineResult["stages"],
+): Promise<{ totalMs: number; totalReq: number; totalTok: number; totalCost: number }> {
+  let totalMs = 0, totalReq = 0, totalTok = 0, totalCost = 0;
+  for (const s of stages) {
+    await env.DB.prepare(
+      `INSERT INTO stage_run (item_id, stage, status, finished_at, duration_ms, attempts, provider, model, request_count, total_tokens, cost_usd, error)
+       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(itemId, s.stage, s.error ? "error" : "done", isoNow(), s.duration_ms, s.provider, s.model, s.request_count, s.total_tokens, s.cost_usd, s.error ?? null)
+      .run();
+    totalMs += s.duration_ms;
+    totalReq += s.request_count;
+    totalTok += s.total_tokens;
+    totalCost += s.cost_usd;
+  }
+  return { totalMs, totalReq, totalTok, totalCost };
+}
+
 async function persistResult(env: Env, itemId: number, r: PipelineResult): Promise<void> {
   await persistMetadata(env, itemId, r.metadata);
   // Link the item to its YouTube channel feed for subscriber-demand signals
@@ -264,6 +362,7 @@ async function persistResult(env: Env, itemId: number, r: PipelineResult): Promi
     )
       .bind(itemId, r.summary.model, r.summary.prompt_version, r.summary.markdown, JSON.stringify(r.summary.structured))
       .run();
+    await persistHeadlineFields(env, itemId, r.summary.structured);
   }
 
   // Replace chunk rows (embeddings filled in by embedChunks).
@@ -278,19 +377,7 @@ async function persistResult(env: Env, itemId: number, r: PipelineResult): Promi
   }
 
   // Stage metrics for the Stats / Queue views.
-  let totalMs = 0, totalReq = 0, totalTok = 0, totalCost = 0;
-  for (const s of r.stages) {
-    await env.DB.prepare(
-      `INSERT INTO stage_run (item_id, stage, status, finished_at, duration_ms, attempts, provider, model, request_count, total_tokens, cost_usd, error)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(itemId, s.stage, s.error ? "error" : "done", isoNow(), s.duration_ms, s.provider, s.model, s.request_count, s.total_tokens, s.cost_usd, s.error ?? null)
-      .run();
-    totalMs += s.duration_ms;
-    totalReq += s.request_count;
-    totalTok += s.total_tokens;
-    totalCost += s.cost_usd;
-  }
+  const { totalMs, totalReq, totalTok, totalCost } = await persistStageRuns(env, itemId, r.stages);
   await env.DB.prepare(
     "UPDATE item SET total_processing_ms = ?, total_api_requests = ?, total_tokens = ?, total_cost_usd = ? WHERE id = ?",
   )

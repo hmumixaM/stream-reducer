@@ -6,6 +6,8 @@
 -- the interest_count column is new and added once).
 
 ALTER TABLE item ADD COLUMN interest_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE item ADD COLUMN headline TEXT;
+ALTER TABLE item ADD COLUMN subhead TEXT;
 
 CREATE TABLE IF NOT EXISTS item_interest (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -2,10 +2,9 @@
 
 Strategy: the MAP step turns each transcript chunk into a *rich, detailed
 chronological walkthrough* that preserves concrete details, anecdotes, numbers,
-names and the section's mood. The REDUCE step does NOT compress that detail away;
-instead it writes a high-level wrapper on top: background, TL;DR, the overall
-atmosphere/vibe, the most important cross-cutting takeaways, top quotes, and
-mentioned entities.
+names and the section's mood. The structured sections are generated separately
+from that walkthrough so long programs do not force every summary field through
+one oversized reduce prompt.
 """
 
 from __future__ import annotations
@@ -46,6 +45,135 @@ TRANSCRIPT PART:
 {chunk}
 """
 
+SECTION_SYSTEM = (
+    "You are an expert editor. You are given page metadata and an already-written, "
+    "detailed chronological walkthrough of a piece of media. Generate only the "
+    "requested structured section. Never invent content; every claim must be "
+    "supported by the walkthrough or notes. Preserve timestamps when requested so "
+    "readers can jump to the source. Respond with STRICT JSON only, no markdown "
+    "fences. Write all text fields in the requested language (JSON keys stay in "
+    "English)."
+)
+
+WALKTHROUGH_INDEX_TEMPLATE = """## Page background (metadata about where this came from)
+{context}
+
+## Detailed walkthrough excerpt {index} of {total}
+{source}
+
+---
+Compress this excerpt into a source-traceable index that later prompts can use
+without reading the full walkthrough.
+
+Return STRICT JSON with this exact shape:
+{{
+  "topics": [{{"timestamp": <seconds as number or null>, "heading": "...", "claims": ["concrete claim, argument, example, number, or conclusion"]}}],
+  "quotes": [{{"text": "short verbatim quote", "timestamp": <seconds as number or null>, "speaker": "name or null"}}],
+  "entities": ["people, products, companies, works mentioned"]
+}}
+
+Rules:
+- Keep topic headings short but specific.
+- Preserve enough concrete claims that a later overview can identify what this program uniquely contributes.
+- Include only quotes that appear verbatim in the excerpt.
+- LANGUAGE: {language_instruction}
+"""
+
+OVERVIEW_TEMPLATE = """## Page background (metadata about where this came from)
+{context}
+
+## Source notes
+{source}
+
+---
+Using the source notes above, write only the high-level framing.
+
+Return STRICT JSON with this exact shape:
+{{
+  "background": "1-3 sentences: who published/submitted it (uploader/author/channel), the platform, when, and what the page description says it is about. Use the page background above.",
+  "tldr": "3-5 sentence high-level overview of the content itself.",
+  "atmosphere": "2-4 sentences describing the overall tone, mood, narrative style, the speaker/host dynamics, the emotional arc, and what it actually FEELS like to watch or listen. Be specific and evocative but strictly faithful."
+}}
+
+Rules:
+- `background` MUST state who submitted/published the content and summarize the page description.
+- `tldr` must summarize what the program actually says, not just restate metadata.
+- `atmosphere` must describe the FEEL and vibe, not just restate facts.
+- LANGUAGE: {language_instruction}
+"""
+
+KEY_POINTS_TEMPLATE = """## Page background
+{context}
+
+## Source notes
+{source}
+
+---
+Extract the most important cross-cutting takeaways.
+
+Return STRICT JSON with this exact shape:
+{{
+  "key_points": [{{"text": "...", "timestamp": <seconds as number or null>}}]
+}}
+
+Rules:
+- Include 8-20 key points.
+- Each key point should be a big idea, argument, conclusion, or important factual claim, NOT a full replay of every detail.
+- Prefer timestamps where the underlying point begins or is most directly supported.
+- LANGUAGE: {language_instruction}
+"""
+
+QUOTES_ENTITIES_TEMPLATE = """## Page background
+{context}
+
+## Detailed walkthrough or compact source notes
+{source}
+
+---
+Extract notable verbatim quotes and mentioned entities.
+
+Return STRICT JSON with this exact shape:
+{{
+  "quotes": [{{"text": "notable verbatim quote", "timestamp": <seconds or null>, "speaker": "name or null"}}],
+  "entities": ["people, products, companies, works mentioned"]
+}}
+
+Rules:
+- Include the most striking 8-15 verbatim quotes.
+- Do not paraphrase quotes.
+- Keep entities concise and deduplicated.
+- timestamps are numbers of seconds (e.g. 95 for 00:01:35), parsed from [HH:MM:SS] markers.
+- LANGUAGE: {language_instruction}
+"""
+
+HEADLINE_TEMPLATE = """## Page background
+{context}
+
+## Source notes
+{source}
+
+---
+Write a Bloomberg-style quick-read headline and subhead for the program.
+
+Return STRICT JSON with this exact shape:
+{{
+  "headline": "information-dense declarative headline",
+  "subhead": "one sentence stating the unique signal or angle this program contributes to the public discourse"
+}}
+
+Rules:
+- The headline is NOT the original platform title. It should be less clickbait-y and more informative.
+- Lead with the most concrete, important fact, argument, or conclusion supported by the source notes.
+- Maximize information density in a wire-service / Bloomberg headline style.
+- `headline` should be at most about 120 characters, with no trailing punctuation.
+- `subhead` should explain what the reader gets from this program that they might not get from generic coverage.
+- No emoji. Avoid "in this video", "this episode", or other empty framing.
+- LANGUAGE: {language_instruction}
+"""
+
+# Legacy single-call reduce prompt. The Cloudflare container now generates each
+# structured section separately (see the section templates above), but the
+# non-CF summarizer in app/pipeline/summarize.py still uses this one-shot reduce.
 REDUCE_SYSTEM = (
     "You are an expert editor. You are given page metadata and an already-written, "
     "detailed chronological walkthrough of a piece of media. Write the high-level "

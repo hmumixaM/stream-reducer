@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Film, Plus, Star } from "lucide-react";
@@ -10,20 +10,31 @@ import { cn, formatCount } from "@/lib/utils";
 
 const PLATFORMS = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
 const PAGE_SIZE = 60;
+const BROWSE_VIEW_KEY = "sr_browse_view";
 const SORTS = [
   { value: "priority", label: "Most requested" },
   { value: "added", label: "Recently added" },
   { value: "views", label: "Most views" },
   { value: "published", label: "Publish date" },
 ];
+type BrowseView = "cards" | "headlines";
+
+function readBrowseView(): BrowseView {
+  return localStorage.getItem(BROWSE_VIEW_KEY) === "headlines" ? "headlines" : "cards";
+}
 
 export function Browse() {
   const [q, setQ] = useState("");
   const [platform, setPlatform] = useState("");
   const [sort, setSort] = useState("priority");
+  const [view, setView] = useState<BrowseView>(readBrowseView);
   const qc = useQueryClient();
   const me = useMe();
   const canAdd = !!me.data?.user;
+
+  useEffect(() => {
+    localStorage.setItem(BROWSE_VIEW_KEY, view);
+  }, [view]);
 
   const items = useInfiniteQuery({
     queryKey: ["browse", { q, platform, sort }],
@@ -68,6 +79,8 @@ export function Browse() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Chip label="Cards" active={view === "cards"} onClick={() => setView("cards")} />
+          <Chip label="Headlines" active={view === "headlines"} onClick={() => setView("headlines")} />
           <Select value={sort} onChange={(e) => setSort(e.target.value)} className="w-auto min-w-[140px]">
             {SORTS.map((s) => (
               <option key={s.value} value={s.value}>{s.label}</option>
@@ -88,19 +101,35 @@ export function Browse() {
         <p className="text-muted-foreground">Loading...</p>
       ) : all.length ? (
         <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {all.map((item) => (
-              <BrowseCard
-                key={item.id}
-                item={item}
-                canAdd={canAdd}
-                onAdd={() => add.mutate(item.source_url)}
-                adding={add.isPending && add.variables === item.source_url}
-                onInterest={() => interest.mutate(item.id)}
-                interestPending={interest.isPending && interest.variables === item.id}
-              />
-            ))}
-          </div>
+          {view === "cards" ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {all.map((item) => (
+                <BrowseCard
+                  key={item.id}
+                  item={item}
+                  canAdd={canAdd}
+                  onAdd={() => add.mutate(item.source_url)}
+                  adding={add.isPending && add.variables === item.source_url}
+                  onInterest={() => interest.mutate(item.id)}
+                  interestPending={interest.isPending && interest.variables === item.id}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {all.map((item) => (
+                <HeadlineRow
+                  key={item.id}
+                  item={item}
+                  canAdd={canAdd}
+                  onAdd={() => add.mutate(item.source_url)}
+                  adding={add.isPending && add.variables === item.source_url}
+                  onInterest={() => interest.mutate(item.id)}
+                  interestPending={interest.isPending && interest.variables === item.id}
+                />
+              ))}
+            </div>
+          )}
           {items.hasNextPage && (
             <div className="mt-6 flex justify-center">
               <Button variant="outline" onClick={() => items.fetchNextPage()} disabled={items.isFetchingNextPage}>
@@ -162,41 +191,148 @@ function BrowseCard({
           {item.interest_count ? <span>{item.interest_count} interested</span> : null}
         </div>
         <div className="mt-auto flex gap-2">
-          {item.saved ? (
-            <Button variant="outline" size="sm" disabled className="flex-1">
-              <Check className="h-4 w-4" /> In your library
-            </Button>
-          ) : !canAdd ? (
-            <Link to="/login" className="block flex-1">
-              <Button variant="outline" size="sm" className="w-full">
-                Sign in to add
-              </Button>
-            </Link>
-          ) : (
-            <Button size="sm" className="flex-1" onClick={onAdd} disabled={adding}>
-              <Plus className="h-4 w-4" /> {adding ? "Adding…" : "Add to library"}
-            </Button>
-          )}
-          {canAdd && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onInterest}
-              disabled={interestPending}
-              title={item.is_interested ? "You're interested — boosts processing priority" : "Mark interest to boost processing priority"}
-            >
-              <Star
-                className={cn("h-4 w-4", item.is_interested && "fill-amber-400 text-amber-400")}
-              />
-              {!!item.interest_count && (
-                <span className="text-xs text-muted-foreground">{item.interest_count}</span>
-              )}
-            </Button>
-          )}
+          <ItemActions
+            item={item}
+            canAdd={canAdd}
+            onAdd={onAdd}
+            adding={adding}
+            onInterest={onInterest}
+            interestPending={interestPending}
+          />
         </div>
       </div>
     </Card>
   );
+}
+
+function HeadlineRow({
+  item,
+  canAdd,
+  onAdd,
+  adding,
+  onInterest,
+  interestPending,
+}: {
+  item: Item;
+  canAdd: boolean;
+  onAdd: () => void;
+  adding: boolean;
+  onInterest: () => void;
+  interestPending: boolean;
+}) {
+  const headline = item.headline || item.title || item.source_url;
+  const meta = [
+    item.author,
+    formatDate(item.published_at),
+    item.view_count != null ? `${formatCount(item.view_count)} views` : null,
+  ].filter(Boolean);
+
+  return (
+    <Card className="group overflow-hidden p-3 transition-colors hover:border-primary">
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <Link to={`/items/${item.id}`} className="block aspect-video w-full shrink-0 overflow-hidden rounded-md bg-muted sm:w-32">
+          {item.thumbnail ? (
+            <img src={item.thumbnail} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+          ) : (
+            <div className="flex h-full items-center justify-center text-muted-foreground">
+              <Film className="h-6 w-6" />
+            </div>
+          )}
+        </Link>
+        <div className="min-w-0 flex-1">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <PlatformBadge platform={item.platform} />
+            <StatusBadge status={item.status} />
+            {item.personal_status === "waiting" && item.status !== "done" && <WaitingBadge />}
+          </div>
+          <Link to={`/items/${item.id}`} className="line-clamp-2 text-base font-semibold leading-snug hover:underline">
+            {headline}
+          </Link>
+          {item.subhead && (
+            <p className="mt-1 line-clamp-2 text-sm leading-snug text-muted-foreground">{item.subhead}</p>
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            {meta.map((m) => (
+              <span key={m} className="truncate">{m}</span>
+            ))}
+            {item.request_count ? <span>{item.request_count} in libraries</span> : null}
+            {item.interest_count ? <span>{item.interest_count} interested</span> : null}
+          </div>
+        </div>
+        <div className="flex gap-2 sm:w-44 sm:flex-col">
+          <ItemActions
+            item={item}
+            canAdd={canAdd}
+            onAdd={onAdd}
+            adding={adding}
+            onInterest={onInterest}
+            interestPending={interestPending}
+          />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function ItemActions({
+  item,
+  canAdd,
+  onAdd,
+  adding,
+  onInterest,
+  interestPending,
+}: {
+  item: Item;
+  canAdd: boolean;
+  onAdd: () => void;
+  adding: boolean;
+  onInterest: () => void;
+  interestPending: boolean;
+}) {
+  return (
+    <>
+      {item.saved ? (
+        <Button variant="outline" size="sm" disabled className="flex-1">
+          <Check className="h-4 w-4" /> In your library
+        </Button>
+      ) : !canAdd ? (
+        <Link to="/login" className="block flex-1">
+          <Button variant="outline" size="sm" className="w-full">
+            Sign in to add
+          </Button>
+        </Link>
+      ) : (
+        <Button size="sm" className="flex-1" onClick={onAdd} disabled={adding}>
+          <Plus className="h-4 w-4" /> {adding ? "Adding…" : "Add to library"}
+        </Button>
+      )}
+      {canAdd && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onInterest}
+          disabled={interestPending}
+          title={item.is_interested ? "You're interested — boosts processing priority" : "Mark interest to boost processing priority"}
+        >
+          <Star
+            className={cn("h-4 w-4", item.is_interested && "fill-amber-400 text-amber-400")}
+          />
+          {!!item.interest_count && (
+            <span className="text-xs text-muted-foreground">{item.interest_count}</span>
+          )}
+        </Button>
+      )}
+    </>
+  );
+}
+
+function formatDate(value?: string | null): string | null {
+  if (!value) return null;
+  return new Date(value).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {

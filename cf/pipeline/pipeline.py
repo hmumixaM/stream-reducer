@@ -24,11 +24,15 @@ from app.adapters.registry import detect_platform, get_adapter
 from app.pipeline.audio import decodable_duration, probe_duration, split_audio
 from app.pipeline.jsonparse import extract_json
 from app.pipeline.prompts import (
+    HEADLINE_TEMPLATE,
+    KEY_POINTS_TEMPLATE,
     MAP_SYSTEM,
     MAP_TEMPLATE,
-    REDUCE_SYSTEM,
-    REDUCE_TEMPLATE,
+    OVERVIEW_TEMPLATE,
+    QUOTES_ENTITIES_TEMPLATE,
+    SECTION_SYSTEM,
     STRICT_JSON_SUFFIX,
+    WALKTHROUGH_INDEX_TEMPLATE,
     language_directive,
 )
 from app.zh import to_simplified
@@ -39,6 +43,10 @@ import llm
 SUMMARY_CHUNK_CHARS = int(os.environ.get("SUMMARY_CHUNK_CHARS", "20000"))
 SUMMARY_MAP_MAX_TOKENS = int(os.environ.get("SUMMARY_MAP_MAX_TOKENS", "8000"))
 SUMMARY_REDUCE_MAX_TOKENS = int(os.environ.get("SUMMARY_REDUCE_MAX_TOKENS", "16000"))
+SUMMARY_SECTION_SOURCE_CHARS = int(os.environ.get("SUMMARY_SECTION_SOURCE_CHARS", "50000"))
+SUMMARY_INDEX_CHUNK_CHARS = int(os.environ.get("SUMMARY_INDEX_CHUNK_CHARS", "30000"))
+SUMMARY_INDEX_MAX_TOKENS = int(os.environ.get("SUMMARY_INDEX_MAX_TOKENS", "6000"))
+SUMMARY_HEADLINE_MAX_TOKENS = int(os.environ.get("SUMMARY_HEADLINE_MAX_TOKENS", "1200"))
 TRANSCRIBE_CHUNK_SECONDS = int(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "300"))
 EMBED_CHUNK_CHARS = int(os.environ.get("EMBED_CHUNK_CHARS", "1500"))
 MEDIA_MAX_BYTES = int(os.environ.get("MEDIA_MAX_BYTES", str(25 * 1024 * 1024)))
@@ -329,12 +337,9 @@ def target_language_directive(code: str) -> str:
     )
 
 
-# --- summarize -------------------------------------------------------------
-def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang: str | None = None) -> dict:
-    segments = transcript.get("segments") or []
-    chunks = _chunk_segments(segments, SUMMARY_CHUNK_CHARS)
-
-    map_system, reduce_system = MAP_SYSTEM, REDUCE_SYSTEM
+def _language_setup(transcript_text: str, target_lang: str | None) -> tuple[str, str, str]:
+    map_system = MAP_SYSTEM
+    section_system = SECTION_SYSTEM
     if target_lang:
         lang = target_language_directive(target_lang)
         # The system prompts default to "write in the SAME language as the
@@ -346,10 +351,201 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
             f"You MUST write ALL prose and text fields in {name}, fully translating from the source "
             f"(JSON keys stay in English). This language requirement takes absolute priority."
         )
-        map_system = MAP_SYSTEM + override
-        reduce_system = REDUCE_SYSTEM + override
+        map_system += override
+        section_system += override
     else:
-        lang = language_directive(transcript.get("text") or "")
+        lang = language_directive(transcript_text)
+    return lang, map_system, section_system
+
+
+def _chunk_text(text: str, max_chars: int) -> list[str]:
+    paragraphs = re.split(r"\n{2,}", text)
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        if size + len(para) > max_chars and current:
+            chunks.append("\n\n".join(current))
+            current = []
+            size = 0
+        current.append(para)
+        size += len(para) + 2
+    if current:
+        chunks.append("\n\n".join(current))
+    return chunks
+
+
+def _format_index_part(data: dict, part: int) -> str:
+    lines = [f"### Compact source index part {part}"]
+    topics = data.get("topics") if isinstance(data.get("topics"), list) else []
+    for topic in topics:
+        if not isinstance(topic, dict):
+            continue
+        ts = topic.get("timestamp")
+        label = f"[{fmt_timestamp(ts)}] " if isinstance(ts, (int, float)) else ""
+        heading = str(topic.get("heading") or "Topic").strip()
+        claims = topic.get("claims") if isinstance(topic.get("claims"), list) else []
+        clean_claims = [str(c).strip() for c in claims if str(c).strip()]
+        suffix = "; ".join(clean_claims)
+        lines.append(f"- {label}{heading}: {suffix}" if suffix else f"- {label}{heading}")
+    quotes = data.get("quotes") if isinstance(data.get("quotes"), list) else []
+    for quote in quotes:
+        if not isinstance(quote, dict) or not quote.get("text"):
+            continue
+        ts = quote.get("timestamp")
+        label = f"[{fmt_timestamp(ts)}] " if isinstance(ts, (int, float)) else ""
+        speaker = f" — {quote.get('speaker')}" if quote.get("speaker") else ""
+        lines.append(f"> {label}{quote.get('text')}{speaker}")
+    entities = data.get("entities") if isinstance(data.get("entities"), list) else []
+    if entities:
+        lines.append("Entities: " + ", ".join(str(e) for e in entities if str(e).strip()))
+    return "\n".join(lines)
+
+
+def _generate_json_section(
+    st: Stage,
+    prompt: str,
+    system: str,
+    defaults: dict,
+    max_tokens: int,
+) -> dict:
+    for attempt in range(2):
+        section_system = system if attempt == 0 else system + STRICT_JSON_SUFFIX
+        res = llm.generate_text(prompt, system=section_system, max_tokens=max_tokens)
+        st.request_count += 1
+        st.total_tokens += res.total_tokens
+        try:
+            data = extract_json(res.text)
+            return {**defaults, **data}
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return defaults.copy()
+
+
+def _build_walkthrough_index(item: ItemView, walkthrough: str, lang: str, section_system: str, st: Stage) -> str:
+    parts = _chunk_text(walkthrough, SUMMARY_INDEX_CHUNK_CHARS)
+    if not parts:
+        return walkthrough
+    index_parts: list[str] = []
+    defaults = {"topics": [], "quotes": [], "entities": []}
+    for i, part in enumerate(parts, start=1):
+        prompt = WALKTHROUGH_INDEX_TEMPLATE.format(
+            context=_build_context(item),
+            index=i,
+            total=len(parts),
+            source=part,
+            language_instruction=lang,
+        )
+        data = _generate_json_section(st, prompt, section_system, defaults, SUMMARY_INDEX_MAX_TOKENS)
+        if data != defaults:
+            index_parts.append(_format_index_part(data, i))
+    return "\n\n".join(index_parts) if index_parts else walkthrough[:SUMMARY_SECTION_SOURCE_CHARS]
+
+
+def _structured_to_source_notes(structured: dict) -> str:
+    lines: list[str] = []
+    for heading, key in (
+        ("Background", "background"),
+        ("TL;DR", "tldr"),
+        ("Atmosphere", "atmosphere"),
+    ):
+        value = structured.get(key)
+        if isinstance(value, str) and value.strip():
+            lines += [f"## {heading}", value.strip(), ""]
+    key_points = structured.get("key_points") if isinstance(structured.get("key_points"), list) else []
+    if key_points:
+        lines.append("## Key points")
+        for kp in key_points:
+            text = kp.get("text") if isinstance(kp, dict) else str(kp)
+            if text:
+                lines.append(f"- {text}")
+        lines.append("")
+    quotes = structured.get("quotes") if isinstance(structured.get("quotes"), list) else []
+    if quotes:
+        lines.append("## Quotes")
+        for quote in quotes:
+            text = quote.get("text") if isinstance(quote, dict) else str(quote)
+            if text:
+                lines.append(f"> {text}")
+    return "\n".join(lines).strip()
+
+
+def _generate_structured_sections(
+    item: ItemView,
+    source: str,
+    stages: list[Stage],
+    lang: str,
+    section_system: str,
+    existing: dict | None = None,
+    walkthrough: str | None = None,
+    active_stage: Stage | None = None,
+) -> dict:
+    existing = existing or {}
+    def build(st: Stage) -> dict:
+        compact_source = source
+        if len(source) > SUMMARY_SECTION_SOURCE_CHARS:
+            compact_source = _build_walkthrough_index(item, source, lang, section_system, st)
+        quote_source = source if len(source) <= SUMMARY_SECTION_SOURCE_CHARS else compact_source
+        context = _build_context(item)
+
+        overview = _generate_json_section(
+            st,
+            OVERVIEW_TEMPLATE.format(context=context, source=compact_source, language_instruction=lang),
+            section_system,
+            {"background": "", "tldr": "", "atmosphere": ""},
+            SUMMARY_REDUCE_MAX_TOKENS,
+        )
+        key_points = _generate_json_section(
+            st,
+            KEY_POINTS_TEMPLATE.format(context=context, source=compact_source, language_instruction=lang),
+            section_system,
+            {"key_points": []},
+            SUMMARY_REDUCE_MAX_TOKENS,
+        )
+        quotes_entities = _generate_json_section(
+            st,
+            QUOTES_ENTITIES_TEMPLATE.format(context=context, source=quote_source, language_instruction=lang),
+            section_system,
+            {"quotes": [], "entities": []},
+            SUMMARY_REDUCE_MAX_TOKENS,
+        )
+        headline = _generate_json_section(
+            st,
+            HEADLINE_TEMPLATE.format(context=context, source=compact_source, language_instruction=lang),
+            section_system,
+            {"headline": "", "subhead": ""},
+            SUMMARY_HEADLINE_MAX_TOKENS,
+        )
+
+        preserved_walkthrough = walkthrough if walkthrough is not None else existing.get("walkthrough", "")
+        return {
+            "background": overview.get("background") or existing.get("background", ""),
+            "tldr": overview.get("tldr") or existing.get("tldr", ""),
+            "atmosphere": overview.get("atmosphere") or existing.get("atmosphere", ""),
+            "key_points": key_points.get("key_points") or existing.get("key_points", []),
+            "quotes": quotes_entities.get("quotes") or existing.get("quotes", []),
+            "entities": quotes_entities.get("entities") or existing.get("entities", []),
+            "headline": headline.get("headline") or existing.get("headline", ""),
+            "subhead": headline.get("subhead") or existing.get("subhead", ""),
+            "walkthrough": preserved_walkthrough,
+        }
+
+    if active_stage is not None:
+        return build(active_stage)
+    with Stage("summarize", provider="gemini", model=os.environ.get("GEMINI_MODEL")) as st:
+        structured = build(st)
+    stages.append(st)
+    return structured
+
+
+# --- summarize -------------------------------------------------------------
+def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang: str | None = None) -> dict:
+    segments = transcript.get("segments") or []
+    chunks = _chunk_segments(segments, SUMMARY_CHUNK_CHARS)
+    lang, map_system, section_system = _language_setup(transcript.get("text") or "", target_lang)
 
     with Stage("summarize", provider="gemini", model=os.environ.get("GEMINI_MODEL")) as st:
         note_blocks: list[str] = []
@@ -362,33 +558,50 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
             st.total_tokens += res.total_tokens
             note_blocks.append(strip_body_timestamps(_strip_fences(res.text).strip()))
         walkthrough = "\n\n".join(note_blocks)
-
-        reduce_prompt = REDUCE_TEMPLATE.format(
-            context=_build_context(item), notes=walkthrough, language_instruction=lang,
+        structured = _generate_structured_sections(
+            item,
+            walkthrough,
+            stages,
+            lang,
+            section_system,
+            walkthrough=walkthrough,
+            active_stage=st,
         )
-        structured: dict | None = None
-        # The reduce output is the only source of background/tl;dr/atmosphere/
-        # key points/quotes. Long-form (esp. YouTube native-caption) walkthroughs
-        # make the model more likely to wrap its JSON in prose; retry once with a
-        # stricter JSON-only instruction before giving up to walkthrough-only.
-        for attempt in range(2):
-            system = reduce_system if attempt == 0 else reduce_system + STRICT_JSON_SUFFIX
-            reduce_res = llm.generate_text(
-                reduce_prompt, system=system, max_tokens=SUMMARY_REDUCE_MAX_TOKENS,
-            )
-            st.request_count += 1
-            st.total_tokens += reduce_res.total_tokens
-            try:
-                structured = extract_json(reduce_res.text)
-                break
-            except (json.JSONDecodeError, ValueError):
-                continue
-        if structured is None:
-            structured = {"background": "", "tldr": "", "atmosphere": "",
-                          "key_points": [], "quotes": [], "entities": []}
-        structured["walkthrough"] = walkthrough
     stages.append(st)
     return structured
+
+
+def regenerate_structured(
+    item: ItemView,
+    existing: dict,
+    stages: list[Stage],
+    target_lang: str | None = None,
+) -> dict:
+    source = existing.get("walkthrough") if isinstance(existing.get("walkthrough"), str) else ""
+    if not source.strip():
+        source = _structured_to_source_notes(existing)
+    if not source.strip():
+        source = _build_context(item)
+    lang, _, section_system = _language_setup(source, target_lang)
+    return _generate_structured_sections(
+        item,
+        source,
+        stages,
+        lang,
+        section_system,
+        existing=existing,
+        walkthrough=existing.get("walkthrough", ""),
+    )
+
+
+def _apply_supplied_metadata(item: ItemView, supplied: dict) -> None:
+    item.title = supplied.get("title")
+    item.author = supplied.get("author")
+    item.description = supplied.get("description")
+    item.duration_s = supplied.get("duration_s")
+    item.published_at = _parse_dt(supplied.get("published_at"))
+    item.view_count = supplied.get("view_count")
+    item.like_count = supplied.get("like_count")
 
 
 # --- top-level run ---------------------------------------------------------
@@ -403,11 +616,33 @@ def run(job: dict) -> dict:
     # a fallback so RSS/podcast items — whose audio URL exposes no scrapeable
     # metadata — still get real summary context.
     supplied = job.get("item") or {}
-    adapter = get_adapter(plat)
     item = ItemView(platform=plat.value, source_url=source_url)
+    if supplied:
+        _apply_supplied_metadata(item, supplied)
     metadata: dict = {}
     transcript: dict | None = job.get("transcript")
     media = {"bytes": 0, "duration_s": None, "audio_b64": None, "format": None}
+
+    if mode == "structured_backfill":
+        existing = job.get("summary") or {}
+        structured = regenerate_structured(item, existing, stages, target_lang=target_lang)
+        markdown = render_markdown(item, structured)
+        return {
+            "metadata": metadata,
+            "transcript": None,
+            "summary": {
+                "model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
+                "prompt_version": PROMPT_VERSION,
+                "markdown": markdown,
+                "structured": structured,
+            },
+            "chunks": [],
+            "media": media,
+            "stages": [_stage_dict(s) for s in stages],
+            "error": None,
+        }
+
+    adapter = get_adapter(plat)
 
     if mode != "resummarize":
         with tempfile.TemporaryDirectory(prefix="sr_media_") as tmp:
@@ -446,13 +681,7 @@ def run(job: dict) -> dict:
         # passed by the caller (avoids a re-fetch — important for sources like
         # Bilibili that block our egress); fall back to fetching otherwise.
         if supplied:
-            item.title = supplied.get("title")
-            item.author = supplied.get("author")
-            item.description = supplied.get("description")
-            item.duration_s = supplied.get("duration_s")
-            item.published_at = _parse_dt(supplied.get("published_at"))
-            item.view_count = supplied.get("view_count")
-            item.like_count = supplied.get("like_count")
+            _apply_supplied_metadata(item, supplied)
         else:
             meta = adapter.fetch_metadata(source_url)
             metadata = _meta_to_dict(meta)

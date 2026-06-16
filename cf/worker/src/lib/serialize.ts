@@ -14,6 +14,8 @@ export function toItemRead(
     source_url: item.source_url,
     external_id: item.external_id,
     title: item.title,
+    headline: item.headline,
+    subhead: item.subhead,
     author: item.author,
     description: item.description,
     duration_s: item.duration_s,
