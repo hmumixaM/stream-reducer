@@ -84,6 +84,8 @@ export default {
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     if (controller.cron === "0 4 * * *") {
       await env.PIPELINE.send({ kind: "graph_build", force: false });
+      // Defense-in-depth GC of expired/orphaned OAuth tokens, grants, clients.
+      await oauthProvider.purgeExpiredData(env);
     } else {
       await pollDueSubscriptions(env);
     }

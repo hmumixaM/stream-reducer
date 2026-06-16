@@ -1,4 +1,5 @@
 import type { PipelineContainer } from "./pipeline/container";
+import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 
 export interface Env {
   // Static assets (built SPA)
@@ -10,6 +11,10 @@ export interface Env {
   MEDIA: R2Bucket;
   AI: Ai;
   OAUTH_KV: KVNamespace;
+
+  // OAuth API, injected by the @cloudflare/workers-oauth-provider wrapper into
+  // the default/api handlers (used by the /oauth consent routes).
+  OAUTH_PROVIDER: OAuthHelpers;
 
   // Queue + container
   PIPELINE: Queue<PipelineMessage>;

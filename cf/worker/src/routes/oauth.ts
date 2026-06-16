@@ -1,27 +1,31 @@
 import { Hono } from "hono";
 import type { AppContext } from "../auth";
 import { requireAuth } from "../auth";
-import { getOAuthApi } from "@cloudflare/workers-oauth-provider";
 
 export const oauthRoutes = new Hono<AppContext>();
 
+// HTML-escape client-controlled text (client name / id) before rendering it in
+// the consent page, so a maliciously-registered client can't inject markup.
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// Consent screen. Reached only with a valid session (requireAuth); the session
+// cookie is SameSite=Lax so the POST below can't be driven cross-site (CSRF).
 oauthRoutes.get("/authorize", requireAuth, async (c) => {
-  // @ts-ignore
-  const oauthApi = c.env.OAUTH_PROVIDER;
-  if (!oauthApi) {
-    return c.text("OAuth provider not initialized", 500);
-  }
+  const oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
+  const clientInfo = await c.env.OAUTH_PROVIDER.lookupClient(oauthReqInfo.clientId);
+  if (!clientInfo) return c.text("Invalid client_id", 400);
 
-  try {
-    const oauthReqInfo = await oauthApi.parseAuthRequest(c.req.raw);
-    const clientInfo = await oauthApi.lookupClient(oauthReqInfo.clientId);
+  const clientLabel = escapeHtml(clientInfo.clientName || clientInfo.clientId);
+  const action = `/oauth/authorize?${new URLSearchParams(c.req.query()).toString()}`;
 
-    if (!clientInfo) {
-      return c.text("Invalid client_id", 400);
-    }
-
-    const html = `
-<!DOCTYPE html>
+  return c.html(`<!DOCTYPE html>
 <html>
 <head>
   <title>Authorize Connection</title>
@@ -38,44 +42,27 @@ oauthRoutes.get("/authorize", requireAuth, async (c) => {
 </head>
 <body>
   <h1>Authorize Connection</h1>
-  <p>The application <span class="client-name">${clientInfo.clientName || clientInfo.clientId}</span> would like to access your stream-reduce account.</p>
+  <p>The application <span class="client-name">${clientLabel}</span> would like to access your stream-reduce account.</p>
   <p>This will allow the application to read your library and add new content on your behalf.</p>
-  
-  <form method="POST" action="/oauth/authorize?${new URLSearchParams(c.req.query()).toString()}">
+  <form method="POST" action="${escapeHtml(action)}">
     <button type="submit">Authorize</button>
     <button type="button" onclick="history.back()">Cancel</button>
   </form>
 </body>
-</html>
-    `;
-
-    return c.html(html);
-  } catch (err: any) {
-    return c.text(`OAuth Error: ${err.message}`, 400);
-  }
+</html>`);
 });
 
 oauthRoutes.post("/authorize", requireAuth, async (c) => {
-  // @ts-ignore
-  const oauthApi = c.env.OAUTH_PROVIDER;
-  if (!oauthApi) {
-    return c.text("OAuth provider not initialized", 500);
-  }
+  const oauthReqInfo = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
+  const user = c.get("user");
 
-  try {
-    const oauthReqInfo = await oauthApi.parseAuthRequest(c.req.raw);
-    const user = c.get("user");
+  const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
+    request: oauthReqInfo,
+    userId: user.id.toString(),
+    metadata: { email: user.email },
+    scope: oauthReqInfo.scope || [],
+    props: { userId: user.id },
+  });
 
-    const { redirectTo } = await oauthApi.completeAuthorization({
-      request: oauthReqInfo,
-      userId: user.id.toString(),
-      metadata: { email: user.email },
-      scope: oauthReqInfo.scope || [],
-      props: { userId: user.id },
-    });
-
-    return c.redirect(redirectTo);
-  } catch (err: any) {
-    return c.text(`OAuth Error: ${err.message}`, 400);
-  }
+  return c.redirect(redirectTo);
 });
