@@ -311,7 +311,7 @@ MINDMAP_SYSTEM = (
     "Based on the content's core nature, choose the single most appropriate structural category, "
     "and then translate it into the closest supported Mermaid diagram type:\n"
     "- Use `mindmap` for Classic & Expansion structures.\n"
-    "- Use `flowchart LR` or `flowchart TD` for Logical, Hierarchical, and Process structures (Tree, Fishbone, Flow, Multi-flow).\n"
+    "- Use `flowchart LR` or `flowchart TD` for Logical, Hierarchical, and Process structures (Tree, Fishbone, Flow, Multi-flow). `flowchart LR` (Left-to-Right) is usually best for readability.\n"
     "- Use `timeline` for pure Timeline/Chronological structures.\n\n"
     "Respond with ONLY the raw Mermaid text. Do NOT use markdown code blocks or backticks. "
     "Do NOT add any explanations."
@@ -336,10 +336,11 @@ Syntax Rules for `mindmap` (Expansion / Bubble Maps):
 - Root node -> 3-8 main branches -> 2-5 sub-nodes.
 
 Syntax Rules for `flowchart` (Hierarchical / Tree / Fishbone / Flow Maps):
-- First line MUST be exactly `flowchart LR` or `flowchart TD`
+- First line MUST be exactly `flowchart LR` (preferred for layout) or `flowchart TD`.
 - Use format: `A[Node A] --> B[Node B]`
 - You can add edge labels: `A -->|Label| B`
 - Group into subgraphs if helpful: `subgraph Name ... end`
+- Use brackets to make nodes explicitly rectangular: `id[Text inside node]`
 
 Syntax Rules for `timeline` (Chronological sequences):
 - First line MUST be exactly `timeline`

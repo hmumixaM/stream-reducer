@@ -8,18 +8,27 @@ mermaid.initialize({
   themeVariables: {
     darkMode: true,
     fontFamily: "inherit",
-    primaryColor: "#3b82f6", // blue-500
-    primaryTextColor: "#f8fafc", // slate-50
-    primaryBorderColor: "#2563eb", // blue-600
-    lineColor: "#475569", // slate-600
-    secondaryColor: "#1e293b", // slate-800
-    tertiaryColor: "#0f172a", // slate-900
+    // Base colors
+    primaryColor: "#0f172a",      // slate-900 (node background)
+    primaryTextColor: "#f8fafc",  // slate-50 (node text)
+    primaryBorderColor: "#3b82f6",// blue-500 (node border)
+    lineColor: "#475569",         // slate-600 (edges)
+    secondaryColor: "#1e293b",    // slate-800
+    tertiaryColor: "#020617",     // slate-950 (root node)
+    
+    // Explicit cluster/background colors if flowchart uses subgraphs
+    clusterBkg: "#0f172a",
+    clusterBorder: "#334155",
   },
   mindmap: {
     padding: 16,
+    maxNodeWidth: 250,
   },
   flowchart: {
-    curve: "basis",
+    curve: "step",          // Angular, rectilinear lines ("step" or "linear") looks more like a structured map
+    padding: 20,
+    nodeSpacing: 40,
+    rankSpacing: 40,
   },
 });
 
