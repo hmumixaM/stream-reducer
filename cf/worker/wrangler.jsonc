@@ -63,10 +63,12 @@
       {
         "queue": "stream-reduce-pipeline",
         "max_batch_size": 1,
-        // Each job runs in its own container instance (job-<id>); keep this at 1
-        // so we never exceed the container max_instances cap (avoids the
-        // "no Container instance available" 503). Throughput is secondary.
-        "max_concurrency": 1,
+        // Each job runs in its own container instance (job-<id>). Run several in
+        // parallel so light jobs (headline/structured backfill) aren't blocked
+        // behind a slow heavy job (long-podcast download/transcribe). Keep this
+        // below the container max_instances cap to avoid "no Container instance
+        // available" 503s.
+        "max_concurrency": 4,
         "max_retries": 3,
         "dead_letter_queue": "stream-reduce-pipeline-dlq"
       }
@@ -83,7 +85,9 @@
       // package (adapters) alongside cf/pipeline/*.py.
       "image_build_context": "../../",
       "instance_type": "standard-2",
-      "max_instances": 5
+      // Headroom above queue max_concurrency (4) so parallel per-item instances
+      // plus briefly-lingering ones (sleepAfter) don't hit the cap.
+      "max_instances": 10
     }
   ],
 
