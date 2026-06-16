@@ -14,7 +14,11 @@
   },
   "dependencies": {
     "@cloudflare/containers": "^0.0.18",
-    "hono": "^4.6.14"
+    "@cloudflare/workers-oauth-provider": "^0.8.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "agents": "^0.16.1",
+    "hono": "^4.6.14",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250109.0",

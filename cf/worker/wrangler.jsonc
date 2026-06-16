@@ -56,6 +56,14 @@
     }
   ],
 
+  // --- KV: OAuth clients, tokens, and grants ---
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "bfba6f4a3950488cb4b0ba9b84e2b879"
+    }
+  ],
+
   // --- Queues: pipeline jobs (ingest/transcribe/summarize/embed) ---
   "queues": {
     "producers": [{ "binding": "PIPELINE", "queue": "stream-reduce-pipeline" }],

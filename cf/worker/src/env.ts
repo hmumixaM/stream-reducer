@@ -9,6 +9,7 @@ export interface Env {
   VECTORIZE: VectorizeIndex;
   MEDIA: R2Bucket;
   AI: Ai;
+  OAUTH_KV: KVNamespace;
 
   // Queue + container
   PIPELINE: Queue<PipelineMessage>;

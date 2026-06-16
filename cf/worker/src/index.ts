@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env, PipelineMessage } from "./env";
 import type { AppContext } from "./auth";
+import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { authRoutes } from "./routes/auth";
 import { itemsRoutes } from "./routes/items";
 import { folderRoutes } from "./routes/folders";
@@ -12,6 +13,8 @@ import { statsRoutes } from "./routes/stats";
 import { queueRoutes } from "./routes/queue";
 import { settingsRoutes } from "./routes/settings";
 import { adminRoutes } from "./routes/admin";
+import { oauthRoutes } from "./routes/oauth";
+import { mcpHandler } from "./routes/mcp";
 import { handleMessage } from "./pipeline/consumer";
 import { pollDueSubscriptions } from "./pipeline/subscriptions";
 
@@ -34,6 +37,7 @@ app.route("/api/stats", statsRoutes);
 app.route("/api/queue", queueRoutes);
 app.route("/api/settings", settingsRoutes);
 app.route("/api/admin", adminRoutes);
+app.route("/oauth", oauthRoutes);
 
 // Unknown API paths -> JSON 404 (don't fall through to the SPA shell).
 app.all("/api/*", (c) => c.json({ error: "not found" }, 404));
@@ -50,8 +54,18 @@ app.get("/media/*", async (c) => {
 // Anything else: serve the built SPA (assets binding handles SPA fallback).
 app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
+const oauthProvider = new OAuthProvider<Env>({
+  authorizeEndpoint: "/oauth/authorize",
+  tokenEndpoint: "/oauth/token",
+  apiRoute: "/mcp",
+  apiHandler: mcpHandler,
+  defaultHandler: {
+    fetch: app.fetch,
+  },
+});
+
 export default {
-  fetch: app.fetch,
+  fetch: (request: Request, env: Env, ctx: ExecutionContext) => oauthProvider.fetch(request, env, ctx),
 
   // Pipeline queue consumer.
   async queue(batch: MessageBatch<PipelineMessage>, env: Env): Promise<void> {
