@@ -63,7 +63,11 @@ async function runSearch(
   const [qvec] = await embedTexts(env, [query]);
   if (!qvec) return text([]);
 
-  const matches = await env.VECTORIZE.query(qvec, { topK: safeK * 4, returnMetadata: "all" });
+  // Vectorize caps topK at 50 when returnMetadata is "all"; exceeding it 500s.
+  const matches = await env.VECTORIZE.query(qvec, {
+    topK: Math.min(safeK * 4, 50),
+    returnMetadata: "all",
+  });
 
   let savedIds: Set<number> | null = null;
   if (libraryUserId != null) {

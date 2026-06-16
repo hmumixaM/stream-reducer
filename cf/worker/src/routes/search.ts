@@ -23,7 +23,11 @@ searchRoutes.get("/", async (c) => {
   if (!qvec) return c.json([]);
 
   // Over-fetch so we can post-filter to the user's library / source / item.
-  const matches = await c.env.VECTORIZE.query(qvec, { topK: k * 4, returnMetadata: "all" });
+  // Vectorize caps topK at 50 when returnMetadata is "all"; exceeding it 500s.
+  const matches = await c.env.VECTORIZE.query(qvec, {
+    topK: Math.min(k * 4, 50),
+    returnMetadata: "all",
+  });
 
   let savedIds: Set<number> | null = null;
   if (scope !== "global") {
