@@ -13,7 +13,9 @@ export async function handleMessage(env: Env, msg: PipelineMessage): Promise<voi
     case "resummarize":
       return processItem(env, msg.item_id, true);
     case "structured_backfill":
-      return backfillStructuredItem(env, msg.item_id);
+      return backfillStructuredItem(env, msg.item_id, "structured_backfill");
+    case "headline_backfill":
+      return backfillStructuredItem(env, msg.item_id, "headline_backfill");
     case "translate":
       return translateItem(env, msg.item_id, msg.lang);
     case "poll":
@@ -165,7 +167,11 @@ async function translateItem(env: Env, itemId: number, lang: string): Promise<vo
   }
 }
 
-async function backfillStructuredItem(env: Env, itemId: number): Promise<void> {
+async function backfillStructuredItem(
+  env: Env,
+  itemId: number,
+  mode: "structured_backfill" | "headline_backfill",
+): Promise<void> {
   const item = await first<ItemRow>(env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(itemId));
   const summary = await first<{ model: string; prompt_version: string; markdown: string; structured: string }>(
     env.DB.prepare("SELECT model, prompt_version, markdown, structured FROM summary WHERE item_id = ?").bind(itemId),
@@ -178,7 +184,7 @@ async function backfillStructuredItem(env: Env, itemId: number): Promise<void> {
       item_id: itemId,
       source_url: item.source_url,
       platform: item.platform,
-      mode: "structured_backfill",
+      mode,
       summary: structured,
       item: {
         title: item.title,
@@ -192,18 +198,25 @@ async function backfillStructuredItem(env: Env, itemId: number): Promise<void> {
     });
     if (result.error || !result.summary) throw new Error(result.error || "no structured summary produced");
 
-    await env.DB.prepare(
-      `UPDATE summary SET model = ?, prompt_version = ?, markdown = ?, structured = ?
-        WHERE item_id = ?`,
-    )
-      .bind(
-        result.summary.model,
-        result.summary.prompt_version,
-        result.summary.markdown,
-        JSON.stringify(result.summary.structured),
-        itemId,
+    if (mode === "headline_backfill") {
+      // Only the headline/subhead changed; keep the existing markdown/model.
+      await env.DB.prepare("UPDATE summary SET structured = ? WHERE item_id = ?")
+        .bind(JSON.stringify(result.summary.structured), itemId)
+        .run();
+    } else {
+      await env.DB.prepare(
+        `UPDATE summary SET model = ?, prompt_version = ?, markdown = ?, structured = ?
+          WHERE item_id = ?`,
       )
-      .run();
+        .bind(
+          result.summary.model,
+          result.summary.prompt_version,
+          result.summary.markdown,
+          JSON.stringify(result.summary.structured),
+          itemId,
+        )
+        .run();
+    }
     await persistHeadlineFields(env, itemId, result.summary.structured);
     const totals = await persistStageRuns(env, itemId, result.stages);
     await env.DB.prepare(

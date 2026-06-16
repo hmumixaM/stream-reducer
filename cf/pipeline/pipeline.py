@@ -594,6 +594,41 @@ def regenerate_structured(
     )
 
 
+def regenerate_headline(
+    item: ItemView,
+    existing: dict,
+    stages: list[Stage],
+    target_lang: str | None = None,
+) -> dict:
+    """Re-generate only the headline/subhead from an existing summary.
+
+    Cheap (one LLM call): reuses the stored walkthrough (or the structured notes
+    when no walkthrough exists) instead of re-running the full structured set.
+    """
+    source = existing.get("walkthrough") if isinstance(existing.get("walkthrough"), str) else ""
+    if not source.strip():
+        source = _structured_to_source_notes(existing)
+    if not source.strip():
+        source = _build_context(item)
+    lang, _, section_system = _language_setup(source, target_lang)
+    with Stage("summarize", provider="gemini", model=os.environ.get("GEMINI_MODEL")) as st:
+        compact_source = source
+        if len(source) > SUMMARY_SECTION_SOURCE_CHARS:
+            compact_source = _build_walkthrough_index(item, source, lang, section_system, st)
+        headline = _generate_json_section(
+            st,
+            HEADLINE_TEMPLATE.format(context=_build_context(item), source=compact_source, language_instruction=lang),
+            section_system,
+            {"headline": "", "subhead": ""},
+            SUMMARY_HEADLINE_MAX_TOKENS,
+        )
+    stages.append(st)
+    out = dict(existing)
+    out["headline"] = headline.get("headline") or existing.get("headline", "")
+    out["subhead"] = headline.get("subhead") or existing.get("subhead", "")
+    return out
+
+
 def _apply_supplied_metadata(item: ItemView, supplied: dict) -> None:
     item.title = supplied.get("title")
     item.author = supplied.get("author")
@@ -623,9 +658,12 @@ def run(job: dict) -> dict:
     transcript: dict | None = job.get("transcript")
     media = {"bytes": 0, "duration_s": None, "audio_b64": None, "format": None}
 
-    if mode == "structured_backfill":
+    if mode in ("structured_backfill", "headline_backfill"):
         existing = job.get("summary") or {}
-        structured = regenerate_structured(item, existing, stages, target_lang=target_lang)
+        if mode == "headline_backfill":
+            structured = regenerate_headline(item, existing, stages, target_lang=target_lang)
+        else:
+            structured = regenerate_structured(item, existing, stages, target_lang=target_lang)
         markdown = render_markdown(item, structured)
         return {
             "metadata": metadata,

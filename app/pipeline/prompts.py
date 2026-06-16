@@ -146,28 +146,45 @@ Rules:
 - LANGUAGE: {language_instruction}
 """
 
-HEADLINE_TEMPLATE = """## Page background
+HEADLINE_TEMPLATE = """## Page background (includes the original platform title)
 {context}
 
 ## Source notes
 {source}
 
 ---
-Write a Bloomberg-style quick-read headline and subhead for the program.
+Rewrite this program as a Bloomberg-terminal news item: a strict wire-service
+HEADLINE plus a SUBHEAD that states the program's actual conclusion.
 
 Return STRICT JSON with this exact shape:
 {{
-  "headline": "information-dense declarative headline",
-  "subhead": "one sentence stating the unique signal or angle this program contributes to the public discourse"
+  "headline": "wire-service headline in The Bloomberg Way",
+  "subhead": "one sentence delivering the program's core causal conclusion or its sharpest claim"
 }}
 
-Rules:
-- The headline is NOT the original platform title. It should be less clickbait-y and more informative.
-- Lead with the most concrete, important fact, argument, or conclusion supported by the source notes.
-- Maximize information density in a wire-service / Bloomberg headline style.
-- `headline` should be at most about 120 characters, with no trailing punctuation.
-- `subhead` should explain what the reader gets from this program that they might not get from generic coverage.
-- No emoji. Avoid "in this video", "this episode", or other empty framing.
+HEADLINE rules (The Bloomberg Way):
+- Do NOT reuse or lightly edit the original platform title. Throw it out and
+  write a fresh news headline from the substance of the program.
+- Active voice, present tense. Lead with the concrete subject (a name that makes
+  news: the person, company, product, or place) + a strong verb + the outcome.
+- Show, don't tell. Use nouns and verbs only; ban adjectives, adverbs, hype,
+  labels, and characterizations (no "amazing", "shocking", "deep dive", "explores").
+- Pack in 2-3 of these: Names that make news, Surprise (what we know now that we
+  didn't), What's at Stake, Conflict / Conflict resolution.
+- One line. Keep it to ~70 characters for Latin scripts, or ~32 characters for
+  Chinese/CJK. No trailing period, no emoji, no quotation marks around the whole.
+- Do not start clauses with "but", "although", "despite", or "however" unless
+  signalling a genuine about-face.
+
+SUBHEAD rules:
+- This is NOT a description of what the program is "about". State the program's
+  actual takeaway as a claim: the cause-and-effect conclusion it argues
+  (X happens because Y, so Z), or the single sharpest / most provocative claim
+  ("暴论") it makes.
+- If the program is long or sprawling, pick the ONE most important or most
+  striking conclusion rather than listing topics.
+- One declarative sentence. Be specific and pointed, but strictly faithful to
+  what the program actually argues — never invent a claim it doesn't make.
 - LANGUAGE: {language_instruction}
 """
 
