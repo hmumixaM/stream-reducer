@@ -29,13 +29,18 @@ export interface PipelineJob {
   transcript?: { language: string | null; source: string; segments: unknown[]; text: string } | null;
   // When set, the summary is regenerated in this language (on-demand translation).
   target_lang?: string;
-  // Caller-supplied metadata for resummarize/translate (avoids a re-fetch).
+  // Caller-supplied stored metadata used as summary context (title, show notes,
+  // show/author, date, views). Authoritative for sources whose URL exposes no
+  // scrapeable metadata of its own (e.g. podcast/RSS audio enclosures), and a
+  // re-fetch avoidance for resummarize/translate.
   item?: {
     title?: string | null;
     author?: string | null;
     description?: string | null;
     duration_s?: number | null;
     published_at?: string | null;
+    view_count?: number | null;
+    like_count?: number | null;
   };
 }
 

@@ -107,7 +107,9 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
         published_at: e.published ?? null,
         duration_s: e.duration_s ?? null,
         thumbnail: e.thumbnail ?? null,
-        author: e.author ?? null,
+        // Show/program name (feed title) when the episode carries no author, so
+        // the summary knows which program it belongs to.
+        author: e.author ?? feed.title ?? null,
       },
     });
     if (res) enqueued++;

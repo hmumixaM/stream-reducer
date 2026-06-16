@@ -99,6 +99,31 @@ adminRoutes.post("/queue/:id/retry", async (c) => {
   return c.json({ ok: true });
 });
 
+// --- Maintenance ---------------------------------------------------------
+// Re-summarize every item whose summary lost its reduce framing (only the
+// detailed walkthrough survived because the reduce JSON failed to parse).
+// `?dry_run=true` reports the affected items without enqueueing.
+adminRoutes.post("/repair-summaries", async (c) => {
+  const dryRun = c.req.query("dry_run") === "true";
+  const rows = await all<{ item_id: number }>(
+    c.env.DB.prepare(
+      `SELECT item_id FROM summary
+        WHERE COALESCE(json_extract(structured, '$.walkthrough'), '') != ''
+          AND COALESCE(json_extract(structured, '$.tldr'), '') = ''
+          AND COALESCE(json_extract(structured, '$.background'), '') = ''
+          AND COALESCE(json_array_length(json_extract(structured, '$.key_points')), 0) = 0`,
+    ),
+  );
+  const itemIds = rows.map((r) => r.item_id);
+  if (!dryRun) {
+    for (const id of itemIds) {
+      await c.env.DB.prepare("UPDATE item SET status = 'summarizing', error = NULL WHERE id = ?").bind(id).run();
+      await c.env.PIPELINE.send({ kind: "resummarize", item_id: id });
+    }
+  }
+  return c.json({ affected: itemIds.length, enqueued: dryRun ? 0 : itemIds.length, item_ids: itemIds });
+});
+
 // Remove an item from the global catalog entirely (drops it for all users).
 adminRoutes.delete("/queue/:id", async (c) => {
   const id = Number(c.req.param("id"));

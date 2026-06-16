@@ -38,6 +38,10 @@ export interface Env {
 
   // Comma-separated emails auto-granted admin on sign-in.
   ADMIN_EMAILS?: string;
+  // Optional shared secret for headless maintenance: a request carrying a
+  // matching `x-admin-token` header passes the admin guard without a session
+  // (used for one-off repair/backfill scripts). Unset = disabled.
+  ADMIN_TOKEN?: string;
 }
 
 // A unit of pipeline work. `kind` selects the action the queue consumer runs.

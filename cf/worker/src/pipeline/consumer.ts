@@ -132,6 +132,8 @@ async function translateItem(env: Env, itemId: number, lang: string): Promise<vo
         description: item.description,
         duration_s: item.duration_s,
         published_at: item.published_at,
+        view_count: item.view_count,
+        like_count: item.like_count,
       },
     });
     if (result.error || !result.summary) throw new Error(result.error || "no summary produced");
@@ -185,6 +187,18 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
       platform: item.platform,
       mode: resummarize ? "resummarize" : "process",
       transcript,
+      // Pass stored metadata as summary context. For podcast/RSS items whose
+      // audio URL has no scrapeable metadata, this carries the feed's title,
+      // show notes, date, and host so the summary isn't context-blind.
+      item: {
+        title: item.title,
+        author: item.author,
+        description: item.description,
+        duration_s: item.duration_s,
+        published_at: item.published_at,
+        view_count: item.view_count,
+        like_count: item.like_count,
+      },
     });
     if (result.error) throw new Error(result.error);
 

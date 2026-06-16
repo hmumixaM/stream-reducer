@@ -137,7 +137,16 @@ export async function requireAuth(c: Context<AppContext>, next: Next) {
 }
 
 // Middleware: requires an authenticated admin, else 401/403.
+// Headless escape hatch: a request carrying a valid `x-admin-token` (matching
+// the ADMIN_TOKEN secret) passes as a synthetic admin, for one-off maintenance.
 export async function requireAdmin(c: Context<AppContext>, next: Next) {
+  const adminToken = c.env.ADMIN_TOKEN;
+  const provided = c.req.header("x-admin-token");
+  if (adminToken && provided && provided === adminToken) {
+    c.set("user", { id: 0, email: "admin-token", is_admin: 1, created_at: isoNow() } as UserRow);
+    await next();
+    return;
+  }
   const user = await resolveUser(c.env, c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
   if (!user.is_admin) return c.json({ error: "forbidden" }, 403);

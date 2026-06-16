@@ -86,6 +86,13 @@ Rules:
 - LANGUAGE: {language_instruction}
 """
 
+# Appended to the reduce system prompt on a retry when the first attempt didn't
+# return parseable JSON (the model wrapped it in prose or a fence).
+STRICT_JSON_SUFFIX = (
+    " CRITICAL: Output ONLY the raw JSON object — start your response with '{' and "
+    "end it with '}'. No prose, no explanation, no markdown code fences."
+)
+
 # Default directive: keep the model in the source language. Replaced with a
 # stronger Simplified-Chinese mandate when the transcript is Chinese-dominant.
 LANGUAGE_SAME_AS_SOURCE = (

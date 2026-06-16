@@ -12,12 +12,14 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.llm import generate_text
 from app.models import Item, Platform, Summary, Transcript
+from app.pipeline.jsonparse import extract_json
 from app.pipeline.metrics import StageTracker
 from app.pipeline.prompts import (
     MAP_SYSTEM,
     MAP_TEMPLATE,
     REDUCE_SYSTEM,
     REDUCE_TEMPLATE,
+    STRICT_JSON_SUFFIX,
     language_directive,
 )
 from app.runtime_config import effective_llm_model, effective_summary_map_model
@@ -157,13 +159,47 @@ def _strip_fences(text: str) -> str:
 
 
 def _parse_json(text: str) -> dict:
-    text = text.strip()
-    if text.startswith("```"):
-        inner = text.split("```")
-        text = inner[1] if len(inner) > 1 else text
-        if text.lstrip().startswith("json"):
-            text = text.lstrip()[4:]
-    return json.loads(text.strip("` \n"))
+    return extract_json(text)
+
+
+_REDUCE_FALLBACK = {
+    "background": "", "tldr": "", "atmosphere": "",
+    "key_points": [], "quotes": [], "entities": [],
+}
+
+
+def _run_reduce(
+    item: Item,
+    walkthrough: str,
+    lang_instruction: str,
+    tracker: StageTracker | None,
+) -> dict:
+    """Reduce a walkthrough into the high-level framing JSON.
+
+    Retries once with a stricter JSON-only instruction (long walkthroughs make
+    the model more likely to wrap its JSON in prose) before falling back to a
+    walkthrough-only summary.
+    """
+    settings = get_settings()
+    reduce_prompt = REDUCE_TEMPLATE.format(
+        context=_build_context(item),
+        notes=walkthrough,
+        language_instruction=lang_instruction,
+    )
+    for attempt in range(2):
+        system = REDUCE_SYSTEM if attempt == 0 else REDUCE_SYSTEM + STRICT_JSON_SUFFIX
+        result = generate_text(
+            reduce_prompt, system=system, max_tokens=settings.summary_reduce_max_tokens
+        )
+        _record(tracker, result)
+        try:
+            return extract_json(result.text)
+        except (json.JSONDecodeError, ValueError):
+            logger.warning(
+                "reduce JSON parse failed (attempt %d/2) for item %s", attempt + 1, item.id
+            )
+    logger.warning("reduce output unparseable for item %s; keeping walkthrough only", item.id)
+    return dict(_REDUCE_FALLBACK)
 
 
 def summarize_item(session: Session, item_id: int, tracker: StageTracker | None = None) -> Summary:
@@ -206,21 +242,7 @@ def summarize_item(session: Session, item_id: int, tracker: StageTracker | None 
     walkthrough = "\n\n".join(note_blocks)
 
     # --- Reduce step: high-level framing (background, TL;DR, atmosphere, etc.). ---
-    reduce_prompt = REDUCE_TEMPLATE.format(
-        context=_build_context(item),
-        notes=walkthrough,
-        language_instruction=lang_instruction,
-    )
-    result = generate_text(
-        reduce_prompt, system=REDUCE_SYSTEM, max_tokens=settings.summary_reduce_max_tokens
-    )
-    _record(tracker, result)
-    try:
-        structured = _parse_json(result.text)
-    except json.JSONDecodeError:
-        logger.warning("reduce output was not valid JSON; keeping walkthrough only")
-        structured = {"tldr": "", "key_points": [], "quotes": [], "entities": []}
-
+    structured = _run_reduce(item, walkthrough, lang_instruction, tracker)
     structured["walkthrough"] = walkthrough
 
     # --- Optional: separate danmaku (弹幕) mood summary, if any were captured. ---
@@ -235,6 +257,55 @@ def summarize_item(session: Session, item_id: int, tracker: StageTracker | None 
     markdown = render_markdown(item, structured)
     summary = _store_summary(session, item_id, settings, markdown, structured)
     return summary
+
+
+def is_walkthrough_only(structured: dict | None) -> bool:
+    """True when a summary has its walkthrough but lost the reduce framing.
+
+    These are the summaries produced when the reduce JSON failed to parse: only
+    the detailed walkthrough survives, with no background/tl;dr/atmosphere/key
+    points. Used to target the reduce-repair backfill.
+    """
+    s = structured or {}
+    if not s.get("walkthrough"):
+        return False
+    return not any(s.get(k) for k in ("background", "tldr", "atmosphere", "key_points"))
+
+
+def resummarize_reduce(
+    session: Session, item_id: int, tracker: StageTracker | None = None
+) -> Summary | None:
+    """Re-run ONLY the reduce step from the already-stored walkthrough.
+
+    A cheap repair for summaries that fell back to walkthrough-only because the
+    reduce JSON failed to parse: no re-download, no transcription, and no map
+    calls — just one (retried) reduce call. Returns None when the item has no
+    stored walkthrough to reduce from.
+    """
+    settings = get_settings()
+    item = session.get(Item, item_id)
+    if item is None:
+        raise ValueError(f"item {item_id} not found")
+    summary = session.exec(select(Summary).where(Summary.item_id == item_id)).first()
+    walkthrough = (summary.structured or {}).get("walkthrough") if summary else None
+    if not walkthrough:
+        return None
+
+    transcript = session.exec(
+        select(Transcript).where(Transcript.item_id == item_id)
+    ).first()
+    lang_source = (transcript.text if transcript else "") or walkthrough
+    lang_instruction = language_directive(lang_source)
+
+    structured = _run_reduce(item, walkthrough, lang_instruction, tracker)
+    structured["walkthrough"] = walkthrough
+    # Preserve a previously-computed danmaku mood block if present.
+    prior_danmaku = (summary.structured or {}).get("danmaku")
+    if prior_danmaku:
+        structured["danmaku"] = prior_danmaku
+
+    markdown = render_markdown(item, structured)
+    return _store_summary(session, item_id, settings, markdown, structured)
 
 
 def _store_summary(session, item_id, settings, markdown, structured) -> Summary:

@@ -22,11 +22,13 @@ from pathlib import Path
 from app.adapters.base import ContentMeta
 from app.adapters.registry import detect_platform, get_adapter
 from app.pipeline.audio import decodable_duration, probe_duration, split_audio
+from app.pipeline.jsonparse import extract_json
 from app.pipeline.prompts import (
     MAP_SYSTEM,
     MAP_TEMPLATE,
     REDUCE_SYSTEM,
     REDUCE_TEMPLATE,
+    STRICT_JSON_SUFFIX,
     language_directive,
 )
 from app.zh import to_simplified
@@ -58,6 +60,17 @@ class ItemView:
     description: str | None = None
     duration_s: int | None = None
     published_at: datetime | None = None
+    view_count: int | None = None
+    like_count: int | None = None
+
+
+def _parse_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
 
 
 @dataclass
@@ -135,34 +148,28 @@ def _strip_fences(text: str) -> str:
     return text
 
 
-def _parse_json(text: str) -> dict:
-    text = text.strip()
-    if text.startswith("```"):
-        inner = text.split("```")
-        text = inner[1] if len(inner) > 1 else text
-        if text.lstrip().startswith("json"):
-            text = text.lstrip()[4:]
-    return json.loads(text.strip("` \n"))
-
-
 def _build_context(item: ItemView) -> str:
     lines = [
         f"- Title: {item.title or '(unknown)'}",
         f"- Platform: {PLATFORM_LABELS.get(item.platform, item.platform)}",
-        f"- Submitted/published by: {item.author or '(unknown)'}",
+        f"- Channel / author: {item.author or '(unknown)'}",
     ]
     if item.published_at:
         lines.append(f"- Published: {item.published_at.date().isoformat()}")
     if item.duration_s:
         lines.append(f"- Duration: {fmt_timestamp(item.duration_s)}")
+    if item.view_count is not None:
+        lines.append(f"- View count: {item.view_count:,}")
+    if item.like_count is not None:
+        lines.append(f"- Like count: {item.like_count:,}")
     lines.append(f"- Source URL: {item.source_url}")
     desc = (item.description or "").strip()
     if desc:
-        if len(desc) > 2000:
-            desc = desc[:2000] + " …"
-        lines.append(f"- Page description:\n{desc}")
+        if len(desc) > 4000:
+            desc = desc[:4000] + " …"
+        lines.append(f"- Show notes / description:\n{desc}")
     else:
-        lines.append("- Page description: (none provided)")
+        lines.append("- Show notes / description: (none provided)")
     return "\n".join(lines)
 
 
@@ -356,16 +363,29 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
             note_blocks.append(strip_body_timestamps(_strip_fences(res.text).strip()))
         walkthrough = "\n\n".join(note_blocks)
 
-        reduce_res = llm.generate_text(
-            REDUCE_TEMPLATE.format(context=_build_context(item), notes=walkthrough, language_instruction=lang),
-            system=reduce_system, max_tokens=SUMMARY_REDUCE_MAX_TOKENS,
+        reduce_prompt = REDUCE_TEMPLATE.format(
+            context=_build_context(item), notes=walkthrough, language_instruction=lang,
         )
-        st.request_count += 1
-        st.total_tokens += reduce_res.total_tokens
-        try:
-            structured = _parse_json(reduce_res.text)
-        except json.JSONDecodeError:
-            structured = {"tldr": "", "key_points": [], "quotes": [], "entities": []}
+        structured: dict | None = None
+        # The reduce output is the only source of background/tl;dr/atmosphere/
+        # key points/quotes. Long-form (esp. YouTube native-caption) walkthroughs
+        # make the model more likely to wrap its JSON in prose; retry once with a
+        # stricter JSON-only instruction before giving up to walkthrough-only.
+        for attempt in range(2):
+            system = reduce_system if attempt == 0 else reduce_system + STRICT_JSON_SUFFIX
+            reduce_res = llm.generate_text(
+                reduce_prompt, system=system, max_tokens=SUMMARY_REDUCE_MAX_TOKENS,
+            )
+            st.request_count += 1
+            st.total_tokens += reduce_res.total_tokens
+            try:
+                structured = extract_json(reduce_res.text)
+                break
+            except (json.JSONDecodeError, ValueError):
+                continue
+        if structured is None:
+            structured = {"background": "", "tldr": "", "atmosphere": "",
+                          "key_points": [], "quotes": [], "entities": []}
         structured["walkthrough"] = walkthrough
     stages.append(st)
     return structured
@@ -379,6 +399,10 @@ def run(job: dict) -> dict:
     stages: list[Stage] = []
 
     target_lang = job.get("target_lang") or None
+    # Stored metadata from the Worker (feed title/show notes/date/views). Used as
+    # a fallback so RSS/podcast items — whose audio URL exposes no scrapeable
+    # metadata — still get real summary context.
+    supplied = job.get("item") or {}
     adapter = get_adapter(plat)
     item = ItemView(platform=plat.value, source_url=source_url)
     metadata: dict = {}
@@ -390,11 +414,15 @@ def run(job: dict) -> dict:
             with Stage("download", provider=adapter.name) as st:
                 meta = adapter.fetch_metadata(source_url)
                 metadata = _meta_to_dict(meta)
-                item.title = metadata["title"]
-                item.author = metadata["author"]
-                item.description = metadata["description"]
-                item.duration_s = metadata["duration_s"]
-                item.published_at = meta.published_at
+                # Adapter-scraped metadata wins when present; fall back to the
+                # stored feed metadata (the only source for podcast enclosures).
+                item.title = metadata["title"] or supplied.get("title")
+                item.author = metadata["author"] or supplied.get("author")
+                item.description = metadata["description"] or supplied.get("description")
+                item.duration_s = metadata["duration_s"] or supplied.get("duration_s")
+                item.published_at = meta.published_at or _parse_dt(supplied.get("published_at"))
+                item.view_count = metadata.get("view_count") or supplied.get("view_count")
+                item.like_count = metadata.get("like_count") or supplied.get("like_count")
 
                 native = adapter.get_native_transcript(source_url, os.environ.get("DEFAULT_LANGUAGE") or None)
                 if native and native.segments:
@@ -417,17 +445,14 @@ def run(job: dict) -> dict:
         # resummarize / translate: reuse provided transcript. Prefer metadata
         # passed by the caller (avoids a re-fetch — important for sources like
         # Bilibili that block our egress); fall back to fetching otherwise.
-        supplied = job.get("item") or {}
         if supplied:
             item.title = supplied.get("title")
             item.author = supplied.get("author")
             item.description = supplied.get("description")
             item.duration_s = supplied.get("duration_s")
-            pub = supplied.get("published_at")
-            try:
-                item.published_at = datetime.fromisoformat(pub.replace("Z", "+00:00")) if pub else None
-            except (ValueError, AttributeError):
-                item.published_at = None
+            item.published_at = _parse_dt(supplied.get("published_at"))
+            item.view_count = supplied.get("view_count")
+            item.like_count = supplied.get("like_count")
         else:
             meta = adapter.fetch_metadata(source_url)
             metadata = _meta_to_dict(meta)
@@ -436,6 +461,8 @@ def run(job: dict) -> dict:
             item.description = metadata["description"]
             item.duration_s = metadata["duration_s"]
             item.published_at = meta.published_at
+            item.view_count = metadata.get("view_count")
+            item.like_count = metadata.get("like_count")
 
     if not transcript or not transcript.get("segments"):
         raise RuntimeError("no transcript available")
