@@ -70,6 +70,11 @@ export interface SubscriptionRow {
   enabled: number;
   last_checked_at: string | null;
   last_seen_guid: string | null;
+  last_status: string | null;
+  last_error: string | null;
+  last_entry_count: number;
+  last_new_count: number;
+  consecutive_failures: number;
   created_at: string;
 }
 

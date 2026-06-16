@@ -45,6 +45,22 @@ async function entryDuration(entry: FeedEntry, platform: string): Promise<number
   return null;
 }
 
+// Record the outcome of a poll so a broken feed is visible instead of silently
+// looking like "healthy, no new episodes". `error` carries the failure reason;
+// `consecutive_failures` keeps climbing until a poll succeeds again.
+async function recordPollError(env: Env, subId: number, err: unknown): Promise<void> {
+  const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  console.error("subscription poll failed", subId, msg);
+  await env.DB.prepare(
+    `UPDATE subscription
+        SET last_checked_at = ?, last_status = 'error', last_error = ?,
+            consecutive_failures = consecutive_failures + 1
+      WHERE id = ?`,
+  )
+    .bind(isoNow(), msg.slice(0, 2000), subId)
+    .run();
+}
+
 export async function pollSubscription(env: Env, subId: number): Promise<number> {
   const sub = await first<SubscriptionRow>(
     env.DB.prepare("SELECT * FROM subscription WHERE id = ?").bind(subId),
@@ -54,13 +70,23 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
   let feed: { title: string | null; entries: FeedEntry[] };
   try {
     feed = await fetchFeed(env, sub.feed_url);
-  } catch {
-    await env.DB.prepare("UPDATE subscription SET last_checked_at = ? WHERE id = ?").bind(isoNow(), subId).run();
+  } catch (err) {
+    await recordPollError(env, subId, err);
     return 0;
   }
   const entries = feed.entries;
   if (!entries.length) {
-    await env.DB.prepare("UPDATE subscription SET last_checked_at = ? WHERE id = ?").bind(isoNow(), subId).run();
+    // No entries can mean an empty feed OR a feed that fetched but parsed to
+    // nothing (e.g. bilibili risk-control HTML). Flag it as 'empty' so the UI
+    // can warn when a feed that should have content keeps returning zero.
+    await env.DB.prepare(
+      `UPDATE subscription
+          SET last_checked_at = ?, last_status = 'empty', last_error = NULL,
+              last_entry_count = 0, last_new_count = 0
+        WHERE id = ?`,
+    )
+      .bind(isoNow(), subId)
+      .run();
     return 0;
   }
 
@@ -119,10 +145,13 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
     ? newestFirstBatch[0]?.guid
     : newestGuid;
   await env.DB.prepare(
-    `UPDATE subscription SET last_checked_at = ?, last_seen_guid = COALESCE(?, last_seen_guid),
-       title = COALESCE(title, ?) WHERE id = ?`,
+    `UPDATE subscription
+        SET last_checked_at = ?, last_seen_guid = COALESCE(?, last_seen_guid),
+            title = COALESCE(title, ?), last_status = 'ok', last_error = NULL,
+            last_entry_count = ?, last_new_count = ?, consecutive_failures = 0
+      WHERE id = ?`,
   )
-    .bind(isoNow(), nextSeenGuid, feed.title, subId)
+    .bind(isoNow(), nextSeenGuid, feed.title, entries.length, enqueued, subId)
     .run();
   return enqueued;
 }

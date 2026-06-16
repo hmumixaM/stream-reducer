@@ -2,10 +2,32 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { RefreshCw, Trash2, Power } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type Subscription } from "@/lib/api";
 import { Button, Card, Input, Spinner } from "@/components/ui";
 import { PlatformBadge } from "@/components/badges";
 import { timeAgo } from "@/lib/utils";
+
+// Compact health pill for the most recent poll outcome.
+function PollStatus({ sub }: { sub: Subscription }) {
+  if (!sub.last_status) return null;
+  const tone =
+    sub.last_status === "error"
+      ? "bg-red-500/15 text-red-400"
+      : sub.last_status === "empty"
+        ? "bg-amber-500/15 text-amber-400"
+        : "bg-emerald-500/15 text-emerald-400";
+  const label =
+    sub.last_status === "error"
+      ? `error${sub.consecutive_failures ? ` ×${sub.consecutive_failures}` : ""}`
+      : sub.last_status === "empty"
+        ? "no entries"
+        : sub.last_new_count
+          ? `+${sub.last_new_count} new`
+          : "ok";
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>{label}</span>
+  );
+}
 
 export function Subscriptions() {
   const qc = useQueryClient();
@@ -99,7 +121,7 @@ export function Subscriptions() {
                 >
                   {s.title || s.feed_url}
                 </button>
-                <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                   <span>every {s.interval_minutes}m</span>
                   {s.window_days != null && <span>last {s.window_days}d</span>}
                   <span>
@@ -107,7 +129,19 @@ export function Subscriptions() {
                       ? `checked ${timeAgo(s.last_checked_at)}`
                       : "never checked"}
                   </span>
+                  <PollStatus sub={s} />
                 </div>
+                {s.last_status === "error" && s.last_error && (
+                  <p className="mt-1 text-xs text-red-400" title={s.last_error}>
+                    last poll failed: {s.last_error}
+                  </p>
+                )}
+                {s.last_status === "empty" && !s.last_seen_guid && (
+                  <p className="mt-1 text-xs text-amber-400">
+                    feed returned 0 entries — for bilibili this usually means an expired/blocked
+                    BILIBILI_COOKIE (risk control).
+                  </p>
+                )}
               </div>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => poll.mutate(s.id)}>

@@ -7,6 +7,12 @@ import { toItemRead } from "../lib/serialize";
 export const queueRoutes = new Hono<AppContext>();
 queueRoutes.use("*", requireAuth);
 
+// Mirror of the consumer's STALE_IN_PROGRESS_MS: an item still in-progress past
+// this long was orphaned by a Worker eviction and is waiting to be reclaimed,
+// so the UI shows it as "stalled" rather than pretending it's actively running.
+const STALE_IN_PROGRESS_MS = 20 * 60 * 1000;
+const IN_PROGRESS = new Set(["fetching", "transcribing", "summarizing"]);
+
 // The user's in-flight library: anything not yet done, plus recent errors,
 // ordered by processing priority (highest-demand first).
 queueRoutes.get("/", async (c) => {
@@ -35,6 +41,7 @@ queueRoutes.get("/", async (c) => {
         ORDER BY item.priority_score DESC, item.enqueued_at DESC`,
     ).bind(userId),
   );
+  const staleBefore = Date.now() - STALE_IN_PROGRESS_MS;
   return c.json(
     rows.map((r) => ({
       ...toItemRead(r, {
@@ -50,6 +57,12 @@ queueRoutes.get("/", async (c) => {
       chunk_count: r.chunk_count ?? 0,
       queue_position: r.queue_position,
       queue_total: queueTotal,
+      // True when the row claims to be running but its container was orphaned
+      // (no heartbeat past the reclaim cutoff) — i.e. stuck, not progressing.
+      stalled:
+        IN_PROGRESS.has(r.status) &&
+        !!r.started_at &&
+        new Date(r.started_at).getTime() < staleBefore,
     })),
   );
 });
