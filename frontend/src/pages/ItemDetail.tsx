@@ -15,6 +15,7 @@ import {
   BookOpen,
   Highlighter,
   Languages,
+  Network,
 } from "lucide-react";
 import {
   api,
@@ -52,7 +53,6 @@ export function ItemDetail() {
   // need a session; anonymous visitors get a read-only view.
   const canEdit = !MIRROR && !!me.data?.user;
   const [showTranscript, setShowTranscript] = useState(false);
-  const [showMindmap, setShowMindmap] = useState(false);
   const [showComments, setShowComments] = useState(false);
   
   const [readMode, setReadMode] = useState(() => {
@@ -251,6 +251,19 @@ export function ItemDetail() {
 
       <div className={readMode ? "block" : "grid grid-cols-1 gap-6 lg:grid-cols-3"}>
         <div className={readMode ? "" : "lg:col-span-2"}>
+          {typeof d.summary?.structured?.mindmap === "string" && d.summary.structured.mindmap && (
+            <div className={cn("mb-6 overflow-hidden rounded-xl border border-border bg-card shadow-sm", readMode && "border-dashed bg-transparent shadow-none")}>
+              <div className="bg-muted/30 px-4 py-3 border-b border-border flex items-center justify-between">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <Network className="h-4 w-4 text-primary" /> Visual Summary
+                </h3>
+              </div>
+              <div className="p-4">
+                <Mindmap chart={d.summary.structured.mindmap as string} />
+              </div>
+            </div>
+          )}
+
           {d.summary ? (
             <SummaryView
               itemId={itemId}
@@ -272,25 +285,6 @@ export function ItemDetail() {
                 <>
                   <Spinner /> Processing… the summary will appear here.
                 </>
-              )}
-            </Card>
-          )}
-
-          {d.summary?.structured?.mindmap && (
-            <Card className={cn("mt-4 p-4", readMode && "border-dashed bg-transparent shadow-none")}>
-              <button
-                onClick={() => setShowMindmap((s) => !s)}
-                className="flex w-full items-center justify-between text-sm font-medium"
-              >
-                <span>Mindmap</span>
-                <ChevronDown
-                  className={`h-4 w-4 transition-transform ${showMindmap ? "rotate-180" : ""}`}
-                />
-              </button>
-              {showMindmap && (
-                <div className="mt-4 border-t border-border pt-4">
-                  <Mindmap chart={d.summary.structured.mindmap as string} />
-                </div>
               )}
             </Card>
           )}

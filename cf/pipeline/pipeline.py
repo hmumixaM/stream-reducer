@@ -33,6 +33,8 @@ from app.pipeline.prompts import (
     SECTION_SYSTEM,
     STRICT_JSON_SUFFIX,
     WALKTHROUGH_INDEX_TEMPLATE,
+    MINDMAP_SYSTEM,
+    MINDMAP_TEMPLATE,
     language_directive,
 )
 from app.zh import to_simplified
@@ -541,6 +543,36 @@ def _generate_structured_sections(
     return structured
 
 
+def generate_mindmap(
+    item: ItemView,
+    structured: dict,
+    lang: str,
+    stages: list[Stage],
+) -> str:
+    source = _structured_to_source_notes(structured)
+    if not source.strip():
+        source = _build_context(item)
+    context = _build_context(item)
+    prompt = MINDMAP_TEMPLATE.format(context=context, source=source, language_instruction=lang)
+
+    with Stage("mindmap", provider="gemini", model=llm._mindmap_model()) as st:
+        res = llm.generate_text(
+            prompt,
+            system=MINDMAP_SYSTEM,
+            model=llm._mindmap_model(),
+            max_tokens=SUMMARY_REDUCE_MAX_TOKENS,
+        )
+        st.request_count += 1
+        st.total_tokens += res.total_tokens
+
+        text = _strip_fences(res.text).strip()
+        if text.startswith(("mindmap", "timeline", "flowchart", "graph")):
+            stages.append(st)
+            return text
+    stages.append(st)
+    return ""
+
+
 # --- summarize -------------------------------------------------------------
 def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang: str | None = None) -> dict:
     segments = transcript.get("segments") or []
@@ -568,6 +600,7 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
             active_stage=st,
         )
     stages.append(st)
+    structured["mindmap"] = generate_mindmap(item, structured, lang, stages)
     return structured
 
 
@@ -583,7 +616,7 @@ def regenerate_structured(
     if not source.strip():
         source = _build_context(item)
     lang, _, section_system = _language_setup(source, target_lang)
-    return _generate_structured_sections(
+    structured = _generate_structured_sections(
         item,
         source,
         stages,
@@ -592,6 +625,8 @@ def regenerate_structured(
         existing=existing,
         walkthrough=existing.get("walkthrough", ""),
     )
+    structured["mindmap"] = generate_mindmap(item, structured, lang, stages)
+    return structured
 
 
 def regenerate_headline(
@@ -629,6 +664,19 @@ def regenerate_headline(
     return out
 
 
+def regenerate_mindmap(
+    item: ItemView,
+    existing: dict,
+    stages: list[Stage],
+    target_lang: str | None = None,
+) -> dict:
+    """Re-generate only the mindmap from an existing summary."""
+    lang, _, _ = _language_setup("", target_lang)
+    out = dict(existing)
+    out["mindmap"] = generate_mindmap(item, out, lang, stages)
+    return out
+
+
 def _apply_supplied_metadata(item: ItemView, supplied: dict) -> None:
     item.title = supplied.get("title")
     item.author = supplied.get("author")
@@ -658,10 +706,12 @@ def run(job: dict) -> dict:
     transcript: dict | None = job.get("transcript")
     media = {"bytes": 0, "duration_s": None, "audio_b64": None, "format": None}
 
-    if mode in ("structured_backfill", "headline_backfill"):
+    if mode in ("structured_backfill", "headline_backfill", "mindmap_backfill"):
         existing = job.get("summary") or {}
         if mode == "headline_backfill":
             structured = regenerate_headline(item, existing, stages, target_lang=target_lang)
+        elif mode == "mindmap_backfill":
+            structured = regenerate_mindmap(item, existing, stages, target_lang=target_lang)
         else:
             structured = regenerate_structured(item, existing, stages, target_lang=target_lang)
         markdown = render_markdown(item, structured)

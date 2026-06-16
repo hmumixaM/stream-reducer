@@ -4,7 +4,23 @@ import { AlertCircle } from "lucide-react";
 
 mermaid.initialize({
   startOnLoad: false,
-  theme: "dark",
+  theme: "base",
+  themeVariables: {
+    darkMode: true,
+    fontFamily: "inherit",
+    primaryColor: "#3b82f6", // blue-500
+    primaryTextColor: "#f8fafc", // slate-50
+    primaryBorderColor: "#2563eb", // blue-600
+    lineColor: "#475569", // slate-600
+    secondaryColor: "#1e293b", // slate-800
+    tertiaryColor: "#0f172a", // slate-900
+  },
+  mindmap: {
+    padding: 16,
+  },
+  flowchart: {
+    curve: "basis",
+  },
 });
 
 interface MindmapProps {
@@ -65,7 +81,7 @@ export function Mindmap({ chart }: MindmapProps) {
 
   return (
     <div 
-      className="w-full overflow-auto flex justify-center py-4 mermaid-container"
+      className="w-full overflow-hidden flex justify-center py-6 px-2 bg-slate-900/30 rounded-lg [&>svg]:max-w-full [&>svg]:h-auto"
       ref={containerRef}
     />
   );
