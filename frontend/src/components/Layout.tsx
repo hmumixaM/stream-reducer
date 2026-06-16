@@ -156,7 +156,7 @@ export function Layout() {
           <Plus className="h-4 w-4" /> Add content
         </Button>
       )}
-      <nav className="flex flex-1 flex-col gap-1">
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
@@ -233,7 +233,7 @@ export function Layout() {
       {/* Sidebar (Mobile Drawer & Desktop Static) */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-card p-4 transition-transform duration-300 ease-in-out md:static md:w-60 md:translate-x-0 md:bg-card/40",
+          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-card p-4 transition-transform duration-300 ease-in-out md:sticky md:top-0 md:h-screen md:self-start md:w-60 md:translate-x-0 md:bg-card/40",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
