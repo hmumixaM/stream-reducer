@@ -16,7 +16,21 @@
     // /api/* (e.g. the magic-link GET /api/auth/verify) with the SPA shell
     // before the Worker runs, so React Router 404s. Run the Worker first for
     // server-handled paths; everything else still falls back to the SPA.
-    "run_worker_first": ["/api/*", "/media/*"]
+    // The /mcp, /oauth/*, and OAuth discovery (/.well-known/oauth-*) paths are
+    // handled by the OAuthProvider that wraps the Worker, so they must run the
+    // Worker first too — otherwise the assets layer serves the SPA (GET) or a
+    // bare 405 (POST) and the MCP/OAuth endpoints never get reached.
+    "run_worker_first": [
+      "/api/*",
+      "/media/*",
+      "/mcp",
+      "/mcp/*",
+      "/oauth/*",
+      "/.well-known/oauth-authorization-server",
+      "/.well-known/oauth-authorization-server/*",
+      "/.well-known/oauth-protected-resource",
+      "/.well-known/oauth-protected-resource/*"
+    ]
   },
 
   "observability": { "enabled": true },
