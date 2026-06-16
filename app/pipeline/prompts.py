@@ -300,10 +300,19 @@ DANMAKU_TEMPLATE = """以下是观众在视频时间轴上发布的弹幕列表�
 MINDMAP_SYSTEM = (
     "You are an expert at creating structured visual summaries. You are given page "
     "metadata and a detailed set of source notes. Your task is to extract the core "
-    "logic and represent it strictly as a Mermaid diagram.\n"
-    "Based on the content's logical structure, choose the best diagram type: `mindmap` "
-    "(for expansion, categories, or bubble maps), `timeline` (for chronological sequences), "
-    "or `flowchart` (for causality, processes, or fishbone-like structures).\n"
+    "logic and represent it strictly as a Mermaid diagram.\n\n"
+    "First, analyze the logical structure of the content. There are three main categories of structures:\n"
+    "1. Classic & Expansion (e.g., Spider map, Circle map, Bubble map, Double bubble map). "
+    "Best for creativity, definitions, feature descriptions, and brainstorming.\n"
+    "2. Logical & Hierarchical (e.g., Tree map, Brace map, Fishbone/Cause-and-effect map, Matrix map, Bridge map). "
+    "Best for classifications, comparisons, systemic analysis, and problem attribution.\n"
+    "3. Process & Timeline (e.g., Flow map, Multi-flow map, Timeline, Org chart). "
+    "Best for executions, evolutions, project tracking, and algorithmic steps.\n\n"
+    "Based on the content's core nature, choose the single most appropriate structural category, "
+    "and then translate it into the closest supported Mermaid diagram type:\n"
+    "- Use `mindmap` for Classic & Expansion structures.\n"
+    "- Use `flowchart LR` or `flowchart TD` for Logical, Hierarchical, and Process structures (Tree, Fishbone, Flow, Multi-flow).\n"
+    "- Use `timeline` for pure Timeline/Chronological structures.\n\n"
     "Respond with ONLY the raw Mermaid text. Do NOT use markdown code blocks or backticks. "
     "Do NOT add any explanations."
 )
@@ -317,29 +326,29 @@ MINDMAP_TEMPLATE = """## Page background
 ---
 Analyze the logical structure of the content above and create the most appropriate Mermaid diagram to visualize it.
 
-Step 1: Determine the best visual framework based on the content's nature:
-- If it's about categories, attributes, or radial expansion (Concept Map, Bubble Map): Use `mindmap`.
-- If it's a history, chronological sequence, or step-by-step timeline: Use `timeline`.
-- If it's a process, cause-and-effect (Fishbone), or tree structure: Use `flowchart LR` or `flowchart TD`.
+Step 1: Choose the visual framework (Expansion, Hierarchical, or Process) that best captures the essence of the content.
 
 Step 2: Generate the Mermaid code.
 
-Syntax Rules for `mindmap`:
+Syntax Rules for `mindmap` (Expansion / Bubble Maps):
 - First line MUST be exactly `mindmap`
 - Use spaces (indentation) to define hierarchy.
-- Root node -> 3-6 main branches -> 2-4 sub-nodes.
+- Root node -> 3-8 main branches -> 2-5 sub-nodes.
 
-Syntax Rules for `timeline`:
+Syntax Rules for `flowchart` (Hierarchical / Tree / Fishbone / Flow Maps):
+- First line MUST be exactly `flowchart LR` or `flowchart TD`
+- Use format: `A[Node A] --> B[Node B]`
+- You can add edge labels: `A -->|Label| B`
+- Group into subgraphs if helpful: `subgraph Name ... end`
+
+Syntax Rules for `timeline` (Chronological sequences):
 - First line MUST be exactly `timeline`
 - Use format: `[Time period or Step] : [Event 1] : [Event 2]`
 
-Syntax Rules for `flowchart`:
-- First line MUST be exactly `flowchart LR` (or `flowchart TD`)
-- Use format: `A[Node A] --> B[Node B]`
-
 General Rules:
-- Keep the text in each node EXTREMELY CONCISE (1-8 words).
-- Avoid special characters that break Mermaid (do NOT use parentheses `()`, brackets `[]`, braces `{{}}`, semicolons `;`, or quotes `"`).
+- Keep the text in each node EXTREMELY CONCISE (1-10 words).
+- Extract the most insightful, defining characteristics or the core logical flow.
+- Avoid special characters that break Mermaid (do NOT use parentheses `()`, brackets `[]`, braces `{{}}`, semicolons `;`, or quotes `"`). Use full-width equivalents like `（` or `”` if absolutely necessary.
 - Respond with the raw Mermaid text only. No markdown formatting.
 - LANGUAGE: {language_instruction}
 """

@@ -81,7 +81,7 @@ export function Mindmap({ chart }: MindmapProps) {
 
   return (
     <div 
-      className="w-full overflow-hidden flex justify-center py-6 px-2 bg-slate-900/30 rounded-lg [&>svg]:max-w-full [&>svg]:h-auto"
+      className="w-full flex justify-center [&>svg]:max-w-full [&>svg]:h-auto drop-shadow-md transition-transform duration-500 hover:scale-[1.02]"
       ref={containerRef}
     />
   );

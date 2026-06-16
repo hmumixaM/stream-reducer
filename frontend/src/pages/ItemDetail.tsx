@@ -252,14 +252,22 @@ export function ItemDetail() {
       <div className={readMode ? "block" : "grid grid-cols-1 gap-6 lg:grid-cols-3"}>
         <div className={readMode ? "" : "lg:col-span-2"}>
           {typeof d.summary?.structured?.mindmap === "string" && d.summary.structured.mindmap && (
-            <div className={cn("mb-6 overflow-hidden rounded-xl border border-border bg-card shadow-sm", readMode && "border-dashed bg-transparent shadow-none")}>
-              <div className="bg-muted/30 px-4 py-3 border-b border-border flex items-center justify-between">
-                <h3 className="text-sm font-semibold flex items-center gap-2">
-                  <Network className="h-4 w-4 text-primary" /> Visual Summary
-                </h3>
-              </div>
-              <div className="p-4">
-                <Mindmap chart={d.summary.structured.mindmap as string} />
+            <div className={cn("mb-6 relative group rounded-2xl overflow-hidden transition-all duration-700 hover:shadow-[0_0_40px_rgba(59,130,246,0.15)]", readMode ? "border-dashed bg-transparent shadow-none" : "")}>
+              {!readMode && (
+                <>
+                  <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 via-purple-500/10 to-transparent opacity-50 group-hover:opacity-100 transition-opacity duration-700 blur-xl"></div>
+                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/30 via-transparent to-pink-500/20"></div>
+                </>
+              )}
+              <div className={cn("relative w-full overflow-hidden flex flex-col bg-slate-950/80 backdrop-blur-xl border", readMode ? "border-dashed border-border" : "border-white/10 rounded-2xl")}>
+                <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between z-10 bg-gradient-to-r from-blue-500/10 to-transparent">
+                  <h3 className="text-sm font-semibold flex items-center gap-2 text-blue-100 tracking-wide">
+                    <Network className="h-4 w-4 text-blue-400" /> Visual Summary
+                  </h3>
+                </div>
+                <div className="p-4 sm:p-6 lg:p-8 z-10 w-full overflow-x-auto min-h-[200px] flex items-center justify-center">
+                  <Mindmap chart={d.summary.structured.mindmap as string} />
+                </div>
               </div>
             </div>
           )}
