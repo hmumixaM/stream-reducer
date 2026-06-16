@@ -114,6 +114,9 @@ const SEARCH_INPUT_SCHEMA = {
   k: z.number().int().default(10),
   source: z.string().optional(),
   item_id: z.number().int().optional(),
+  // "library" (default) searches only the caller's saved items; "all" searches
+  // every item in the shared catalog.
+  scope: z.enum(["library", "all"]).default("library"),
 } as const;
 
 // Build the per-request MCP server. A fresh instance per request is required
@@ -194,30 +197,16 @@ function buildServer(env: Env, userId: number): McpServer {
     "search_content",
     {
       description:
-        "Semantic search across the transcripts + summaries of items in YOUR library only. " +
-        "Returns the most relevant chunks (not whole items), each with the chunk `text`, " +
-        "its `item_id`/`title`/`source_url`, a `source` (transcript/summary) + `field` tag, " +
-        "a similarity `score`, and — for transcript hits — `start_s` plus a `deep_link` that " +
-        "jumps to that moment. Optional filters: `source` (\"transcript\"/\"summary\") and " +
-        "`item_id` (restrict to one item). Use `search_all_content` to search every item in " +
-        "the catalog, not just your library.",
+        "Semantic search across the transcripts + summaries of content. By default " +
+        "(`scope`=\"library\") it searches only YOUR saved items; pass `scope`=\"all\" to " +
+        "search EVERY item in the shared catalog. Returns the most relevant chunks (not " +
+        "whole items), each with the chunk `text`, its `item_id`/`title`/`source_url`, a " +
+        "`source` (transcript/summary) + `field` tag, a similarity `score`, and — for " +
+        "transcript hits — `start_s` plus a `deep_link` that jumps to that moment. Optional " +
+        "filters: `source` (\"transcript\"/\"summary\") and `item_id` (restrict to one item).",
       inputSchema: SEARCH_INPUT_SCHEMA,
     },
-    async (args) => runSearch(env, args, userId),
-  );
-
-  server.registerTool(
-    "search_all_content",
-    {
-      description:
-        "Semantic search across the transcripts + summaries of EVERY item in the whole " +
-        "stream-reduce catalog (shared across all users), not just your own library. " +
-        "Same result shape and filters as `search_content`: returns matching chunks with " +
-        "`text`, `item_id`/`title`/`source_url`, `source`/`field`, `score`, and a `deep_link` " +
-        "for transcript hits. Optional filters: `source` and `item_id`.",
-      inputSchema: SEARCH_INPUT_SCHEMA,
-    },
-    async (args) => runSearch(env, args, null),
+    async ({ scope, ...args }) => runSearch(env, args, scope === "all" ? null : userId),
   );
 
   server.registerTool(
