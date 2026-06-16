@@ -259,7 +259,7 @@ function HeadlineRow({
             {item.interest_count ? <span>{item.interest_count} interested</span> : null}
           </div>
         </div>
-        <div className="flex gap-2 sm:w-44 sm:flex-col">
+        <div className="flex shrink-0 gap-2 sm:w-44 sm:flex-col sm:self-start">
           <ItemActions
             item={item}
             canAdd={canAdd}
