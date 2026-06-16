@@ -17,7 +17,7 @@ mermaid.initialize({
     tertiaryColor: "#020617",     // slate-950 (root node)
     
     // Explicit cluster/background colors if flowchart uses subgraphs
-    clusterBkg: "#0f172a",
+    clusterBkg: "transparent",
     clusterBorder: "#334155",
   },
   mindmap: {
@@ -29,6 +29,7 @@ mermaid.initialize({
     padding: 20,
     nodeSpacing: 40,
     rankSpacing: 40,
+    defaultRenderer: "dagre-wrapper",
   },
 });
 
@@ -79,7 +80,17 @@ export function Mindmap({ chart }: MindmapProps) {
         
         // Generate a unique ID for this render to avoid conflicts
         const id = `mindmap-${Math.random().toString(36).substr(2, 9)}`;
-        const { svg } = await mermaid.render(id, sanitizeChart(chart));
+        // Replace any unescaped quotes with their full-width equivalent
+        // because quotes break mermaid syntax. Exclude the start keyword.
+        let sanitized = sanitizeChart(chart);
+        const lines = sanitized.split('\n');
+        for (let i = 1; i < lines.length; i++) {
+          // Replace standard quotes with full-width quotes so we don't break node syntax
+          lines[i] = lines[i].replace(/"/g, '”').replace(/'/g, '’');
+        }
+        sanitized = lines.join('\n');
+
+        const { svg } = await mermaid.render(id, sanitized);
         
         if (isMounted && containerRef.current) {
           containerRef.current.innerHTML = svg;
@@ -114,7 +125,7 @@ export function Mindmap({ chart }: MindmapProps) {
 
   return (
     <div 
-      className="w-full flex justify-center [&>svg]:max-w-full [&>svg]:h-auto drop-shadow-md transition-transform duration-500 hover:scale-[1.02]"
+      className="w-full flex justify-center [&>svg]:max-w-full [&>svg]:h-auto drop-shadow-md transition-transform duration-500 hover:scale-[1.02] [&_.edgePath_path]:stroke-slate-600 [&_.node_rect]:fill-slate-900 [&_.node_rect]:stroke-blue-500 [&_.node_polygon]:fill-slate-900 [&_.node_polygon]:stroke-blue-500 [&_.node_circle]:fill-slate-900 [&_.node_circle]:stroke-blue-500 [&_.cluster_rect]:fill-slate-900/30 [&_.cluster_rect]:stroke-slate-700"
       ref={containerRef}
     />
   );
