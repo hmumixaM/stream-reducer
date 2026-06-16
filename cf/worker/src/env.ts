@@ -28,6 +28,7 @@ export interface Env {
   EMAIL_FROM: string;
   LLM_BASE_URL: string;
   LLM_MODEL: string;
+  LLM_MODEL_MINDMAP: string;
   STT_MODEL: string;
   EMBEDDING_DIM: string;
   SUBSCRIPTION_WINDOW_DAYS: string;
@@ -56,6 +57,7 @@ export type PipelineMessage =
   | { kind: "resummarize"; item_id: number }
   | { kind: "structured_backfill"; item_id: number }
   | { kind: "headline_backfill"; item_id: number }
+  | { kind: "mindmap_backfill"; item_id: number }
   | { kind: "translate"; item_id: number; lang: string }
   | { kind: "poll"; subscription_id: number }
   | { kind: "graph_build"; force?: boolean };

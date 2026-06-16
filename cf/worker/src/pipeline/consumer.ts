@@ -16,6 +16,8 @@ export async function handleMessage(env: Env, msg: PipelineMessage): Promise<voi
       return backfillStructuredItem(env, msg.item_id, "structured_backfill");
     case "headline_backfill":
       return backfillStructuredItem(env, msg.item_id, "headline_backfill");
+    case "mindmap_backfill":
+      return backfillStructuredItem(env, msg.item_id, "mindmap_backfill");
     case "translate":
       return translateItem(env, msg.item_id, msg.lang);
     case "poll":

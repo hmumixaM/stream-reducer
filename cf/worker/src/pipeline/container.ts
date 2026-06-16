@@ -15,6 +15,7 @@ export class PipelineContainer extends Container<Env> {
     GEMINI_API_KEY: this.env.GEMINI_API_KEY,
     GEMINI_BASE_URL: this.env.LLM_BASE_URL,
     GEMINI_MODEL: this.env.LLM_MODEL,
+    GEMINI_MODEL_MINDMAP: this.env.LLM_MODEL_MINDMAP,
     OPENROUTER_API_KEY: this.env.OPENROUTER_API_KEY,
     STT_MODEL: this.env.STT_MODEL,
   };
@@ -27,7 +28,8 @@ export interface PipelineJob {
   // resummarize re-runs only the summary using a provided transcript.
   // structured_backfill re-generates structured summary fields from stored summary JSON.
   // headline_backfill re-generates only the headline/subhead from stored summary JSON.
-  mode: "process" | "resummarize" | "structured_backfill" | "headline_backfill";
+  // mindmap_backfill re-generates only the mindmap from stored summary JSON.
+  mode: "process" | "resummarize" | "structured_backfill" | "headline_backfill" | "mindmap_backfill";
   transcript?: { language: string | null; source: string; segments: unknown[]; text: string } | null;
   summary?: Record<string, unknown> | null;
   // When set, the summary is regenerated in this language (on-demand translation).
