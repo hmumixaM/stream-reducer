@@ -36,7 +36,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Shared adapter code (reused as-is) + the stateless server.
 COPY app ./app
-COPY cf/pipeline/server.py cf/pipeline/pipeline.py cf/pipeline/llm.py ./
+COPY cf/pipeline/server.py cf/pipeline/pipeline.py cf/pipeline/llm.py cf/pipeline/bili_refresh.py ./
 COPY cf/pipeline/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 

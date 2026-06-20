@@ -8,12 +8,15 @@ The Worker (via the PipelineContainer Durable Object) calls:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import queue
 import subprocess
+import threading
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import pipeline
 
@@ -85,3 +88,64 @@ async def process(request: Request):
     except Exception as exc:  # noqa: BLE001
         logger.exception("process failed for %s", body.get("source_url"))
         return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
+
+
+@app.post("/process_stream")
+async def process_stream(request: Request):
+    """Run the pipeline while streaming newline-delimited JSON progress events so
+    the Worker can heartbeat live stage/% into D1. Emits a sequence of
+    {"event":"progress", stage, pct, ...} lines, then a terminal
+    {"event":"result", result} or {"event":"error", stage, message}.
+
+    Used for download-bearing modes (process). Modes that never download
+    (translate / infographic / backfill) keep using /process.
+    """
+    body = await request.json()
+    events: "queue.Queue" = queue.Queue(maxsize=1000)
+    sentinel = object()
+    state = {"stage": None}
+
+    def on_progress(evt: dict) -> None:
+        if evt.get("stage"):
+            state["stage"] = evt["stage"]
+        try:
+            events.put_nowait({"event": "progress", **evt})
+        except queue.Full:
+            pass  # drop progress under backpressure; never block the pipeline
+
+    def worker() -> None:
+        try:
+            result = pipeline.run(body, on_progress=on_progress)
+            events.put({"event": "result", "result": result})
+        except Exception as exc:  # noqa: BLE001 — surface the captured reason
+            logger.exception("process_stream failed for %s", body.get("source_url"))
+            events.put({"event": "error", "stage": state["stage"], "message": f"{type(exc).__name__}: {exc}"})
+        finally:
+            events.put(sentinel)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def generate():
+        while True:
+            evt = events.get()
+            if evt is sentinel:
+                break
+            yield json.dumps(evt, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+
+@app.post("/refresh-cookie")
+async def refresh_cookie(request: Request):
+    """Run the Bilibili cookie refresh through WARP egress (the Worker IP is
+    risk-controlled on passport.bilibili.com). Always 200s; the outcome
+    (including any error) is in the body so the Worker can decide whether to
+    persist the new cookie to KV."""
+    body = await request.json()
+    import bili_refresh
+
+    return bili_refresh.refresh(
+        body.get("cookie", ""),
+        body.get("refresh_token", ""),
+        bool(body.get("force")),
+    )

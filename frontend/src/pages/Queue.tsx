@@ -74,14 +74,18 @@ function phase(item: QueueItem): { label: string; tone: string } {
   if (item.status === "error") return { label: "failed", tone: "text-red-400" };
   if (item.stalled) return { label: "stalled — waiting to restart", tone: "text-amber-400" };
   if (item.status === "queued") return { label: "waiting in line", tone: "text-muted-foreground" };
-  if (item.current_stage === "transcribe" && item.chunk_count > 0)
-    return {
-      label: `transcribing chunk ${item.chunk_done}/${item.chunk_count}`,
-      tone: "text-amber-400",
-    };
-  if (item.current_stage === "download" || (item.status === "fetching" && !item.current_stage))
-    return { label: "downloading audio", tone: "text-blue-400" };
-  if (item.current_stage) return { label: item.current_stage, tone: "text-violet-400" };
+  // Prefer the live progress heartbeat; fall back to the post-hoc stage_run.
+  const stage = item.progress_stage || item.current_stage;
+  const detail = item.progress_detail;
+  if (stage === "download")
+    return { label: detail ? `downloading · ${detail}` : "downloading audio", tone: "text-blue-400" };
+  if (stage === "transcribe") {
+    const d = detail || (item.chunk_count > 0 ? `chunk ${item.chunk_done}/${item.chunk_count}` : "");
+    return { label: d ? `transcribing · ${d}` : "transcribing", tone: "text-amber-400" };
+  }
+  if (stage === "summarize") return { label: "summarizing", tone: "text-violet-400" };
+  if (item.status === "fetching") return { label: "downloading audio", tone: "text-blue-400" };
+  if (stage) return { label: stage, tone: "text-violet-400" };
   return { label: item.status, tone: "text-muted-foreground" };
 }
 
@@ -127,6 +131,14 @@ function QueueRow({ item, onRetry }: { item: QueueItem; onRetry: () => void }) {
           {item.total_api_requests > 0 && <span>{item.total_api_requests} req</span>}
           {item.total_tokens > 0 && <span>{item.total_tokens.toLocaleString()} tok</span>}
         </div>
+        {item.progress_pct != null && item.status !== "error" && !item.stalled && (
+          <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-blue-400 transition-all"
+              style={{ width: `${Math.min(100, Math.max(0, item.progress_pct))}%` }}
+            />
+          </div>
+        )}
         {item.error && <p className="mt-1 truncate text-xs text-red-400" title={item.error}>{item.error}</p>}
       </div>
       {(item.status === "error" || item.stalled) && (

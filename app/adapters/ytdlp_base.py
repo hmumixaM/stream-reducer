@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import collections
 import logging
 import os
 import tempfile
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -55,14 +58,24 @@ def reset_cookie_cache() -> None:
 
 
 def _proxy_candidates() -> list[str | None]:
-    """Ordered proxy candidates from ``PROXY_URLS`` (comma-separated).
+    """Ordered proxy candidates yt-dlp egresses through, tried in order with
+    rotation on failure.
 
-    Each entry is a proxy URL (e.g. ``socks5://127.0.0.1:40000``) or the literal
-    ``direct`` (no proxy). When unset, returns ``[None]`` so behaviour is
-    unchanged (direct egress).
+    Sources, in priority:
+    - ``PROXY_URLS`` (comma-separated): the WARP SOCKS5 instances + ``direct``
+      the container's entrypoint exports.
+    - else a single ``YT_DLP_PROXY`` (self-hosted / explicit proxy) followed by
+      ``direct`` as a fallback.
+    - else ``[None]`` (direct egress, unchanged behaviour).
+
+    Each entry is a proxy URL (``socks5://…`` / ``http://…``) or ``None`` for a
+    direct connection (the literal ``direct`` token maps to ``None``).
     """
     raw = os.environ.get("PROXY_URLS", "").strip()
     if not raw:
+        single = os.environ.get("YT_DLP_PROXY", "").strip() or (get_settings().yt_dlp_proxy or "").strip()
+        if single:
+            return [single, None]
         return [None]
     out: list[str | None] = []
     for part in raw.split(","):
@@ -76,6 +89,78 @@ def _proxy_candidates() -> list[str | None]:
 def _is_risk_control(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(marker in msg for marker in _RISK_MARKERS)
+
+
+# Phrases that mean "this IP is blocked/flagged" (YouTube bot wall, HTTP
+# 403/412/429, geo). Used to prefix a clear, actionable hint on the error.
+_IP_BLOCK_MARKERS = (
+    "sign in to confirm",
+    "not a bot",
+    "http error 403",
+    "http error 412",
+    "http error 429",
+    "confirm you're not a bot",
+    "blocked it in your country",
+    "this video is not available",
+)
+
+
+def _looks_ip_blocked(text: str) -> bool:
+    t = text.lower()
+    return any(m in t for m in _IP_BLOCK_MARKERS)
+
+
+class _CaptureLogger:
+    """yt-dlp logger that keeps the last N messages in a ring buffer so a
+    blocked/failed download surfaces the *real* reason (bot wall, 412/403,
+    geo-block) instead of the silence ``quiet=True`` would otherwise leave."""
+
+    def __init__(self, maxlines: int = 40) -> None:
+        self.lines: collections.deque[str] = collections.deque(maxlen=maxlines)
+
+    def _add(self, msg: object) -> None:
+        for line in str(msg).splitlines():
+            line = line.strip()
+            if line:
+                self.lines.append(line)
+
+    def debug(self, msg: object) -> None:
+        # yt-dlp routes normal stdout here too; skip its [debug] spam.
+        if not str(msg).startswith("[debug] "):
+            self._add(msg)
+
+    def info(self, msg: object) -> None:
+        self._add(msg)
+
+    def warning(self, msg: object) -> None:
+        self._add(msg)
+
+    def error(self, msg: object) -> None:
+        self._add(msg)
+
+    def text(self) -> str:
+        return "\n".join(self.lines)
+
+
+class _DownloadDeadline(Exception):
+    """Raised from the progress hook to abort a download that overran its
+    wall-clock budget (a slow drip / stalled CDN) so the job fails fast."""
+
+
+def _map_progress(d: dict) -> dict:
+    """Map a yt-dlp progress_hooks dict to a compact progress event."""
+    total = d.get("total_bytes") or d.get("total_bytes_estimate")
+    downloaded = d.get("downloaded_bytes")
+    pct = round(downloaded / total * 100, 1) if (total and downloaded) else None
+    return {
+        "stage": "download",
+        "status": d.get("status"),
+        "pct": pct,
+        "downloaded": downloaded,
+        "total": total,
+        "speed": d.get("speed"),
+        "eta": d.get("eta"),
+    }
 
 
 def _resolve_cookies_file() -> str | None:
@@ -150,13 +235,15 @@ class YtDlpAdapter(Adapter):
             "no_warnings": True,
             "skip_download": True,
             "noprogress": True,
-            # Resilience against flaky CDNs (esp. Bilibili): retry hard and read
-            # in bounded chunks so a stalled socket doesn't fail the whole file.
-            "socket_timeout": 60,
-            "retries": 10,
-            "fragment_retries": 10,
-            "file_access_retries": 5,
-            "extractor_retries": 3,
+            # Lean retries so a hard block (bot wall / 412 / dead CDN) surfaces in
+            # seconds, not minutes — proxy rotation (download_audio) and the
+            # deadline watchdog provide the broader resilience instead of many
+            # in-place retries that previously left items stuck in `fetching`.
+            "socket_timeout": int(os.environ.get("YT_DLP_SOCKET_TIMEOUT", "30")),
+            "retries": int(os.environ.get("YT_DLP_RETRIES", "3")),
+            "fragment_retries": int(os.environ.get("YT_DLP_RETRIES", "3")),
+            "file_access_retries": 3,
+            "extractor_retries": 2,
             "http_headers": {"User-Agent": BROWSER_UA, **self.extra_headers},
         }
         cookies = self._cookies_file()
@@ -355,22 +442,29 @@ class YtDlpAdapter(Adapter):
                 logger.warning("failed to fetch subtitle track ext=%s", ext, exc_info=True)
         return []
 
-    def download_audio(self, url: str, dest_dir: Path) -> Path:
+    def download_audio(
+        self,
+        url: str,
+        dest_dir: Path,
+        on_progress: Callable[[dict], None] | None = None,
+    ) -> Path:
         dest_dir.mkdir(parents=True, exist_ok=True)
         outtmpl = str(dest_dir / "%(id)s.%(ext)s")
         # Try each configured proxy in turn (e.g. WARP SOCKS5 instances, then
-        # `direct`), rotating to the next on any failure so a single IP being
-        # risk-controlled by Bilibili doesn't fail the whole download. The proxy
-        # also flows into _ydl_opts for the metadata/native calls earlier in the
-        # job (they use the first candidate).
+        # `direct`), rotating to the next on any failure so a single blocked IP
+        # doesn't fail the whole download. The proxy also flows into _ydl_opts
+        # for the metadata/native calls earlier in the job (first candidate).
         candidates = _proxy_candidates()
         last_exc: Exception | None = None
+        last_log = ""
         for index, proxy in enumerate(candidates):
             self._active_proxy = proxy
+            logbuf = _CaptureLogger()
             try:
-                return self._download_audio_once(url, dest_dir, outtmpl)
-            except Exception as exc:  # noqa: BLE001 — rotate, then re-raise last
+                return self._download_audio_once(url, dest_dir, outtmpl, logbuf, on_progress)
+            except Exception as exc:  # noqa: BLE001 — rotate, then raise a rich error
                 last_exc = exc
+                last_log = logbuf.text()
                 more = index + 1 < len(candidates)
                 logger.warning(
                     "download_audio via proxy=%s failed (%s%s)%s",
@@ -381,20 +475,58 @@ class YtDlpAdapter(Adapter):
                 )
                 if more:
                     continue
-                raise
+                raise RuntimeError(self._download_error(exc, last_log)) from exc
         assert last_exc is not None
-        raise last_exc
+        raise RuntimeError(self._download_error(last_exc, last_log)) from last_exc
 
-    def _download_audio_once(self, url: str, dest_dir: Path, outtmpl: str) -> Path:
+    def _download_error(self, exc: Exception, log_text: str) -> str:
+        """Build a human-readable failure reason from yt-dlp's captured log
+        (last few lines) + the exception, prefixing an IP-block hint when the
+        cause looks like a bot wall / 403 / 412."""
+        tail = [ln for ln in log_text.splitlines() if ln][-6:]
+        detail = " | ".join(tail) if tail else str(exc)
+        if _looks_ip_blocked(detail) or _is_risk_control(exc):
+            return f"IP-block — set YT_DLP_PROXY / rotate WARP: {detail}"
+        return detail
+
+    def _download_audio_once(
+        self,
+        url: str,
+        dest_dir: Path,
+        outtmpl: str,
+        logbuf: _CaptureLogger,
+        on_progress: Callable[[dict], None] | None,
+    ) -> Path:
+        deadline_s = int(os.environ.get("DOWNLOAD_DEADLINE_S", "600"))
+        start = time.monotonic()
+
+        def hook(d: dict) -> None:
+            if deadline_s and time.monotonic() - start > deadline_s:
+                raise _DownloadDeadline(f"download exceeded {deadline_s}s")
+            if on_progress:
+                try:
+                    on_progress(_map_progress(d))
+                except _DownloadDeadline:
+                    raise
+                except Exception:  # noqa: BLE001 — never let reporting break the download
+                    logger.debug("on_progress callback failed", exc_info=True)
+
         opts = self._ydl_opts({
             "skip_download": False,
-            "format": "bestaudio/best",
+            # Best *audio-only* track; if none exists fall back to the *smallest*
+            # combined stream (worst) rather than a full (4K) video just to strip
+            # its audio.
+            "format": "bestaudio/worst",
             "outtmpl": outtmpl,
             # 10MB HTTP chunks make large DASH audio reads robust against the
             # "Downloaded X, expected Y bytes" / read-timeout failures.
             "http_chunk_size": 10 * 1024 * 1024,
             "concurrent_fragment_downloads": 1,
             "continuedl": True,
+            # Capture yt-dlp's own messages (incl. warnings) for the error reason.
+            "logger": logbuf,
+            "no_warnings": False,
+            "progress_hooks": [hook],
         })
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)

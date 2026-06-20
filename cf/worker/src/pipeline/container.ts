@@ -33,6 +33,8 @@ export class PipelineContainer extends Container<Env> {
     // Number of Cloudflare WARP SOCKS5 proxies entrypoint.sh brings up; yt-dlp
     // rotates through them (then `direct`) to dodge Bilibili IP risk-control.
     WARP_INSTANCES: this.env.WARP_INSTANCES ?? "2",
+    // Optional single proxy override (used only when PROXY_URLS/WARP is unset).
+    YT_DLP_PROXY: this.env.YT_DLP_PROXY ?? "",
   };
 }
 
@@ -134,6 +136,88 @@ export async function runPipeline(env: Env, job: PipelineJob): Promise<PipelineR
     throw new Error(`pipeline container ${res.status}: ${text.slice(0, 500)}`);
   }
   return (await res.json()) as PipelineResult;
+}
+
+// A streamed pipeline progress event (see cf/pipeline/server.py /process_stream).
+export interface ProgressEvent {
+  event: "progress" | "result" | "error";
+  stage?: string;
+  status?: string;
+  pct?: number | null;
+  speed?: number | null;
+  eta?: number | null;
+  downloaded?: number | null;
+  total?: number | null;
+  chunk_done?: number;
+  chunk_count?: number;
+  message?: string;
+  result?: PipelineResult;
+}
+
+// Like runPipeline, but consumes the container's NDJSON /process_stream so the
+// caller can observe live stage/%/errors while the job runs. Returns the final
+// PipelineResult (or throws with the captured reason). If @cloudflare/containers
+// buffers the body, progress simply arrives in one burst at the end (acceptable
+// degradation to runPipeline's behavior).
+export async function runPipelineStreaming(
+  env: Env,
+  job: PipelineJob,
+  onProgress: (evt: ProgressEvent) => void | Promise<void>,
+): Promise<PipelineResult> {
+  const key = `job-${job.item_id}`;
+  if (job.platform === "bilibili" && !job.bilibili_cookie) {
+    job = { ...job, bilibili_cookie: await getBilibiliCookie(env) };
+  }
+  const instance = getContainer(env.PIPELINE_CONTAINER, key);
+  const res = await instance.fetch(
+    new Request("http://pipeline/process_stream", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(job),
+    }),
+  );
+  if (!res.ok || !res.body) {
+    const text = res.body ? await res.text() : "";
+    throw new Error(`pipeline container ${res.status}: ${text.slice(0, 500)}`);
+  }
+
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "";
+  let result: PipelineResult | null = null;
+  let errorMsg: string | null = null;
+
+  const handle = async (line: string): Promise<void> => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let evt: ProgressEvent;
+    try {
+      evt = JSON.parse(trimmed) as ProgressEvent;
+    } catch {
+      return;
+    }
+    if (evt.event === "result") result = evt.result ?? null;
+    else if (evt.event === "error") {
+      errorMsg = evt.message ?? "pipeline error";
+      await onProgress(evt);
+    } else await onProgress(evt);
+  };
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      await handle(line);
+    }
+  }
+  await handle(buf); // terminal line without a trailing newline
+
+  if (errorMsg) throw new Error(errorMsg);
+  if (!result) throw new Error("pipeline stream ended without a result");
+  return result;
 }
 
 export interface FeedEntryOut {

@@ -1,13 +1,48 @@
 import { Hono } from "hono";
+import { getContainer } from "@cloudflare/containers";
 import type { AppContext } from "../auth";
 import { requireAdmin } from "../auth";
 import { all, first, type ItemRow } from "../db";
 import { toItemRead } from "../lib/serialize";
 import { cacheThumbnail } from "../lib/ingest";
+import { refreshBilibiliCookie } from "../lib/biliRefresh";
+import { loadBiliAuth } from "../lib/biliAuth";
 
 // Admin-only: user management + global processing-queue oversight.
 export const adminRoutes = new Hono<AppContext>();
 adminRoutes.use("*", requireAdmin);
+
+// Manually run the Bilibili cookie refresh (cron runs it daily). `?force=true`
+// skips the cookie/info "needs refresh" gate. Reports the outcome + KV state so
+// you can confirm the cookie rolled.
+adminRoutes.post("/bili-refresh", async (c) => {
+  const force = c.req.query("force") === "true";
+  const before = await loadBiliAuth(c.env);
+  let outcome: { refreshed: boolean; reason: string };
+  try {
+    outcome = await refreshBilibiliCookie(c.env, { force });
+  } catch (err) {
+    outcome = { refreshed: false, reason: err instanceof Error ? `${err.name}: ${err.message}` : String(err) };
+  }
+  const after = await loadBiliAuth(c.env);
+  return c.json({
+    outcome,
+    before: { updated_at: before?.updated_at ?? null, token_len: before?.refresh_token.length ?? 0 },
+    after: { updated_at: after?.updated_at ?? null, token_len: after?.refresh_token.length ?? 0 },
+    token_changed: !!before && !!after && before.refresh_token !== after.refresh_token,
+  });
+});
+
+// Diagnostic: report the container's egress IP through each configured WARP
+// proxy (and direct), plus Bilibili's risk-control verdict.
+adminRoutes.get("/proxy-check", async (c) => {
+  const instance = getContainer(c.env.PIPELINE_CONTAINER, "proxy-check");
+  const res = await instance.fetch(new Request("http://pipeline/proxy-check"));
+  return new Response(await res.text(), {
+    status: res.status,
+    headers: { "content-type": "application/json" },
+  });
+});
 
 // --- Users ---------------------------------------------------------------
 adminRoutes.get("/users", async (c) => {

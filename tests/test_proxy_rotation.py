@@ -41,7 +41,7 @@ def test_download_audio_rotates_to_working_proxy(monkeypatch, tmp_path):
     adapter = YouTubeAdapter()
     used: list[object] = []
 
-    def fake_once(url: str, dest_dir: Path, outtmpl: str) -> Path:
+    def fake_once(url: str, dest_dir: Path, outtmpl: str, logbuf=None, on_progress=None) -> Path:
         used.append(adapter._active_proxy)
         if adapter._active_proxy != "socks5://127.0.0.1:40001":
             raise RuntimeError("HTTP Error 412: Precondition Failed")
@@ -61,7 +61,7 @@ def test_download_audio_raises_last_error_when_all_fail(monkeypatch, tmp_path):
     monkeypatch.setenv("PROXY_URLS", "socks5://127.0.0.1:40000,direct")
     adapter = YouTubeAdapter()
 
-    def always_fail(url: str, dest_dir: Path, outtmpl: str) -> Path:
+    def always_fail(url: str, dest_dir: Path, outtmpl: str, logbuf=None, on_progress=None) -> Path:
         raise RuntimeError(f"boom via {adapter._active_proxy}")
 
     monkeypatch.setattr(adapter, "_download_audio_once", always_fail)
@@ -79,3 +79,56 @@ def test_is_risk_control_classification():
     assert ytdlp_base._is_risk_control(RuntimeError("HTTP Error 412: Precondition Failed"))
     assert ytdlp_base._is_risk_control(RuntimeError("code -352 风控"))
     assert not ytdlp_base._is_risk_control(RuntimeError("video unavailable"))
+
+
+def test_proxy_candidates_yt_dlp_proxy_fallback(monkeypatch):
+    monkeypatch.delenv("PROXY_URLS", raising=False)
+    monkeypatch.setenv("YT_DLP_PROXY", "http://proxy.example:8080")
+    # YT_DLP_PROXY env wins over the (empty) setting; direct is the fallback.
+    assert ytdlp_base._proxy_candidates() == ["http://proxy.example:8080", None]
+
+
+def test_looks_ip_blocked():
+    assert ytdlp_base._looks_ip_blocked("ERROR: Sign in to confirm you're not a bot")
+    assert ytdlp_base._looks_ip_blocked("HTTP Error 403: Forbidden")
+    assert not ytdlp_base._looks_ip_blocked("video is private")
+
+
+def test_map_progress():
+    evt = ytdlp_base._map_progress(
+        {"status": "downloading", "downloaded_bytes": 50, "total_bytes": 200, "speed": 1000, "eta": 3}
+    )
+    assert evt == {"stage": "download", "status": "downloading", "pct": 25.0,
+                   "downloaded": 50, "total": 200, "speed": 1000, "eta": 3}
+
+
+def test_download_error_ip_block_hint():
+    adapter = YouTubeAdapter()
+    msg = adapter._download_error(RuntimeError("x"), "ERROR: Sign in to confirm you're not a bot")
+    assert "YT_DLP_PROXY" in msg
+
+
+def test_download_audio_once_uses_audio_only_format(monkeypatch, tmp_path):
+    captured: dict = {}
+
+    class _FakeYDL:
+        def __init__(self, opts):
+            captured.update(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, url, download):
+            (tmp_path / "x.m4a").write_text("a")
+            return {"id": "x"}
+
+        def prepare_filename(self, info):
+            return str(tmp_path / "x.m4a")
+
+    monkeypatch.setattr(ytdlp_base, "YoutubeDL", _FakeYDL)
+    adapter = YouTubeAdapter()
+    adapter._download_audio_once("u", tmp_path, str(tmp_path / "%(id)s.%(ext)s"), ytdlp_base._CaptureLogger(), None)
+    assert captured["format"] == "bestaudio/worst"

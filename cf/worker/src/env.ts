@@ -42,6 +42,9 @@ export interface Env {
   // Number of WARP SOCKS5 proxies the pipeline container brings up for yt-dlp
   // egress rotation (defaults to "2" in the container if unset).
   WARP_INSTANCES?: string;
+  // Optional single proxy (http(s)://… / socks5://…) for yt-dlp egress; only
+  // used when PROXY_URLS (WARP rotation) is not set.
+  YT_DLP_PROXY?: string;
 
   // Secrets
   GEMINI_API_KEY: string;

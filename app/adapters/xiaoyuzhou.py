@@ -181,9 +181,9 @@ class XiaoyuzhouAdapter(Adapter):
             like_count=r.get("like_count"),
         )
 
-    def download_audio(self, url: str, dest_dir: Path) -> Path:
+    def download_audio(self, url: str, dest_dir: Path, on_progress=None) -> Path:
         r = self._resolve(url)
-        return download_url(r["audio_url"], dest_dir, r.get("external_id") or "xyz_episode")
+        return download_url(r["audio_url"], dest_dir, r.get("external_id") or "xyz_episode", on_progress)
 
 
 def _find_episode(data: dict) -> dict | None:

@@ -51,5 +51,7 @@ class Adapter:
         """Expand a playlist/collection URL into entries. None when unsupported."""
         return None
 
-    def download_audio(self, url: str, dest_dir: Path) -> Path:
+    def download_audio(self, url: str, dest_dir: Path, on_progress=None) -> Path:
+        """Download the source audio into dest_dir. `on_progress`, when given, is
+        called with progress event dicts (e.g. {"stage":"download","pct":...})."""
         raise NotImplementedError

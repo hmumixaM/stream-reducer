@@ -141,9 +141,9 @@ class ApplePodcastAdapter(Adapter):
             external_id=r.get("external_id"),
         )
 
-    def download_audio(self, url: str, dest_dir: Path) -> Path:
+    def download_audio(self, url: str, dest_dir: Path, on_progress=None) -> Path:
         r = self._resolve(url)
-        return download_url(r["audio_url"], dest_dir, r.get("external_id") or "apple_episode")
+        return download_url(r["audio_url"], dest_dir, r.get("external_id") or "apple_episode", on_progress)
 
 
 def _episode_result(ep: dict) -> dict:

@@ -13,9 +13,27 @@ set -u
 
 WARP_INSTANCES="${WARP_INSTANCES:-2}"
 BASE_PORT="${WARP_BASE_PORT:-40000}"
-WARP_WARMUP_SECONDS="${WARP_WARMUP_SECONDS:-3}"
+# Max seconds to wait for the first WARP proxy's WireGuard handshake to pass
+# traffic before starting the server anyway (rotation + `direct` cover misses).
+WARP_READY_TIMEOUT="${WARP_READY_TIMEOUT:-45}"
 
 proxies=()
+
+# True once the SOCKS proxy can actually fetch through the WARP tunnel.
+proxy_ready() {
+  local hostport="${1#*://}"
+  curl -fsS --max-time 8 --socks5-hostname "$hostport" \
+    https://www.cloudflare.com/cdn-cgi/trace >/dev/null 2>&1
+}
+
+wait_ready() {
+  local url="$1" deadline=$(( $(date +%s) + WARP_READY_TIMEOUT ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if proxy_ready "$url"; then return 0; fi
+    sleep 2
+  done
+  return 1
+}
 
 start_warp() {
   local idx="$1" port="$2"
@@ -58,9 +76,14 @@ PROXY_URLS="$(IFS=,; echo "${proxies[*]}")"
 export PROXY_URLS
 echo "[warp] PROXY_URLS=${PROXY_URLS}"
 
-# Let the WireGuard handshakes settle before the first download attempt.
-if [ "${#proxies[@]}" -gt 1 ]; then
-  sleep "$WARP_WARMUP_SECONDS"
+# Block (bounded) until the first WARP proxy can pass traffic, so the first job
+# doesn't race the WireGuard handshake. Falls through to `direct` on timeout.
+if [ "${proxies[0]}" != "direct" ]; then
+  if wait_ready "${proxies[0]}"; then
+    echo "[warp] ${proxies[0]} ready"
+  else
+    echo "[warp] WARNING: ${proxies[0]} not ready after ${WARP_READY_TIMEOUT}s; relying on rotation/direct"
+  fi
 fi
 
 exec uvicorn server:app --host 0.0.0.0 --port 8080

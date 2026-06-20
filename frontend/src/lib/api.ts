@@ -89,6 +89,10 @@ export interface QueueItem extends Item {
   current_stage?: string | null;
   chunk_done: number;
   chunk_count: number;
+  // Live progress heartbeated while the job streams from the container.
+  progress_stage?: string | null;
+  progress_pct?: number | null;
+  progress_detail?: string | null;
   queue_position?: number;
   queue_total?: number;
   // In-progress but orphaned (container died); waiting to be reclaimed.

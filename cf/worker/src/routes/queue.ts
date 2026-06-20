@@ -23,7 +23,7 @@ queueRoutes.get("/", async (c) => {
   );
   const queueTotal = totalRow[0]?.n ?? 0;
 
-  const rows = await all<ItemRow & { ui_folder: number | null; ui_fav: number; ui_arch: number; ui_status: string; current_stage: string | null; chunk_done: number; chunk_count: number; queue_position: number }>(
+  const rows = await all<ItemRow & { ui_folder: number | null; ui_fav: number; ui_arch: number; ui_status: string; current_stage: string | null; chunk_done: number; chunk_count: number; queue_position: number; progress_stage: string | null; progress_pct: number | null; progress_detail: string | null }>(
     c.env.DB.prepare(
       `SELECT item.*, ui.folder_id AS ui_folder, ui.is_favorite AS ui_fav,
               ui.is_archived AS ui_arch, ui.personal_status AS ui_status,
@@ -55,6 +55,10 @@ queueRoutes.get("/", async (c) => {
       current_stage: r.current_stage,
       chunk_done: r.chunk_done ?? 0,
       chunk_count: r.chunk_count ?? 0,
+      // Live progress heartbeated by the consumer while the job streams.
+      progress_stage: r.progress_stage ?? null,
+      progress_pct: r.progress_pct ?? null,
+      progress_detail: r.progress_detail ?? null,
       queue_position: r.queue_position,
       queue_total: queueTotal,
       // True when the row claims to be running but its container was orphaned

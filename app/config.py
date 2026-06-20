@@ -97,6 +97,11 @@ class Settings(BaseSettings):
     preferred_language: str = "zh"
     track_api_calls: bool = True
     yt_dlp_cookies_file: str = ""
+    # Optional proxy for yt-dlp egress (http(s)://… or socks5://…), e.g. a WARP
+    # or residential proxy to dodge datacenter-IP blocks. On the Cloudflare
+    # stack PROXY_URLS (WARP rotation) takes precedence; this is the single-proxy
+    # / self-hosted knob.
+    yt_dlp_proxy: str = ""
 
     # HTTP metadata for OpenRouter rankings (optional)
     openrouter_referer: str = "https://github.com/stream-reduce"

@@ -2,7 +2,7 @@ import type { Env, PipelineMessage } from "../env";
 import { first, type ItemRow } from "../db";
 import { isoNow } from "../lib/crypto";
 import { persistItemMetadata, linkItemFeed, youtubeChannelFeed, cacheThumbnail } from "../lib/ingest";
-import { runPipeline, type PipelineResult } from "./container";
+import { runPipeline, runPipelineStreaming, type PipelineResult, type ProgressEvent } from "./container";
 import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
 
@@ -90,6 +90,7 @@ async function claimNextQueuedItem(env: Env): Promise<ItemRow | null> {
     // loop forever); a fresh queued claim does not.
     const res = await env.DB.prepare(
       `UPDATE item SET status = 'fetching', started_at = ?, error = NULL,
+         progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL,
          retry_count = retry_count + (CASE WHEN status = 'queued' THEN 0 ELSE 1 END)
         WHERE id = ? AND ${clause}`,
     )
@@ -312,10 +313,36 @@ async function processItem(env: Env, itemId: number, resummarize = false): Promi
   const item = await first<ItemRow>(env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(itemId));
   if (!item) return;
 
-  await env.DB.prepare("UPDATE item SET status = 'fetching', started_at = ?, error = NULL WHERE id = ?")
+  await env.DB.prepare(
+    `UPDATE item SET status = 'fetching', started_at = ?, error = NULL,
+       progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+     WHERE id = ?`,
+  )
     .bind(isoNow(), itemId)
     .run();
   return processClaimedItem(env, { ...item, status: "fetching", error: null }, resummarize);
+}
+
+// Map a streamed pipeline stage to the item's coarse status.
+const STAGE_STATUS: Record<string, string> = {
+  download: "fetching",
+  transcribe: "transcribing",
+  summarize: "summarizing",
+};
+
+// "45% · 2.4 MB/s · ETA 12s" for downloads, "chunk 3/10" for transcription.
+function progressDetail(evt: ProgressEvent): string | null {
+  if (evt.stage === "download") {
+    const parts: string[] = [];
+    if (evt.pct != null) parts.push(`${evt.pct}%`);
+    if (evt.speed) parts.push(`${(evt.speed / 1e6).toFixed(1)} MB/s`);
+    if (evt.eta != null) parts.push(`ETA ${evt.eta}s`);
+    return parts.join(" · ") || null;
+  }
+  if (evt.stage === "transcribe" && evt.chunk_count) {
+    return `chunk ${evt.chunk_done}/${evt.chunk_count}`;
+  }
+  return null;
 }
 
 async function processClaimedItem(env: Env, item: ItemRow, resummarize = false): Promise<void> {
@@ -332,11 +359,11 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
       if (t) transcript = { language: t.language, source: t.source, segments: JSON.parse(t.segments || "[]"), text: t.text };
     }
 
-    const result = await runPipeline(env, {
+    const job = {
       item_id: itemId,
       source_url: item.source_url,
       platform: item.platform,
-      mode: resummarize ? "resummarize" : "process",
+      mode: (resummarize ? "resummarize" : "process") as "resummarize" | "process",
       transcript,
       // Pass stored metadata as summary context. For podcast/RSS items whose
       // audio URL has no scrapeable metadata, this carries the feed's title,
@@ -350,7 +377,34 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
         view_count: item.view_count,
         like_count: item.like_count,
       },
-    });
+    };
+
+    // resummarize/translate never download, so stream only the full process run.
+    // The heartbeat throttles D1 writes (~1 / 1.5s) but always writes on a stage
+    // change, so the 3s queue poll renders a live stage + progress bar.
+    let result: PipelineResult;
+    if (resummarize) {
+      result = await runPipeline(env, job);
+    } else {
+      let lastWrite = 0;
+      let lastStage = "";
+      const heartbeat = async (evt: ProgressEvent): Promise<void> => {
+        if (evt.event !== "progress") return;
+        const stage = evt.stage || "";
+        const stageChanged = stage !== lastStage;
+        const now = Date.now();
+        if (!stageChanged && now - lastWrite < 1500) return;
+        lastWrite = now;
+        lastStage = stage;
+        await env.DB.prepare(
+          `UPDATE item SET status = COALESCE(?, status), progress_stage = ?, progress_pct = ?,
+             progress_detail = ?, progress_updated_at = ? WHERE id = ?`,
+        )
+          .bind(STAGE_STATUS[stage] ?? null, stage || null, evt.pct ?? null, progressDetail(evt), isoNow(), itemId)
+          .run();
+      };
+      result = await runPipelineStreaming(env, job, heartbeat);
+    }
     // Membership/paid-gated content: terminal 'excluded' (not an error, not
     // retried, hidden from the active queue). Metadata is still persisted so
     // the title/channel are recognizable.
@@ -369,7 +423,11 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
     await persistResult(env, itemId, result);
     await embedChunks(env, itemId);
 
-    await env.DB.prepare("UPDATE item SET status = 'done', completed_at = ?, error = NULL WHERE id = ?")
+    await env.DB.prepare(
+      `UPDATE item SET status = 'done', completed_at = ?, error = NULL,
+         progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+       WHERE id = ?`,
+    )
       .bind(isoNow(), itemId)
       .run();
     // Flip every user's saved copy of this content to done (dedup payoff).
@@ -380,7 +438,9 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
     // continuation isn't lost (which previously stranded items in 'fetching').
     const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     await env.DB.prepare(
-      "UPDATE item SET status = 'error', error = ?, retry_count = retry_count + 1 WHERE id = ?",
+      `UPDATE item SET status = 'error', error = ?, retry_count = retry_count + 1,
+         progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+       WHERE id = ?`,
     )
       .bind(msg.slice(0, 4000), itemId)
       .run();

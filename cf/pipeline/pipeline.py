@@ -764,12 +764,19 @@ def _excluded_result(metadata: dict, stages: list[Stage], message: str) -> dict:
 
 
 # --- top-level run ---------------------------------------------------------
-def run(job: dict) -> dict:
+def run(job: dict, on_progress=None) -> dict:
     source_url = job["source_url"]
     _apply_bilibili_cookie(job.get("bilibili_cookie"))
     plat = detect_platform(source_url)  # Platform enum (registry key)
     mode = job.get("mode", "process")
     stages: list[Stage] = []
+
+    def emit(evt: dict) -> None:
+        if on_progress:
+            try:
+                on_progress(evt)
+            except Exception:  # noqa: BLE001 — progress reporting must never break the job
+                pass
 
     target_lang = job.get("target_lang") or None
     # Stored metadata from the Worker (feed title/show notes/date/views). Used as
@@ -824,6 +831,7 @@ def run(job: dict) -> dict:
     if mode != "resummarize":
         try:
             with tempfile.TemporaryDirectory(prefix="sr_media_") as tmp:
+                emit({"stage": "download", "status": "start"})
                 with Stage("download", provider=adapter.name) as st:
                     meta = adapter.fetch_metadata(source_url)
                     metadata = _meta_to_dict(meta)
@@ -843,7 +851,7 @@ def run(job: dict) -> dict:
                         transcript = {"language": native.language, "source": "native", "segments": segs,
                                       "text": "\n".join(s.get("text", "") for s in segs)}
                     else:
-                        audio_path = Path(adapter.download_audio(source_url, Path(tmp)))
+                        audio_path = Path(adapter.download_audio(source_url, Path(tmp), on_progress=emit))
                         decodable = decodable_duration(audio_path)
                         media["bytes"] = audio_path.stat().st_size
                         media["duration_s"] = decodable or probe_duration(audio_path)
@@ -853,7 +861,8 @@ def run(job: dict) -> dict:
                 stages.append(st)
 
                 if transcript is None:
-                    transcript = _transcribe(tmp, audio_path, stages)
+                    emit({"stage": "transcribe", "status": "start"})
+                    transcript = _transcribe(tmp, audio_path, stages, on_progress=emit)
         except Exception as exc:  # noqa: BLE001
             # Membership/paid-gated videos (YouTube members-only, Bilibili
             # 充电专属, …) can't be downloaded — exclude them so they aren't
@@ -881,6 +890,7 @@ def run(job: dict) -> dict:
     if not transcript or not transcript.get("segments"):
         raise RuntimeError("no transcript available")
 
+    emit({"stage": "summarize", "status": "start"})
     structured = summarize(item, transcript, stages, target_lang=target_lang)
     markdown = render_markdown(item, structured)
     chunks = _chunk_for_embed(transcript, structured, markdown)
@@ -901,7 +911,7 @@ def run(job: dict) -> dict:
     }
 
 
-def _transcribe(tmp: str, audio_path: Path, stages: list[Stage]) -> dict:
+def _transcribe(tmp: str, audio_path: Path, stages: list[Stage], on_progress=None) -> dict:
     import httpx
 
     with Stage("transcribe", provider="openrouter", model=os.environ.get("STT_MODEL")) as st:
@@ -909,12 +919,13 @@ def _transcribe(tmp: str, audio_path: Path, stages: list[Stage]) -> dict:
         chunk_paths = split_audio(str(audio_path), TRANSCRIBE_CHUNK_SECONDS, workdir)
         if not chunk_paths:
             raise RuntimeError("no audio chunks produced")
+        chunk_count = len(chunk_paths)
         usage = llm.SttUsage()
         segments: list[dict] = []
         offset = 0.0
         language = None
         with httpx.Client(timeout=300) as client:
-            for chunk in chunk_paths:
+            for index, chunk in enumerate(chunk_paths, start=1):
                 dur = probe_duration(chunk)
                 text, detected = llm.transcribe_chunk(client, str(chunk), usage)
                 language = language or detected
@@ -922,6 +933,13 @@ def _transcribe(tmp: str, audio_path: Path, stages: list[Stage]) -> dict:
                     segments.append({"start": round(offset, 2), "end": round(offset + dur, 2),
                                      "text": to_simplified(text.strip())})
                 offset += dur
+                if on_progress:
+                    try:
+                        on_progress({"stage": "transcribe", "chunk_done": index,
+                                     "chunk_count": chunk_count,
+                                     "pct": round(index / chunk_count * 100, 1)})
+                    except Exception:  # noqa: BLE001
+                        pass
         st.request_count = usage.requests
         st.total_tokens = usage.total_tokens
         st.cost_usd = usage.cost_usd

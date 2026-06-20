@@ -70,9 +70,9 @@ class GenericAdapter(Adapter):
             thumbnail=r.get("thumbnail"),
         )
 
-    def download_audio(self, url: str, dest_dir: Path) -> Path:
+    def download_audio(self, url: str, dest_dir: Path, on_progress=None) -> Path:
         r = self._resolve(url)
-        return download_url(r["audio_url"], dest_dir, r.get("title") or "episode")
+        return download_url(r["audio_url"], dest_dir, r.get("title") or "episode", on_progress)
 
 
 class DirectAudioAdapter(Adapter):
@@ -86,6 +86,6 @@ class DirectAudioAdapter(Adapter):
     def fetch_metadata(self, url: str) -> ContentMeta:
         return ContentMeta(title=Path(url).stem)
 
-    def download_audio(self, url: str, dest_dir: Path) -> Path:
+    def download_audio(self, url: str, dest_dir: Path, on_progress=None) -> Path:
         target = self.audio_url or url
-        return download_url(target, dest_dir, Path(url).stem or "episode")
+        return download_url(target, dest_dir, Path(url).stem or "episode", on_progress)
