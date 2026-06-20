@@ -109,6 +109,13 @@ async def process_stream(request: Request):
     state = {"stage": None}
 
     def on_progress(evt: dict) -> None:
+        # Partial stage content (e.g. the transcript once transcribe finishes) is
+        # streamed so the Worker can persist + show it before later stages run.
+        # These carry data, so deliver them reliably (blocking put), unlike the
+        # droppable progress heartbeats.
+        if evt.get("partial"):
+            events.put({"event": "partial", **evt})
+            return
         if evt.get("stage"):
             state["stage"] = evt["stage"]
         try:

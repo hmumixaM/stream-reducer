@@ -424,7 +424,24 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
           throw herr;
         }
       };
-      result = await runPipelineStreaming(env, job, heartbeat);
+      // Persist each stage's content the moment it streams in (metadata +
+      // transcript as soon as transcribe finishes) so the item page shows it
+      // WHILE summarize runs — and an empty transcript is immediately visible.
+      const onPartial = async (evt: ProgressEvent): Promise<void> => {
+        if (evt.metadata) await persistMetadata(env, itemId, evt.metadata);
+        if (evt.transcript) {
+          const t = evt.transcript;
+          await env.DB.prepare(
+            `INSERT INTO transcript (item_id, language, source, segments, text)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(item_id) DO UPDATE SET language=excluded.language, source=excluded.source,
+               segments=excluded.segments, text=excluded.text`,
+          )
+            .bind(itemId, t.language, t.source, JSON.stringify(t.segments), t.text)
+            .run();
+        }
+      };
+      result = await runPipelineStreaming(env, job, heartbeat, onPartial);
     }
     // Membership/paid-gated content: terminal 'excluded' (not an error, not
     // retried, hidden from the active queue). Metadata is still persisted so

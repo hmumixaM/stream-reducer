@@ -152,7 +152,7 @@ export async function runPipeline(env: Env, job: PipelineJob): Promise<PipelineR
 
 // A streamed pipeline progress event (see cf/pipeline/server.py /process_stream).
 export interface ProgressEvent {
-  event: "progress" | "result" | "error";
+  event: "progress" | "result" | "error" | "partial";
   stage?: string;
   status?: string;
   pct?: number | null;
@@ -165,6 +165,12 @@ export interface ProgressEvent {
   detail?: string;
   message?: string;
   result?: PipelineResult;
+  // Partial stage content streamed mid-run (event === "partial"): e.g. the
+  // transcript + metadata as soon as transcribe finishes, so the UI shows them
+  // before summarize completes.
+  partial?: string;
+  metadata?: PipelineResult["metadata"];
+  transcript?: PipelineResult["transcript"];
 }
 
 // Like runPipeline, but consumes the container's NDJSON /process_stream so the
@@ -176,6 +182,7 @@ export async function runPipelineStreaming(
   env: Env,
   job: PipelineJob,
   onProgress: (evt: ProgressEvent) => void | Promise<void>,
+  onPartial?: (evt: ProgressEvent) => void | Promise<void>,
 ): Promise<PipelineResult> {
   const key = containerKey(env, `job-${job.item_id}`);
   if (job.platform === "bilibili" && !job.bilibili_cookie) {
@@ -220,6 +227,8 @@ export async function runPipelineStreaming(
     else if (evt.event === "error") {
       errorMsg = evt.message ?? "pipeline error";
       await onProgress(evt);
+    } else if (evt.event === "partial") {
+      if (onPartial) await onPartial(evt);
     } else await onProgress(evt);
   };
 

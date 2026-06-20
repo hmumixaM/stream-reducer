@@ -928,6 +928,11 @@ def run(job: dict, on_progress=None) -> dict:
                 if transcript is None:
                     emit({"stage": "transcribe", "status": "start"})
                     transcript = _transcribe(tmp, audio_path, stages, on_progress=emit)
+
+                # Stream the metadata + transcript as soon as they're ready so the
+                # UI shows them WHILE summarize runs (and you can immediately see
+                # whether the transcript came back empty before it summarizes).
+                emit({"partial": "transcript", "metadata": metadata, "transcript": transcript})
         except Exception as exc:  # noqa: BLE001
             # Membership/paid-gated videos (YouTube members-only, Bilibili
             # 充电专属, …) can't be downloaded — exclude them so they aren't
