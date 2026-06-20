@@ -342,8 +342,10 @@ const STAGE_STATUS: Record<string, string> = {
   summarize: "summarizing",
 };
 
-// "45% · 2.4 MB/s · ETA 12s" for downloads, "chunk 3/10" for transcription.
+// "45% · 2.4 MB/s · ETA 12s" for downloads, "chunk 3/10" for transcription,
+// or an explicit detail (e.g. summarize section names).
 function progressDetail(evt: ProgressEvent): string | null {
+  if (evt.detail) return evt.detail;
   if (evt.stage === "download") {
     const parts: string[] = [];
     if (evt.pct != null) parts.push(`${evt.pct}%`);

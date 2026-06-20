@@ -555,15 +555,26 @@ def _generate_structured_sections(
     walkthrough: str | None = None,
     active_stage: Stage | None = None,
     deadline: float | None = None,
+    on_progress=None,
 ) -> dict:
     existing = existing or {}
+
+    def _emit(detail: str) -> None:
+        if on_progress:
+            try:
+                on_progress({"stage": "summarize", "detail": detail})
+            except Exception:  # noqa: BLE001
+                pass
+
     def build(st: Stage) -> dict:
         compact_source = source
         if len(source) > SUMMARY_SECTION_SOURCE_CHARS:
+            _emit("index")
             compact_source = _build_walkthrough_index(item, source, lang, section_system, st, deadline)
         quote_source = source if len(source) <= SUMMARY_SECTION_SOURCE_CHARS else compact_source
         context = _build_context(item)
 
+        _emit("overview")
         overview = _generate_json_section(
             st,
             OVERVIEW_TEMPLATE.format(context=context, source=compact_source, language_instruction=lang),
@@ -572,6 +583,7 @@ def _generate_structured_sections(
             SUMMARY_REDUCE_MAX_TOKENS,
             deadline,
         )
+        _emit("key points")
         key_points = _generate_json_section(
             st,
             KEY_POINTS_TEMPLATE.format(context=context, source=compact_source, language_instruction=lang),
@@ -580,6 +592,7 @@ def _generate_structured_sections(
             SUMMARY_REDUCE_MAX_TOKENS,
             deadline,
         )
+        _emit("quotes")
         quotes_entities = _generate_json_section(
             st,
             QUOTES_ENTITIES_TEMPLATE.format(context=context, source=quote_source, language_instruction=lang),
@@ -588,6 +601,7 @@ def _generate_structured_sections(
             SUMMARY_REDUCE_MAX_TOKENS,
             deadline,
         )
+        _emit("headline")
         headline = _generate_json_section(
             st,
             HEADLINE_TEMPLATE.format(context=context, source=compact_source, language_instruction=lang),
@@ -673,7 +687,14 @@ def generate_infographic(item: ItemView, structured: dict, stages: list[Stage]) 
 
 
 # --- summarize -------------------------------------------------------------
-def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang: str | None = None) -> dict:
+def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang: str | None = None, on_progress=None) -> dict:
+    def emit(detail: str) -> None:
+        if on_progress:
+            try:
+                on_progress({"stage": "summarize", "detail": detail})
+            except Exception:  # noqa: BLE001
+                pass
+
     segments = transcript.get("segments") or []
     chunks = _chunk_segments(segments, SUMMARY_CHUNK_CHARS)
     lang, map_system, section_system = _language_setup(transcript.get("text") or "", target_lang)
@@ -684,6 +705,7 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
     with Stage("summarize", provider="gemini", model=os.environ.get("GEMINI_MODEL")) as st:
         note_blocks: list[str] = []
         for i, chunk in enumerate(chunks, start=1):
+            emit(f"notes {i}/{len(chunks)}")
             if time.monotonic() > deadline:
                 logger.warning("summarize budget exceeded at map chunk %d/%d; using partial", i, len(chunks))
                 break
@@ -710,6 +732,7 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
             walkthrough=walkthrough,
             active_stage=st,
             deadline=deadline,
+            on_progress=emit,
         )
     stages.append(st)
     return structured
@@ -933,7 +956,7 @@ def run(job: dict, on_progress=None) -> dict:
         raise RuntimeError("no transcript available")
 
     emit({"stage": "summarize", "status": "start"})
-    structured = summarize(item, transcript, stages, target_lang=target_lang)
+    structured = summarize(item, transcript, stages, target_lang=target_lang, on_progress=emit)
     markdown = render_markdown(item, structured)
     chunks = _chunk_for_embed(transcript, structured, markdown)
 

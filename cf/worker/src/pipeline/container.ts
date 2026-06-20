@@ -162,6 +162,7 @@ export interface ProgressEvent {
   total?: number | null;
   chunk_done?: number;
   chunk_count?: number;
+  detail?: string;
   message?: string;
   result?: PipelineResult;
 }
