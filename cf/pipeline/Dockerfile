@@ -28,8 +28,8 @@ RUN curl -fsSL -o /usr/local/bin/wgcf \
 
 WORKDIR /srv
 
-# Rotate worker to get new IP / latest yt-dlp
-ENV ROTATE_WORKER=1
+# Rotate worker to get new IP / latest yt-dlp (bump to force a clean rebuild)
+ENV ROTATE_WORKER=3
 
 COPY cf/pipeline/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt

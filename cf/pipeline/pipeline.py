@@ -469,7 +469,14 @@ def _generate_json_section(
     system: str,
     defaults: dict,
     max_tokens: int,
+    deadline: float | None = None,
 ) -> dict:
+    # Total summarize budget guard: once we're past the deadline, stop making
+    # calls and use defaults so summarize can't overrun the worker's stream
+    # budget (which left items stuck in 'summarizing').
+    if deadline is not None and time.monotonic() > deadline:
+        logger.warning("summarize budget exceeded; skipping section")
+        return defaults.copy()
     for attempt in range(2):
         section_system = system if attempt == 0 else system + STRICT_JSON_SUFFIX
         try:
@@ -490,7 +497,7 @@ def _generate_json_section(
     return defaults.copy()
 
 
-def _build_walkthrough_index(item: ItemView, walkthrough: str, lang: str, section_system: str, st: Stage) -> str:
+def _build_walkthrough_index(item: ItemView, walkthrough: str, lang: str, section_system: str, st: Stage, deadline: float | None = None) -> str:
     parts = _chunk_text(walkthrough, SUMMARY_INDEX_CHUNK_CHARS)
     if not parts:
         return walkthrough
@@ -504,7 +511,7 @@ def _build_walkthrough_index(item: ItemView, walkthrough: str, lang: str, sectio
             source=part,
             language_instruction=lang,
         )
-        data = _generate_json_section(st, prompt, section_system, defaults, SUMMARY_INDEX_MAX_TOKENS)
+        data = _generate_json_section(st, prompt, section_system, defaults, SUMMARY_INDEX_MAX_TOKENS, deadline)
         if data != defaults:
             index_parts.append(_format_index_part(data, i))
     return "\n\n".join(index_parts) if index_parts else walkthrough[:SUMMARY_SECTION_SOURCE_CHARS]
@@ -547,12 +554,13 @@ def _generate_structured_sections(
     existing: dict | None = None,
     walkthrough: str | None = None,
     active_stage: Stage | None = None,
+    deadline: float | None = None,
 ) -> dict:
     existing = existing or {}
     def build(st: Stage) -> dict:
         compact_source = source
         if len(source) > SUMMARY_SECTION_SOURCE_CHARS:
-            compact_source = _build_walkthrough_index(item, source, lang, section_system, st)
+            compact_source = _build_walkthrough_index(item, source, lang, section_system, st, deadline)
         quote_source = source if len(source) <= SUMMARY_SECTION_SOURCE_CHARS else compact_source
         context = _build_context(item)
 
@@ -562,6 +570,7 @@ def _generate_structured_sections(
             section_system,
             {"background": "", "tldr": "", "atmosphere": ""},
             SUMMARY_REDUCE_MAX_TOKENS,
+            deadline,
         )
         key_points = _generate_json_section(
             st,
@@ -569,6 +578,7 @@ def _generate_structured_sections(
             section_system,
             {"key_points": []},
             SUMMARY_REDUCE_MAX_TOKENS,
+            deadline,
         )
         quotes_entities = _generate_json_section(
             st,
@@ -576,6 +586,7 @@ def _generate_structured_sections(
             section_system,
             {"quotes": [], "entities": []},
             SUMMARY_REDUCE_MAX_TOKENS,
+            deadline,
         )
         headline = _generate_json_section(
             st,
@@ -583,6 +594,7 @@ def _generate_structured_sections(
             section_system,
             {"headline": "", "subhead": ""},
             SUMMARY_HEADLINE_MAX_TOKENS,
+            deadline,
         )
 
         preserved_walkthrough = walkthrough if walkthrough is not None else existing.get("walkthrough", "")
@@ -666,9 +678,15 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
     chunks = _chunk_segments(segments, SUMMARY_CHUNK_CHARS)
     lang, map_system, section_system = _language_setup(transcript.get("text") or "", target_lang)
 
+    # Hard wall-clock budget for the whole summarize stage so it can't overrun
+    # the worker's ~15min stream budget and leave the item stuck in 'summarizing'.
+    deadline = time.monotonic() + float(os.environ.get("SUMMARIZE_BUDGET", "480"))
     with Stage("summarize", provider="gemini", model=os.environ.get("GEMINI_MODEL")) as st:
         note_blocks: list[str] = []
         for i, chunk in enumerate(chunks, start=1):
+            if time.monotonic() > deadline:
+                logger.warning("summarize budget exceeded at map chunk %d/%d; using partial", i, len(chunks))
+                break
             try:
                 res = llm.generate_text(
                     MAP_TEMPLATE.format(index=i, total=len(chunks), chunk=chunk, language_instruction=lang),
@@ -691,6 +709,7 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
             section_system,
             walkthrough=walkthrough,
             active_stage=st,
+            deadline=deadline,
         )
     stages.append(st)
     return structured
