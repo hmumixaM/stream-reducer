@@ -345,7 +345,7 @@ const STAGE_STATUS: Record<string, string> = {
 // "45% · 2.4 MB/s · ETA 12s" for downloads, "chunk 3/10" for transcription,
 // or an explicit detail (e.g. summarize section names).
 function progressDetail(evt: ProgressEvent): string | null {
-  if (evt.detail) return evt.detail;
+  if (typeof evt.detail === "string" && evt.detail) return evt.detail;
   if (evt.stage === "download") {
     const parts: string[] = [];
     if (evt.pct != null) parts.push(`${evt.pct}%`);
@@ -410,12 +410,19 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
         if (!stageChanged && now - lastWrite < 1500) return;
         lastWrite = now;
         lastStage = stage;
-        await env.DB.prepare(
-          `UPDATE item SET status = COALESCE(?, status), progress_stage = ?, progress_pct = ?,
-             progress_detail = ?, progress_updated_at = ? WHERE id = ?`,
-        )
-          .bind(STAGE_STATUS[stage] ?? null, stage || null, evt.pct ?? null, progressDetail(evt), isoNow(), itemId)
-          .run();
+        const pct = typeof evt.pct === "number" ? evt.pct : null;
+        const detail = progressDetail(evt);
+        try {
+          await env.DB.prepare(
+            `UPDATE item SET status = COALESCE(?, status), progress_stage = ?, progress_pct = ?,
+               progress_detail = ?, progress_updated_at = ? WHERE id = ?`,
+          )
+            .bind(STAGE_STATUS[stage] ?? null, stage || null, pct, detail, isoNow(), itemId)
+            .run();
+        } catch (herr) {
+          console.error("heartbeat bind failed", itemId, JSON.stringify({ evt, pct, detail }).slice(0, 2000));
+          throw herr;
+        }
       };
       result = await runPipelineStreaming(env, job, heartbeat);
     }
