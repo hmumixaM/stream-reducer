@@ -3,6 +3,7 @@ import type { AppContext } from "../auth";
 import { requireAdmin } from "../auth";
 import { all, first, type ItemRow } from "../db";
 import { toItemRead } from "../lib/serialize";
+import { cacheThumbnail } from "../lib/ingest";
 
 // Admin-only: user management + global processing-queue oversight.
 export const adminRoutes = new Hono<AppContext>();
@@ -200,6 +201,37 @@ adminRoutes.post("/backfill-infographics", async (c) => {
     }
   }
   return c.json({ candidates: itemIds.length, enqueued: dryRun ? 0 : itemIds.length });
+});
+
+// Backfill: mirror existing items' remote cover images into R2 and rewrite the
+// thumbnail to the served /media path. Needed for items stored before R2 cover
+// caching (notably Bilibili, whose hdslb.com URLs the browser can't load).
+//   ?dry_run=true     -> report how many would be cached, fetch nothing
+//   ?platform=bilibili -> only that platform (default: all remote thumbnails)
+//   ?limit=N          -> cap the batch (default 100; safe under subrequest caps)
+adminRoutes.post("/cache-thumbnails", async (c) => {
+  const dryRun = c.req.query("dry_run") === "true";
+  const limitParam = Number(c.req.query("limit"));
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.floor(limitParam) : 100;
+  const platform = c.req.query("platform");
+  const rows = await all<{ id: number; thumbnail: string }>(
+    c.env.DB.prepare(
+      `SELECT id, thumbnail FROM item
+        WHERE thumbnail LIKE 'http%' ${platform ? "AND platform = ?" : ""}
+        ORDER BY id DESC LIMIT ?`,
+    ).bind(...(platform ? [platform, limit] : [limit])),
+  );
+  let cached = 0;
+  if (!dryRun) {
+    for (const r of rows) {
+      const path = await cacheThumbnail(c.env, r.id, r.thumbnail);
+      if (path) {
+        await c.env.DB.prepare("UPDATE item SET thumbnail = ? WHERE id = ?").bind(path, r.id).run();
+        cached++;
+      }
+    }
+  }
+  return c.json({ candidates: rows.length, cached: dryRun ? 0 : cached });
 });
 
 // Remove an item from the global catalog entirely (drops it for all users).

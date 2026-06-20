@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,6 +25,10 @@ BROWSER_UA = (
 # Where mounted cookie files are looked up when YT_DLP_COOKIES_FILE is unset.
 COOKIES_DIR = Path("/cookies")
 
+# Cache of cookie files materialized from a "name=value; …" header env var,
+# keyed by the env var name (so we write each one only once per process).
+_COOKIE_HEADER_FILES: dict[str, str] = {}
+
 
 def _resolve_cookies_file() -> str | None:
     """Use the configured cookies file, else auto-detect a *.txt in /cookies."""
@@ -36,10 +42,55 @@ def _resolve_cookies_file() -> str | None:
     return None
 
 
+def _cookie_header_to_file(env_name: str, header: str, domain: str) -> str:
+    """Materialize a browser "name=value; …" cookie header into a Netscape
+    cookies.txt that yt-dlp can read. Cached per env var for the process.
+
+    The container injects the same Bilibili cookie used by the Worker feed
+    APIs (BILIBILI_COOKIE) but yt-dlp only accepts a cookie *file*, not a raw
+    header — without it Bilibili's web extractor returns HTTP 412.
+    """
+    cached = _COOKIE_HEADER_FILES.get(env_name)
+    if cached and Path(cached).exists():
+        return cached
+    lines = ["# Netscape HTTP Cookie File"]
+    for pair in header.split(";"):
+        pair = pair.strip()
+        if not pair or "=" not in pair:
+            continue
+        name, value = pair.split("=", 1)
+        name, value = name.strip(), value.strip()
+        if not name:
+            continue
+        # domain, include_subdomains, path, secure, expiry, name, value.
+        # expiry 0 = session cookie (yt-dlp keeps it for the run).
+        lines.append("\t".join([domain, "TRUE", "/", "FALSE", "0", name, value]))
+    path = Path(tempfile.gettempdir()) / f"ytdlp_cookies_{env_name}.txt"
+    path.write_text("\n".join(lines) + "\n")
+    _COOKIE_HEADER_FILES[env_name] = str(path)
+    return str(path)
+
+
 class YtDlpAdapter(Adapter):
     name = "yt_dlp"
     # Extra HTTP headers (e.g. Referer) some sites require to avoid bot blocks.
     extra_headers: dict[str, str] = {}
+    # When set, a "name=value; …" cookie header is read from this env var and
+    # materialized into a yt-dlp cookie file (used when no file is mounted).
+    cookie_env: str | None = None
+    # Cookie domain written into the generated Netscape file (leading dot =
+    # include subdomains).
+    cookie_domain: str = ""
+
+    def _cookies_file(self) -> str | None:
+        mounted = _resolve_cookies_file()
+        if mounted:
+            return mounted
+        if self.cookie_env:
+            header = os.environ.get(self.cookie_env)
+            if header:
+                return _cookie_header_to_file(self.cookie_env, header, self.cookie_domain)
+        return None
 
     def _ydl_opts(self, extra: dict | None = None) -> dict:
         opts: dict = {
@@ -56,7 +107,7 @@ class YtDlpAdapter(Adapter):
             "extractor_retries": 3,
             "http_headers": {"User-Agent": BROWSER_UA, **self.extra_headers},
         }
-        cookies = _resolve_cookies_file()
+        cookies = self._cookies_file()
         if cookies:
             opts["cookiefile"] = cookies
         if extra:

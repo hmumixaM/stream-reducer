@@ -6,9 +6,12 @@ import type { Env } from "../env";
 export class PipelineContainer extends Container<Env> {
   // The Python service inside the image listens here (see cf/pipeline/server.py).
   defaultPort = 8080;
-  // Spin down quickly after a job so per-item instances don't pile up against
-  // the container max_instances cap.
-  sleepAfter = "45s";
+  // Spin down quickly after a job so per-item instances don't linger against
+  // the container max_instances cap. With queue max_concurrency == max_instances
+  // (1 container per concurrent job), a long idle window would let a just-
+  // finished instance overlap the next job and trip "no Container instance
+  // available" 503s — so keep this short.
+  sleepAfter = "5s";
 
   // Secrets/config the container needs are injected as container env vars.
   override envVars = {
@@ -21,6 +24,9 @@ export class PipelineContainer extends Container<Env> {
     GEMINI_IMAGE_API_KEY: this.env.GEMINI_IMAGE_API_KEY ?? "",
     OPENROUTER_API_KEY: this.env.OPENROUTER_API_KEY,
     STT_MODEL: this.env.STT_MODEL,
+    // Bilibili web cookies for yt-dlp (materialized into a cookie file inside
+    // the container) — required to clear HTTP 412 risk control on downloads.
+    BILIBILI_COOKIE: this.env.BILIBILI_COOKIE ?? "",
   };
 }
 

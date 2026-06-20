@@ -19,6 +19,52 @@ export interface ItemMetadata {
   channel_id?: string | null;
 }
 
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
+// Download a remote cover image and store it in R2, returning the app-relative
+// `/media/...` path to serve it from (same pattern as audio + infographics).
+// Why: Bilibili's hdslb.com CDN hotlink-protects images (403 on a third-party
+// Referer) and hands back http:// URLs (mixed-content blocked on the https app),
+// so the browser can't load them directly. Fetching server-side with a Bilibili
+// Referer and re-serving from our own origin sidesteps both. Returns null (caller
+// keeps the original URL) when the image is missing/unfetchable — a flaky cover
+// must never fail an otherwise-successful pipeline run.
+export async function cacheThumbnail(
+  env: Env,
+  itemId: number,
+  url: string | null | undefined,
+): Promise<string | null> {
+  if (!url || !/^https?:\/\//.test(url)) return null;
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return null;
+  }
+  const headers: Record<string, string> = { "user-agent": BROWSER_UA };
+  // hdslb.com (Bilibili) rejects hotlinking unless the Referer is bilibili.
+  if (host.endsWith("hdslb.com")) headers["referer"] = "https://www.bilibili.com/";
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) return null;
+    const contentType = res.headers.get("content-type") || "image/jpeg";
+    const ext = contentType.includes("png")
+      ? "png"
+      : contentType.includes("webp")
+        ? "webp"
+        : contentType.includes("gif")
+          ? "gif"
+          : "jpg";
+    const key = `thumbnail/${itemId}.${ext}`;
+    await env.MEDIA.put(key, await res.arrayBuffer(), { httpMetadata: { contentType } });
+    return `/media/${key}`;
+  } catch (err) {
+    console.warn("thumbnail cache failed", { itemId, url, err: String(err) });
+    return null;
+  }
+}
+
 // Derive the canonical YouTube channel feed URL from a channel id. This matches
 // the feed_url shape stored for YouTube subscriptions (see routes/subscriptions),
 // so a manually-added video links to the same feed its subscribers follow.

@@ -10,6 +10,11 @@ class BilibiliAdapter(YtDlpAdapter):
     name = "bilibili"
     # Bilibili returns HTTP 412 without a browser Referer.
     extra_headers = {"Referer": "https://www.bilibili.com/"}
+    # Bilibili's web extractor also needs logged-in cookies (buvid/SESSDATA) to
+    # avoid HTTP 412 risk control; reuse the Worker's BILIBILI_COOKIE secret,
+    # injected into the container as an env var, materialized into a cookie file.
+    cookie_env = "BILIBILI_COOKIE"
+    cookie_domain = ".bilibili.com"
 
     def get_danmaku(self, url: str) -> list[dict] | None:
         return fetch_bilibili_danmaku(url) or None

@@ -1,7 +1,7 @@
 import type { Env, PipelineMessage } from "../env";
 import { first, type ItemRow } from "../db";
 import { isoNow } from "../lib/crypto";
-import { persistItemMetadata, linkItemFeed, youtubeChannelFeed } from "../lib/ingest";
+import { persistItemMetadata, linkItemFeed, youtubeChannelFeed, cacheThumbnail } from "../lib/ingest";
 import { runPipeline, type PipelineResult } from "./container";
 import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
@@ -376,7 +376,9 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
 }
 
 async function persistMetadata(env: Env, itemId: number, m: PipelineResult["metadata"]): Promise<void> {
-  await persistItemMetadata(env, itemId, m);
+  // Mirror the cover image into R2 and persist the /media path (see cacheThumbnail).
+  const cached = await cacheThumbnail(env, itemId, m.thumbnail);
+  await persistItemMetadata(env, itemId, cached ? { ...m, thumbnail: cached } : m);
 }
 
 async function persistHeadlineFields(env: Env, itemId: number, structured: Record<string, unknown>): Promise<void> {
