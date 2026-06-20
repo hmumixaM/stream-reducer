@@ -199,6 +199,14 @@ export async function runPipelineStreaming(
   let result: PipelineResult | null = null;
   let errorMsg: string | null = null;
 
+  // Worker-side idle watchdog: the container emits progress events through every
+  // stage (download %, transcribe chunk x/y, summarize section-by-section), so a
+  // gap with NO output means a genuine stall (e.g. an LLM summarize call the
+  // proxy never answers). Abort + fail cleanly instead of letting the item hang
+  // in-progress until the Worker invocation is evicted. Reset on every chunk, so
+  // legitimately-slow long content (which keeps emitting) is never killed.
+  const idleMs = Number(env.PIPELINE_IDLE_MS ?? "240000");
+
   const handle = async (line: string): Promise<void> => {
     const trimmed = line.trim();
     if (!trimmed) return;
@@ -216,7 +224,17 @@ export async function runPipelineStreaming(
   };
 
   for (;;) {
-    const { value, done } = await reader.read();
+    const step = await Promise.race([
+      reader.read(),
+      new Promise<"idle">((resolve) => setTimeout(() => resolve("idle"), idleMs)),
+    ]);
+    if (step === "idle") {
+      try { await reader.cancel(); } catch { /* ignore */ }
+      throw new Error(
+        `pipeline stalled — no progress for ${Math.round(idleMs / 60000)}min (likely an LLM summarize stall)`,
+      );
+    }
+    const { value, done } = step;
     if (done) break;
     buf += value;
     let nl: number;

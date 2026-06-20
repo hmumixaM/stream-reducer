@@ -49,6 +49,9 @@ export interface Env {
   // every job onto a brand-new container instance running the freshly built
   // image (otherwise long-lived instances keep a stale image after a deploy).
   CONTAINER_GEN?: string;
+  // Worker-side idle watchdog (ms): abort a streaming pipeline run if the
+  // container emits no progress for this long (a genuine stall). Default 240000.
+  PIPELINE_IDLE_MS?: string;
 
   // Secrets
   GEMINI_API_KEY: string;
