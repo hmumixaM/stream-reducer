@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import os
 import random
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -54,19 +55,36 @@ def generate_text(
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
     start = time.monotonic()
-    # Bounded per-call timeout so a hanging summarize call (some content makes
-    # the model/proxy stall) aborts quickly and the caller can fall back, instead
-    # of several 300s waits overrunning the worker's stream budget and leaving
-    # the item stuck in 'summarizing'. Normal calls finish in seconds.
-    timeout = float(os.environ.get("LLM_TIMEOUT", "90"))
-    with httpx.Client(timeout=timeout) as client:
-        resp = client.post(
-            f"{_gemini_base()}/chat/completions",
-            json=payload,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    # HARD per-call wall-clock cap. httpx's `timeout` is per-read (gap between
+    # bytes), so a proxy that *streams* a response slowly can run for many
+    # minutes without tripping it — which let a single summarize call overrun the
+    # worker's ~15min stream budget and leave items stuck in 'summarizing'. Run
+    # the request in a daemon thread and abandon it past the deadline so the
+    # caller can fall back. Normal calls finish in seconds.
+    deadline = float(os.environ.get("LLM_TIMEOUT", "60"))
+    box: dict = {}
+
+    def _call() -> None:
+        try:
+            with httpx.Client(timeout=deadline) as client:
+                resp = client.post(
+                    f"{_gemini_base()}/chat/completions",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                )
+                resp.raise_for_status()
+                box["data"] = resp.json()
+        except BaseException as exc:  # noqa: BLE001 — propagated to the caller below
+            box["err"] = exc
+
+    thread = threading.Thread(target=_call, daemon=True)
+    thread.start()
+    thread.join(deadline + 5)
+    if thread.is_alive():
+        raise httpx.ReadTimeout(f"LLM call exceeded {deadline + 5:.0f}s hard timeout")
+    if "err" in box:
+        raise box["err"]
+    data = box["data"]
     content = data["choices"][0]["message"].get("content") or ""
     usage = data.get("usage") or {}
     return LlmResult(
