@@ -97,12 +97,14 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
     if (sub.last_seen_guid && e.guid === sub.last_seen_guid) break;
     fresh.push(e);
   }
-  const minPublished = sub.min_published_at; // window cutoff (last 3 months)
+  // Two subscription filters: (1) the publish-date window (天数限制) so a channel
+  // only backfills its last N days, and (2) the duration floor (default 10 min)
+  // so shorts/clips stay out. A subscription pulls EVERY video that passes both
+  // — not just the channel feed's latest 15 — drained MAX_NEW_PER_POLL per poll.
+  // Entries with an unknown publish date / duration are kept (we can't tell).
+  // Manual adds don't go through here, so they're unaffected.
+  const minPublished = sub.min_published_at; // window cutoff (e.g. last 90 days)
   const inWindow = fresh.filter((e) => !minPublished || !e.published || e.published >= minPublished);
-
-  // Skip short videos: subscriptions only pull in items >= the duration floor.
-  // Entries with an unknown duration are kept (we can't tell). Manual adds don't
-  // go through here, so they're unaffected.
   const minDuration = Number(env.SUBSCRIPTION_MIN_DURATION_S || DEFAULT_MIN_DURATION_S);
   const durations = await Promise.all(inWindow.map((e) => entryDuration(e, entryUrl(e).platform)));
   const within = inWindow.filter((_, i) => durations[i] == null || durations[i]! >= minDuration);

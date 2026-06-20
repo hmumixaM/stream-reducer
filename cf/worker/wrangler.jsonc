@@ -70,11 +70,15 @@
     }
   ],
 
-  // --- KV: OAuth clients, tokens, and grants ---
+  // --- KV: OAuth clients, tokens, and grants + Bilibili auth (cookie + token) ---
   "kv_namespaces": [
     {
       "binding": "OAUTH_KV",
       "id": "bfba6f4a3950488cb4b0ba9b84e2b879"
+    },
+    {
+      "binding": "BILI_AUTH",
+      "id": "b2a287d7866842ef864246119d2e3c72"
     }
   ],
 

@@ -6,7 +6,9 @@ export type ItemStatus =
   | "transcribing"
   | "summarizing"
   | "done"
-  | "error";
+  | "error"
+  // Deliberately skipped (membership/paid-gated content); terminal, not retried.
+  | "excluded";
 
 export type Platform =
   | "youtube"

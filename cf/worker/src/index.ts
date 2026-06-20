@@ -17,6 +17,7 @@ import { oauthRoutes } from "./routes/oauth";
 import { mcpHandler } from "./routes/mcp";
 import { handleMessage } from "./pipeline/consumer";
 import { pollDueSubscriptions } from "./pipeline/subscriptions";
+import { refreshBilibiliCookie } from "./lib/biliRefresh";
 
 export { PipelineContainer } from "./pipeline/container";
 
@@ -89,6 +90,14 @@ export default {
       await env.PIPELINE.send({ kind: "graph_build", force: false });
       // Defense-in-depth GC of expired/orphaned OAuth tokens, grants, clients.
       await oauthProvider.purgeExpiredData(env);
+      // Keep the Bilibili cookie alive (self-gates via cookie/info; only the
+      // first daily check actually rolls the cookie when Bilibili asks for it).
+      try {
+        const r = await refreshBilibiliCookie(env);
+        console.log("bilibili cookie refresh:", r.reason);
+      } catch (err) {
+        console.error("bilibili cookie refresh failed", err);
+      }
     } else {
       await pollDueSubscriptions(env);
     }

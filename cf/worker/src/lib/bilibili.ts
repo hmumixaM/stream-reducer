@@ -8,6 +8,7 @@
 // (BILIBILI_COOKIE secret); series works without one.
 import type { Env } from "../env";
 import { parseDuration, type FeedEntry } from "./feed";
+import { getBilibiliCookie } from "./biliAuth";
 
 export interface BiliSource {
   kind: "space" | "season" | "series";
@@ -50,9 +51,9 @@ export function parseBilibiliUrl(input: string): BiliSource | null {
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-async function biliGet(env: Env, url: string, referer: string): Promise<Record<string, unknown>> {
+async function biliGet(url: string, referer: string, cookie: string | undefined): Promise<Record<string, unknown>> {
   const headers: Record<string, string> = { "user-agent": UA, referer };
-  if (env.BILIBILI_COOKIE) headers["cookie"] = env.BILIBILI_COOKIE;
+  if (cookie) headers["cookie"] = cookie;
   const res = await fetch(url, { headers });
   return (await res.json()) as Record<string, unknown>;
 }
@@ -70,23 +71,24 @@ function videoEntry(bvid: string, title: string, tsSeconds: number | null, durat
 
 // Fetch recent entries for a bilibili source. Returns newest-first.
 export async function fetchBilibiliEntries(env: Env, src: BiliSource): Promise<FeedEntry[]> {
+  const cookie = await getBilibiliCookie(env);
   if (src.kind === "season") {
     const url = `https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=${src.mid}&season_id=${src.sid}&sort_reverse=false&page_num=1&page_size=30`;
-    const d = await biliGet(env, url, `https://space.bilibili.com/${src.mid}`);
+    const d = await biliGet(url, `https://space.bilibili.com/${src.mid}`, cookie);
     const archives = (((d.data as Record<string, unknown>)?.archives as Record<string, unknown>[]) ?? []);
     return archives.map((a) => videoEntry(String(a.bvid), String(a.title ?? ""), Number(a.pubdate) || null, a.duration as string | number));
   }
 
   if (src.kind === "series") {
     const url = `https://api.bilibili.com/x/series/archives?mid=${src.mid}&series_id=${src.sid}&only_normal=true&sort=desc&pn=1&ps=30`;
-    const d = await biliGet(env, url, `https://space.bilibili.com/${src.mid}`);
+    const d = await biliGet(url, `https://space.bilibili.com/${src.mid}`, cookie);
     const archives = (((d.data as Record<string, unknown>)?.archives as Record<string, unknown>[]) ?? []);
     return archives.map((a) => videoEntry(String(a.bvid), String(a.title ?? ""), Number(a.pubdate) || null, a.duration as string | number));
   }
 
   // space: the UP主's dynamic feed, filtered to video posts.
   const url = `https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?offset=&host_mid=${src.mid}&timezone_offset=-480&features=itemOpusStyle`;
-  const d = await biliGet(env, url, `https://space.bilibili.com/${src.mid}/dynamic`);
+  const d = await biliGet(url, `https://space.bilibili.com/${src.mid}/dynamic`, cookie);
   const items = (((d.data as Record<string, unknown>)?.items as Record<string, unknown>[]) ?? []);
   const out: FeedEntry[] = [];
   for (const it of items) {

@@ -1,5 +1,6 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import type { Env } from "../env";
+import { getBilibiliCookie } from "../lib/biliAuth";
 
 // Container-enabled Durable Object that runs the Python pipeline image
 // (yt-dlp + ffmpeg + summarize). The Worker controls one instance per job.
@@ -26,7 +27,12 @@ export class PipelineContainer extends Container<Env> {
     STT_MODEL: this.env.STT_MODEL,
     // Bilibili web cookies for yt-dlp (materialized into a cookie file inside
     // the container) — required to clear HTTP 412 risk control on downloads.
+    // This is the static seed; the per-job request body carries the freshest
+    // (auto-refreshed) cookie and wins inside the container.
     BILIBILI_COOKIE: this.env.BILIBILI_COOKIE ?? "",
+    // Number of Cloudflare WARP SOCKS5 proxies entrypoint.sh brings up; yt-dlp
+    // rotates through them (then `direct`) to dodge Bilibili IP risk-control.
+    WARP_INSTANCES: this.env.WARP_INSTANCES ?? "2",
   };
 }
 
@@ -39,6 +45,9 @@ export interface PipelineJob {
   // headline_backfill re-generates only the headline/subhead from stored summary JSON.
   // infographic renders an image poster from stored summary JSON (image model).
   mode: "process" | "resummarize" | "structured_backfill" | "headline_backfill" | "infographic";
+  // Freshest (auto-refreshed) Bilibili cookie, attached per-job so the container
+  // uses the current cookie instead of the static deploy-time secret.
+  bilibili_cookie?: string;
   transcript?: { language: string | null; source: string; segments: unknown[]; text: string } | null;
   summary?: Record<string, unknown> | null;
   // When set, the summary is regenerated in this language (on-demand translation).
@@ -92,6 +101,9 @@ export interface PipelineResult {
   media: { bytes: number; duration_s: number | null; audio_b64: string | null; format: string | null };
   stages: { stage: string; provider: string | null; model: string | null; duration_ms: number; request_count: number; total_tokens: number; cost_usd: number; error?: string | null }[];
   error?: string | null;
+  // Set when the container deliberately skipped the item (membership/paid-gated
+  // content). The Worker marks it 'excluded' — a terminal, non-retried state.
+  excluded?: boolean;
 }
 
 // Run a job in its own container instance (keyed by item). Per-item isolation
@@ -104,6 +116,11 @@ export async function runPipeline(env: Env, job: PipelineJob): Promise<PipelineR
     : job.mode === "infographic"
       ? `ig-${job.item_id}`
       : `job-${job.item_id}`;
+  // Attach the freshest Bilibili cookie (from KV) so the container's yt-dlp uses
+  // the auto-refreshed value rather than the static deploy-time env secret.
+  if (job.platform === "bilibili" && !job.bilibili_cookie) {
+    job = { ...job, bilibili_cookie: await getBilibiliCookie(env) };
+  }
   const instance = getContainer(env.PIPELINE_CONTAINER, key);
   const res = await instance.fetch(
     new Request("http://pipeline/process", {
@@ -119,18 +136,48 @@ export async function runPipeline(env: Env, job: PipelineJob): Promise<PipelineR
   return (await res.json()) as PipelineResult;
 }
 
+export interface FeedEntryOut {
+  external_id: string | null;
+  title: string | null;
+  url: string;
+  duration_s: number | null;
+  published: string | null;
+}
+
+// Enumerate a channel/playlist's recent uploads via the container's yt-dlp.
+// Used by subscription polling to go beyond the ~15 entries a channel's RSS
+// feed exposes (the Worker can't run yt-dlp itself).
+export async function fetchFeedEntries(
+  env: Env,
+  source_url: string,
+  limit = 300,
+): Promise<FeedEntryOut[]> {
+  const instance = getContainer(env.PIPELINE_CONTAINER, "feed");
+  const res = await instance.fetch(
+    new Request("http://pipeline/feed_entries", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source_url, limit }),
+    }),
+  );
+  if (!res.ok) throw new Error(`feed_entries container ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const data = (await res.json()) as { entries?: FeedEntryOut[] };
+  return data.entries ?? [];
+}
+
 // Fetch only metadata (used for fast metadata-first prioritization).
 export async function fetchMetadata(
   env: Env,
   source_url: string,
   platform: string,
 ): Promise<PipelineResult["metadata"]> {
+  const bilibili_cookie = platform === "bilibili" ? await getBilibiliCookie(env) : undefined;
   const instance = getContainer(env.PIPELINE_CONTAINER, `meta-${platform}`);
   const res = await instance.fetch(
     new Request("http://pipeline/metadata", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ source_url, platform }),
+      body: JSON.stringify({ source_url, platform, bilibili_cookie }),
     }),
   );
   if (!res.ok) throw new Error(`metadata container ${res.status}`);

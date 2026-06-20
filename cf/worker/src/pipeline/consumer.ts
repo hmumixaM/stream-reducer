@@ -351,6 +351,19 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
         like_count: item.like_count,
       },
     });
+    // Membership/paid-gated content: terminal 'excluded' (not an error, not
+    // retried, hidden from the active queue). Metadata is still persisted so
+    // the title/channel are recognizable.
+    if (result.excluded) {
+      if (result.metadata) await persistMetadata(env, itemId, result.metadata);
+      await env.DB.prepare(
+        "UPDATE item SET status = 'excluded', error = ?, completed_at = ?, retry_count = ? WHERE id = ?",
+      )
+        .bind((result.error || "members-only").slice(0, 500), isoNow(), MAX_RECLAIM, itemId)
+        .run();
+      await env.DB.prepare("UPDATE user_item SET personal_status = 'excluded' WHERE item_id = ?").bind(itemId).run();
+      return;
+    }
     if (result.error) throw new Error(result.error);
 
     await persistResult(env, itemId, result);

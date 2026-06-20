@@ -29,6 +29,54 @@ COOKIES_DIR = Path("/cookies")
 # keyed by the env var name (so we write each one only once per process).
 _COOKIE_HEADER_FILES: dict[str, str] = {}
 
+# Sentinel: the adapter hasn't picked a proxy yet, so fall back to the first
+# configured candidate.
+_PROXY_UNSET = object()
+
+# Substrings that mark a Bilibili (or generic) anti-bot / IP risk-control reject.
+# Used only to classify log lines — rotation itself fires on any failure when a
+# fallback proxy is available.
+_RISK_MARKERS = (
+    "412",
+    "precondition failed",
+    "-352",
+    "-403",
+    "风控",
+    "risk",
+    "区域限制",
+    "geo restrict",
+)
+
+
+def reset_cookie_cache() -> None:
+    """Forget materialized cookie files so a changed cookie env (e.g. a freshly
+    refreshed Bilibili cookie passed per-job) is re-materialized on next use."""
+    _COOKIE_HEADER_FILES.clear()
+
+
+def _proxy_candidates() -> list[str | None]:
+    """Ordered proxy candidates from ``PROXY_URLS`` (comma-separated).
+
+    Each entry is a proxy URL (e.g. ``socks5://127.0.0.1:40000``) or the literal
+    ``direct`` (no proxy). When unset, returns ``[None]`` so behaviour is
+    unchanged (direct egress).
+    """
+    raw = os.environ.get("PROXY_URLS", "").strip()
+    if not raw:
+        return [None]
+    out: list[str | None] = []
+    for part in raw.split(","):
+        p = part.strip()
+        if not p:
+            continue
+        out.append(None if p.lower() == "direct" else p)
+    return out or [None]
+
+
+def _is_risk_control(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _RISK_MARKERS)
+
 
 def _resolve_cookies_file() -> str | None:
     """Use the configured cookies file, else auto-detect a *.txt in /cookies."""
@@ -81,6 +129,10 @@ class YtDlpAdapter(Adapter):
     # Cookie domain written into the generated Netscape file (leading dot =
     # include subdomains).
     cookie_domain: str = ""
+    # The proxy yt-dlp egresses through for this adapter's calls. _PROXY_UNSET
+    # means "use the first configured candidate"; download_audio rewrites it as
+    # it rotates through PROXY_URLS on failure.
+    _active_proxy: object = _PROXY_UNSET
 
     def _cookies_file(self) -> str | None:
         mounted = _resolve_cookies_file()
@@ -110,6 +162,11 @@ class YtDlpAdapter(Adapter):
         cookies = self._cookies_file()
         if cookies:
             opts["cookiefile"] = cookies
+        proxy = self._active_proxy
+        if proxy is _PROXY_UNSET:
+            proxy = _proxy_candidates()[0]
+        if proxy:
+            opts["proxy"] = proxy
         if extra:
             opts.update(extra)
         return opts
@@ -117,6 +174,38 @@ class YtDlpAdapter(Adapter):
     def _extract_info(self, url: str, download: bool = False, extra: dict | None = None) -> dict:
         with YoutubeDL(self._ydl_opts(extra)) as ydl:
             return ydl.extract_info(url, download=download)
+
+    def extract_feed_entries(self, url: str, limit: int = 300) -> list[dict]:
+        """Flat-extract a channel/playlist into feed entries (newest first) with
+        duration + publish date, for subscription polling.
+
+        The Worker can't run yt-dlp, and a channel's RSS feed only exposes its
+        latest ~15 uploads — so polling routes through here to enumerate the full
+        recent back-catalogue. `youtubetab:approximate_date` makes YouTube flat
+        entries carry an upload timestamp so the Worker can still apply its
+        publish-date window; `duration` lets it apply the min-duration floor
+        without scraping each watch page.
+        """
+        extra: dict = {"extract_flat": "in_playlist", "playlistend": limit}
+        if self.name == "youtube":
+            extra["extractor_args"] = {"youtubetab": {"approximate_date": ["true"]}}
+        info = self._extract_info(url, extra=extra)
+        out: list[dict] = []
+        for entry in info.get("entries") or []:
+            if not entry:
+                continue
+            entry_url = entry.get("url") or entry.get("webpage_url")
+            if not entry_url:
+                continue
+            ts = entry.get("timestamp")
+            out.append({
+                "external_id": entry.get("id"),
+                "title": entry.get("title"),
+                "url": entry_url,
+                "duration_s": int(entry["duration"]) if entry.get("duration") else None,
+                "published": datetime.fromtimestamp(ts, tz=UTC).isoformat() if ts else None,
+            })
+        return out
 
     def extract_entries(self, url: str) -> dict | None:
         """Flat-extract a playlist/collection URL into its entries.
@@ -269,6 +358,34 @@ class YtDlpAdapter(Adapter):
     def download_audio(self, url: str, dest_dir: Path) -> Path:
         dest_dir.mkdir(parents=True, exist_ok=True)
         outtmpl = str(dest_dir / "%(id)s.%(ext)s")
+        # Try each configured proxy in turn (e.g. WARP SOCKS5 instances, then
+        # `direct`), rotating to the next on any failure so a single IP being
+        # risk-controlled by Bilibili doesn't fail the whole download. The proxy
+        # also flows into _ydl_opts for the metadata/native calls earlier in the
+        # job (they use the first candidate).
+        candidates = _proxy_candidates()
+        last_exc: Exception | None = None
+        for index, proxy in enumerate(candidates):
+            self._active_proxy = proxy
+            try:
+                return self._download_audio_once(url, dest_dir, outtmpl)
+            except Exception as exc:  # noqa: BLE001 — rotate, then re-raise last
+                last_exc = exc
+                more = index + 1 < len(candidates)
+                logger.warning(
+                    "download_audio via proxy=%s failed (%s%s)%s",
+                    proxy or "direct",
+                    "risk-control: " if _is_risk_control(exc) else "",
+                    exc,
+                    "; rotating to next proxy" if more else "; no more proxies",
+                )
+                if more:
+                    continue
+                raise
+        assert last_exc is not None
+        raise last_exc
+
+    def _download_audio_once(self, url: str, dest_dir: Path, outtmpl: str) -> Path:
         opts = self._ydl_opts({
             "skip_download": False,
             "format": "bestaudio/best",

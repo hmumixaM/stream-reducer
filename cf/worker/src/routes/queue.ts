@@ -19,7 +19,7 @@ queueRoutes.get("/", async (c) => {
   const userId = c.get("user").id;
   // Total items still ahead in the global pipeline (for an ETA hint).
   const totalRow = await all<{ n: number }>(
-    c.env.DB.prepare("SELECT COUNT(*) AS n FROM item WHERE status != 'done'"),
+    c.env.DB.prepare("SELECT COUNT(*) AS n FROM item WHERE status NOT IN ('done', 'excluded')"),
   );
   const queueTotal = totalRow[0]?.n ?? 0;
 
@@ -32,12 +32,12 @@ queueRoutes.get("/", async (c) => {
               (SELECT chunk_count FROM stage_run WHERE item_id = item.id ORDER BY id DESC LIMIT 1) AS chunk_count,
               -- Rank in the global processing order (same ordering the worker
               -- claims by): how many non-done items are scheduled ahead of this.
-              (SELECT COUNT(*) FROM item o WHERE o.status != 'done'
+              (SELECT COUNT(*) FROM item o WHERE o.status NOT IN ('done', 'excluded')
                  AND (o.priority_score > item.priority_score
                    OR (o.priority_score = item.priority_score AND o.request_count > item.request_count)
                    OR (o.priority_score = item.priority_score AND o.request_count = item.request_count AND o.enqueued_at < item.enqueued_at))) + 1 AS queue_position
          FROM user_item ui JOIN item ON item.id = ui.item_id
-        WHERE ui.user_id = ? AND item.status != 'done'
+        WHERE ui.user_id = ? AND item.status NOT IN ('done', 'excluded')
         ORDER BY item.priority_score DESC, item.enqueued_at DESC`,
     ).bind(userId),
   );

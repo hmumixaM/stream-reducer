@@ -9,15 +9,19 @@ const STATUS_STYLES: Record<ItemStatus, string> = {
   summarizing: "bg-violet-500/15 text-violet-400",
   done: "bg-emerald-500/15 text-emerald-400",
   error: "bg-red-500/15 text-red-400",
+  excluded: "bg-slate-500/15 text-slate-400",
 };
+
+// Terminal statuses don't show the pulsing "in-progress" dot.
+const TERMINAL: ItemStatus[] = ["done", "error", "excluded"];
 
 export function StatusBadge({ status }: { status: ItemStatus }) {
   return (
     <Badge className={cn(STATUS_STYLES[status])}>
-      {status !== "done" && status !== "error" && (
+      {!TERMINAL.includes(status) && (
         <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
       )}
-      {status}
+      {status === "excluded" ? "members-only" : status}
     </Badge>
   );
 }

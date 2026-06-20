@@ -75,6 +75,51 @@ export function normalizeUrl(rawUrl: string): string {
   return `${parsed.origin}${parsed.pathname}${qs ? `?${qs}` : ""}`;
 }
 
+// Guard for manual library adds: a single video/episode is allowed, but a
+// channel / user space / playlist / feed page is not (those belong in a
+// subscription, which expands them at poll time). Adding a channel as an item
+// makes yt-dlp treat it as a giant playlist and hang. Returns a user-facing
+// error string for non-item URLs, or null when the URL is an acceptable item.
+// Only the video platforms (YouTube, Bilibili) are restricted; podcast/RSS/
+// 小宇宙 links are single episodes and pass through.
+export function nonItemUrlError(rawUrl: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl.trim());
+  } catch {
+    return null; // not a URL: let downstream handling deal with it
+  }
+  const host = (parsed.hostname || "").toLowerCase();
+  const path = parsed.pathname;
+  const platform = detectPlatform(rawUrl);
+
+  if (platform === "bilibili") {
+    // space.bilibili.com/<mid> is an UP主 (channel), not a video.
+    if (host.endsWith("space.bilibili.com")) {
+      return "This is a Bilibili channel page, not a video — add it as a subscription instead.";
+    }
+    if (BV_RE.test(path) || /\/av\d+/i.test(path) || host === "b23.tv") return null;
+    return "This Bilibili link isn't a single video — paste a /video/BV… URL, or add the channel as a subscription.";
+  }
+
+  if (platform === "youtube") {
+    if (path.startsWith("/feeds/")) return "This is a YouTube feed, not a video.";
+    if (/^\/(channel\/|c\/|user\/|@|playlist)/.test(path) || path === "/") {
+      return "This is a YouTube channel/playlist, not a video — add it as a subscription instead.";
+    }
+    if (host.endsWith("youtu.be")) {
+      return path.replace(/^\/+/, "") ? null : "Missing YouTube video id.";
+    }
+    if (path.includes("/shorts/") || path.includes("/embed/")) return null;
+    if (path.includes("/watch")) {
+      return parsed.searchParams.get("v") ? null : "Missing YouTube video id.";
+    }
+    return "This YouTube link isn't a single video.";
+  }
+
+  return null;
+}
+
 // Split a free-text blob of URLs (whitespace/comma separated) into a clean list.
 export function splitUrls(text: string): string[] {
   return text

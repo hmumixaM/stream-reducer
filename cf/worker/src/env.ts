@@ -11,6 +11,9 @@ export interface Env {
   MEDIA: R2Bucket;
   AI: Ai;
   OAUTH_KV: KVNamespace;
+  // Persisted Bilibili auth: the current cookie + its refresh_token, rolled by
+  // the cron-driven refresh (see lib/biliRefresh.ts).
+  BILI_AUTH: KVNamespace;
 
   // OAuth API, injected by the @cloudflare/workers-oauth-provider wrapper into
   // the default/api handlers (used by the /oauth consent routes).
@@ -36,6 +39,9 @@ export interface Env {
   SUBSCRIPTION_MIN_DURATION_S?: string;
   GRAPH_KNN_K: string;
   GRAPH_SIM_THRESHOLD: string;
+  // Number of WARP SOCKS5 proxies the pipeline container brings up for yt-dlp
+  // egress rotation (defaults to "2" in the container if unset).
+  WARP_INSTANCES?: string;
 
   // Secrets
   GEMINI_API_KEY: string;
@@ -45,8 +51,13 @@ export interface Env {
   // Falls back to GEMINI_API_KEY in the container when unset.
   GEMINI_IMAGE_API_KEY?: string;
   // Bilibili web cookies (Netscape values joined as "name=value; …"), used to
-  // clear risk-control on the space/season/series feed APIs. Optional.
+  // clear risk-control on the space/season/series feed APIs. Optional. This is
+  // only the initial seed/fallback — the live cookie is kept in the BILI_AUTH KV
+  // and auto-refreshed.
   BILIBILI_COOKIE?: string;
+  // Bilibili persistent refresh token (browser localStorage `ac_time_value`),
+  // required to seed the cookie auto-refresh. Optional.
+  BILIBILI_REFRESH_TOKEN?: string;
 
   // Comma-separated emails auto-granted admin on sign-in.
   ADMIN_EMAILS?: string;

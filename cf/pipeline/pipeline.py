@@ -60,6 +60,33 @@ PLATFORM_LABELS = {
 }
 _TS_RE = re.compile(r"\[(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\]")
 
+# Substrings (case-insensitive) that mark content gated behind a channel
+# membership / paid tier (YouTube members-only, Bilibili 充电专属/大会员, etc.).
+# Such videos can't be downloaded with our cookies, so we exclude them (a
+# terminal, non-retried state) instead of failing/retrying the item forever.
+_MEMBERS_ONLY_MARKERS = (
+    "members-only",
+    "member's only",
+    "join this channel",
+    "available to this channel's members",
+    "members of this channel",
+    "subscriber_only",
+    "needs_subscription",
+    "premium_only",
+    "充电专属",
+    "充电视频",
+    "专属视频",
+    "大会员",
+    "付费视频",
+    "需要购买",
+    "需要充电",
+)
+
+
+def _is_members_only(text: str) -> bool:
+    t = (text or "").lower()
+    return any(marker.lower() in t for marker in _MEMBERS_ONLY_MARKERS)
+
 
 @dataclass
 class ItemView:
@@ -252,12 +279,36 @@ def _meta_to_dict(meta: ContentMeta) -> dict:
     }
 
 
-def fetch_metadata(source_url: str, platform: str | None = None) -> dict:
+def _apply_bilibili_cookie(cookie: str | None) -> None:
+    """Override the container's BILIBILI_COOKIE with the per-job (auto-refreshed)
+    cookie passed by the Worker, and drop any cookie file materialized from the
+    previous value so the adapter re-materializes the new one."""
+    if not cookie:
+        return
+    if os.environ.get("BILIBILI_COOKIE") != cookie:
+        os.environ["BILIBILI_COOKIE"] = cookie
+        from app.adapters.ytdlp_base import reset_cookie_cache
+
+        reset_cookie_cache()
+
+
+def fetch_metadata(source_url: str, platform: str | None = None, bilibili_cookie: str | None = None) -> dict:
+    _apply_bilibili_cookie(bilibili_cookie)
     # The adapter registry is keyed by the Platform enum; always resolve it from
     # the URL (the string `platform` from the Worker is informational only).
     adapter = get_adapter(detect_platform(source_url))
     meta = adapter.fetch_metadata(source_url)
     return _meta_to_dict(meta)
+
+
+def fetch_feed_entries(source_url: str, limit: int = 300) -> dict:
+    """Enumerate a channel/playlist's recent uploads (newest first) for
+    subscription polling. Routed through the container because the Worker can't
+    run yt-dlp and a channel's RSS feed is capped at its latest ~15 uploads.
+    """
+    adapter = get_adapter(detect_platform(source_url))
+    extract = getattr(adapter, "extract_feed_entries", None)
+    return {"entries": extract(source_url, limit) if extract else []}
 
 
 # --- chunking for embeddings ----------------------------------------------
@@ -696,9 +747,26 @@ def _apply_supplied_metadata(item: ItemView, supplied: dict) -> None:
     item.like_count = supplied.get("like_count")
 
 
+def _excluded_result(metadata: dict, stages: list[Stage], message: str) -> dict:
+    """Terminal result for content we deliberately don't download (e.g.
+    members-only / paid). The Worker flips the item to an 'excluded' status
+    (not an error, not retried)."""
+    return {
+        "metadata": metadata or {},
+        "transcript": None,
+        "summary": None,
+        "chunks": [],
+        "media": {"bytes": 0, "duration_s": None, "audio_b64": None, "format": None},
+        "stages": [_stage_dict(s) for s in stages],
+        "error": message,
+        "excluded": True,
+    }
+
+
 # --- top-level run ---------------------------------------------------------
 def run(job: dict) -> dict:
     source_url = job["source_url"]
+    _apply_bilibili_cookie(job.get("bilibili_cookie"))
     plat = detect_platform(source_url)  # Platform enum (registry key)
     mode = job.get("mode", "process")
     stages: list[Stage] = []
@@ -754,37 +822,45 @@ def run(job: dict) -> dict:
     adapter = get_adapter(plat)
 
     if mode != "resummarize":
-        with tempfile.TemporaryDirectory(prefix="sr_media_") as tmp:
-            with Stage("download", provider=adapter.name) as st:
-                meta = adapter.fetch_metadata(source_url)
-                metadata = _meta_to_dict(meta)
-                # Adapter-scraped metadata wins when present; fall back to the
-                # stored feed metadata (the only source for podcast enclosures).
-                item.title = metadata["title"] or supplied.get("title")
-                item.author = metadata["author"] or supplied.get("author")
-                item.description = metadata["description"] or supplied.get("description")
-                item.duration_s = metadata["duration_s"] or supplied.get("duration_s")
-                item.published_at = meta.published_at or _parse_dt(supplied.get("published_at"))
-                item.view_count = metadata.get("view_count") or supplied.get("view_count")
-                item.like_count = metadata.get("like_count") or supplied.get("like_count")
+        try:
+            with tempfile.TemporaryDirectory(prefix="sr_media_") as tmp:
+                with Stage("download", provider=adapter.name) as st:
+                    meta = adapter.fetch_metadata(source_url)
+                    metadata = _meta_to_dict(meta)
+                    # Adapter-scraped metadata wins when present; fall back to the
+                    # stored feed metadata (the only source for podcast enclosures).
+                    item.title = metadata["title"] or supplied.get("title")
+                    item.author = metadata["author"] or supplied.get("author")
+                    item.description = metadata["description"] or supplied.get("description")
+                    item.duration_s = metadata["duration_s"] or supplied.get("duration_s")
+                    item.published_at = meta.published_at or _parse_dt(supplied.get("published_at"))
+                    item.view_count = metadata.get("view_count") or supplied.get("view_count")
+                    item.like_count = metadata.get("like_count") or supplied.get("like_count")
 
-                native = adapter.get_native_transcript(source_url, os.environ.get("DEFAULT_LANGUAGE") or None)
-                if native and native.segments:
-                    segs = [{**s, "text": to_simplified(s.get("text", ""))} for s in native.segments]
-                    transcript = {"language": native.language, "source": "native", "segments": segs,
-                                  "text": "\n".join(s.get("text", "") for s in segs)}
-                else:
-                    audio_path = Path(adapter.download_audio(source_url, Path(tmp)))
-                    decodable = decodable_duration(audio_path)
-                    media["bytes"] = audio_path.stat().st_size
-                    media["duration_s"] = decodable or probe_duration(audio_path)
-                    media["format"] = audio_path.suffix.lstrip(".") or "mp3"
-                    if media["bytes"] <= MEDIA_MAX_BYTES:
-                        media["audio_b64"] = base64.b64encode(audio_path.read_bytes()).decode("ascii")
-            stages.append(st)
+                    native = adapter.get_native_transcript(source_url, os.environ.get("DEFAULT_LANGUAGE") or None)
+                    if native and native.segments:
+                        segs = [{**s, "text": to_simplified(s.get("text", ""))} for s in native.segments]
+                        transcript = {"language": native.language, "source": "native", "segments": segs,
+                                      "text": "\n".join(s.get("text", "") for s in segs)}
+                    else:
+                        audio_path = Path(adapter.download_audio(source_url, Path(tmp)))
+                        decodable = decodable_duration(audio_path)
+                        media["bytes"] = audio_path.stat().st_size
+                        media["duration_s"] = decodable or probe_duration(audio_path)
+                        media["format"] = audio_path.suffix.lstrip(".") or "mp3"
+                        if media["bytes"] <= MEDIA_MAX_BYTES:
+                            media["audio_b64"] = base64.b64encode(audio_path.read_bytes()).decode("ascii")
+                stages.append(st)
 
-            if transcript is None:
-                transcript = _transcribe(tmp, audio_path, stages)
+                if transcript is None:
+                    transcript = _transcribe(tmp, audio_path, stages)
+        except Exception as exc:  # noqa: BLE001
+            # Membership/paid-gated videos (YouTube members-only, Bilibili
+            # 充电专属, …) can't be downloaded — exclude them so they aren't
+            # retried forever or surfaced as failures.
+            if _is_members_only(str(exc)):
+                return _excluded_result(metadata, stages, f"{type(exc).__name__}: {exc}")
+            raise
     else:
         # resummarize / translate: reuse provided transcript. Prefer metadata
         # passed by the caller (avoids a re-fetch — important for sources like

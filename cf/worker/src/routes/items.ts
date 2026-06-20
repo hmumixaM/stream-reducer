@@ -4,7 +4,7 @@ import { requireAuth, resolveUser } from "../auth";
 import { all, first, type ItemRow, type UserItemRow } from "../db";
 import { toItemRead } from "../lib/serialize";
 import { addUrlToLibrary, recomputePriority } from "../lib/ingest";
-import { splitUrls } from "../lib/url";
+import { splitUrls, nonItemUrlError } from "../lib/url";
 
 export const itemsRoutes = new Hono<AppContext>();
 
@@ -160,6 +160,19 @@ itemsRoutes.post("/library", requireAuth, async (c) => {
   if (body.url) raw.push(body.url);
   const urls = raw.flatMap((entry) => splitUrls(entry));
   if (!urls.length) return c.json({ error: "no urls provided" }, 400);
+
+  // Reject channel/playlist/feed links: only single videos/episodes can be added
+  // to the library (channels belong in subscriptions). All-or-nothing so the
+  // user gets a clear error instead of a silently-skipped link.
+  const invalid = urls
+    .map((url) => ({ url, error: nonItemUrlError(url) }))
+    .filter((x): x is { url: string; error: string } => x.error !== null);
+  if (invalid.length) {
+    return c.json(
+      { error: invalid.map((x) => x.error).join(" "), invalid },
+      400,
+    );
+  }
 
   const userId = c.get("user").id;
   const created: unknown[] = [];

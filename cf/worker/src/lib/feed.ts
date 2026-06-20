@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { parseBilibiliUrl, fetchBilibiliEntries } from "./bilibili";
+import { fetchFeedEntries } from "../pipeline/container";
 
 // Minimal RSS / Atom parser for Workers (no DOM). Handles the common shapes:
 // RSS <item> (link/guid/pubDate/enclosure) and Atom <entry> (link href/id/published).
@@ -113,12 +114,38 @@ async function itunesFeedUrl(id: string): Promise<string | null> {
 
 // Fetch + parse a subscription feed. RSS/Atom (YouTube, Apple, generic) is
 // fetched and parsed; Bilibili sources are built from its JSON APIs.
+// A YouTube channel Atom feed only ever exposes the latest ~15 uploads, so a
+// subscription can never backfill a channel's catalogue from it. Detect the
+// channel id and enumerate the full recent uploads via the container's yt-dlp
+// instead (which also yields each video's duration + approximate date, so the
+// poll's duration floor + publish-date window still apply).
+const YT_CHANNEL_FEED_RE = /youtube\.com\/feeds\/videos\.xml\?channel_id=(UC[0-9A-Za-z_-]+)/i;
+
 export async function fetchFeed(env: Env, feedUrl: string): Promise<ParsedFeed> {
   const bili = parseBilibiliUrl(feedUrl);
   if (bili) {
     const entries = await fetchBilibiliEntries(env, bili);
     return { title: null, entries };
   }
+
+  const ytChannel = feedUrl.match(YT_CHANNEL_FEED_RE);
+  if (ytChannel) {
+    const channelUrl = `https://www.youtube.com/channel/${ytChannel[1]}/videos`;
+    const raw = await fetchFeedEntries(env, channelUrl);
+    const entries: FeedEntry[] = raw
+      .filter((e) => e.external_id)
+      .map((e) => ({
+        title: e.title,
+        link: `https://www.youtube.com/watch?v=${e.external_id}`,
+        // Match the Atom feed's guid shape so last_seen_guid stays continuous.
+        guid: `yt:video:${e.external_id}`,
+        published: e.published,
+        audio: null,
+        duration_s: e.duration_s,
+      }));
+    return { title: null, entries };
+  }
+
   const res = await fetch(feedUrl, { headers: { "user-agent": "stream-reduce/1.0" } });
   return parseFeed(await res.text());
 }

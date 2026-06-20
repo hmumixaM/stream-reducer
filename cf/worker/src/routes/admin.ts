@@ -66,7 +66,7 @@ adminRoutes.get("/queue", async (c) => {
                  WHERE ui.item_id = item.id) AS owners,
               (SELECT COUNT(DISTINCT ui.user_id) FROM user_item ui WHERE ui.item_id = item.id) AS owner_count
          FROM item
-        WHERE item.status != 'done'
+        WHERE item.status NOT IN ('done', 'excluded')
         ORDER BY item.priority_score DESC, item.request_count DESC, item.enqueued_at ASC`,
     ),
   );
