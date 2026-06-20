@@ -11,10 +11,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import os
 import re
 import tempfile
 import time
+
+import httpx
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +43,8 @@ from app.pipeline.prompts import (
 from app.zh import to_simplified
 
 import llm
+
+logger = logging.getLogger("pipeline")
 
 # Tunables (env-overridable).
 SUMMARY_CHUNK_CHARS = int(os.environ.get("SUMMARY_CHUNK_CHARS", "20000"))
@@ -467,7 +472,14 @@ def _generate_json_section(
 ) -> dict:
     for attempt in range(2):
         section_system = system if attempt == 0 else system + STRICT_JSON_SUFFIX
-        res = llm.generate_text(prompt, system=section_system, max_tokens=max_tokens)
+        try:
+            res = llm.generate_text(prompt, system=section_system, max_tokens=max_tokens)
+        except httpx.HTTPError as exc:
+            # Timeout / proxy error / 5xx: fall back to defaults immediately (no
+            # second attempt, which would likely stall again) so one bad section
+            # can't overrun the worker budget and leave the item stuck.
+            logger.warning("summary section LLM call failed: %s", exc)
+            break
         st.request_count += 1
         st.total_tokens += res.total_tokens
         try:
@@ -657,10 +669,16 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
     with Stage("summarize", provider="gemini", model=os.environ.get("GEMINI_MODEL")) as st:
         note_blocks: list[str] = []
         for i, chunk in enumerate(chunks, start=1):
-            res = llm.generate_text(
-                MAP_TEMPLATE.format(index=i, total=len(chunks), chunk=chunk, language_instruction=lang),
-                system=map_system, max_tokens=SUMMARY_MAP_MAX_TOKENS,
-            )
+            try:
+                res = llm.generate_text(
+                    MAP_TEMPLATE.format(index=i, total=len(chunks), chunk=chunk, language_instruction=lang),
+                    system=map_system, max_tokens=SUMMARY_MAP_MAX_TOKENS,
+                )
+            except httpx.HTTPError as exc:
+                # A stalled/failed map call shouldn't hang the whole job; skip
+                # this chunk's notes (best-effort) rather than overrun the budget.
+                logger.warning("summary map chunk %d/%d LLM call failed: %s", i, len(chunks), exc)
+                continue
             st.request_count += 1
             st.total_tokens += res.total_tokens
             note_blocks.append(strip_body_timestamps(_strip_fences(res.text).strip()))

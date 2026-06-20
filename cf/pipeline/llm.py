@@ -54,7 +54,12 @@ def generate_text(
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
     start = time.monotonic()
-    with httpx.Client(timeout=300) as client:
+    # Bounded per-call timeout so a hanging summarize call (some content makes
+    # the model/proxy stall) aborts quickly and the caller can fall back, instead
+    # of several 300s waits overrunning the worker's stream budget and leaving
+    # the item stuck in 'summarizing'. Normal calls finish in seconds.
+    timeout = float(os.environ.get("LLM_TIMEOUT", "90"))
+    with httpx.Client(timeout=timeout) as client:
         resp = client.post(
             f"{_gemini_base()}/chat/completions",
             json=payload,
