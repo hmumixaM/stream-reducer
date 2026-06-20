@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { getContainer } from "@cloudflare/containers";
+import { containerKey } from "../pipeline/container";
 import type { AppContext } from "../auth";
 import { requireAdmin } from "../auth";
 import { all, first, type ItemRow } from "../db";
@@ -36,7 +37,7 @@ adminRoutes.post("/bili-refresh", async (c) => {
 // Diagnostic: report the container's egress IP through each configured WARP
 // proxy (and direct), plus Bilibili's risk-control verdict.
 adminRoutes.get("/proxy-check", async (c) => {
-  const instance = getContainer(c.env.PIPELINE_CONTAINER, "proxy-check");
+  const instance = getContainer(c.env.PIPELINE_CONTAINER, containerKey(c.env, "proxy-check"));
   const res = await instance.fetch(new Request("http://pipeline/proxy-check"));
   return new Response(await res.text(), {
     status: res.status,

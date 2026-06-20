@@ -2,6 +2,15 @@ import { Container, getContainer } from "@cloudflare/containers";
 import type { Env } from "../env";
 import { getBilibiliCookie } from "../lib/biliAuth";
 
+// Container DO instances run the image they were CREATED with and are reused by
+// id across deploys, so a long-lived instance can keep running a stale image
+// after a new deploy (which left fixes from not taking effect). Suffixing the
+// instance key with CONTAINER_GEN lets a deploy that bumps that var force every
+// job onto a brand-new instance (= the freshly built image).
+export function containerKey(env: Env, base: string): string {
+  return `${base}-g${env.CONTAINER_GEN ?? "0"}`;
+}
+
 // Container-enabled Durable Object that runs the Python pipeline image
 // (yt-dlp + ffmpeg + summarize). The Worker controls one instance per job.
 export class PipelineContainer extends Container<Env> {
@@ -113,11 +122,14 @@ export interface PipelineResult {
 // caused head-of-line blocking); instances spin down fast via `sleepAfter` to
 // stay under the max_instances cap.
 export async function runPipeline(env: Env, job: PipelineJob): Promise<PipelineResult> {
-  const key = job.target_lang
-    ? `tr-${job.item_id}-${job.target_lang}`
-    : job.mode === "infographic"
-      ? `ig-${job.item_id}`
-      : `job-${job.item_id}`;
+  const key = containerKey(
+    env,
+    job.target_lang
+      ? `tr-${job.item_id}-${job.target_lang}`
+      : job.mode === "infographic"
+        ? `ig-${job.item_id}`
+        : `job-${job.item_id}`,
+  );
   // Attach the freshest Bilibili cookie (from KV) so the container's yt-dlp uses
   // the auto-refreshed value rather than the static deploy-time env secret.
   if (job.platform === "bilibili" && !job.bilibili_cookie) {
@@ -164,7 +176,7 @@ export async function runPipelineStreaming(
   job: PipelineJob,
   onProgress: (evt: ProgressEvent) => void | Promise<void>,
 ): Promise<PipelineResult> {
-  const key = `job-${job.item_id}`;
+  const key = containerKey(env, `job-${job.item_id}`);
   if (job.platform === "bilibili" && !job.bilibili_cookie) {
     job = { ...job, bilibili_cookie: await getBilibiliCookie(env) };
   }
@@ -236,7 +248,7 @@ export async function fetchFeedEntries(
   source_url: string,
   limit = 300,
 ): Promise<FeedEntryOut[]> {
-  const instance = getContainer(env.PIPELINE_CONTAINER, "feed");
+  const instance = getContainer(env.PIPELINE_CONTAINER, containerKey(env, "feed"));
   const res = await instance.fetch(
     new Request("http://pipeline/feed_entries", {
       method: "POST",
@@ -256,7 +268,7 @@ export async function fetchMetadata(
   platform: string,
 ): Promise<PipelineResult["metadata"]> {
   const bilibili_cookie = platform === "bilibili" ? await getBilibiliCookie(env) : undefined;
-  const instance = getContainer(env.PIPELINE_CONTAINER, `meta-${platform}`);
+  const instance = getContainer(env.PIPELINE_CONTAINER, containerKey(env, `meta-${platform}`));
   const res = await instance.fetch(
     new Request("http://pipeline/metadata", {
       method: "POST",

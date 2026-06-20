@@ -154,7 +154,10 @@
     "SUBSCRIPTION_MIN_DURATION_S": "600",
     "GRAPH_KNN_K": "6",
     "GRAPH_SIM_THRESHOLD": "0.6",
-    "ADMIN_EMAILS": "huyangmax@gmail.com"
+    "ADMIN_EMAILS": "huyangmax@gmail.com",
+    // Bump to force all container jobs onto fresh instances (new image) after a
+    // deploy — avoids long-lived DO instances running a stale container image.
+    "CONTAINER_GEN": "1"
   }
 
   // Secrets (set via `wrangler secret put`):

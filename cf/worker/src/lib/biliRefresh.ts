@@ -8,6 +8,7 @@
 import type { Env } from "../env";
 import { loadBiliAuth, saveBiliAuth } from "./biliAuth";
 import { getContainer } from "@cloudflare/containers";
+import { containerKey } from "../pipeline/container";
 
 export interface RefreshOutcome {
   refreshed: boolean;
@@ -30,7 +31,7 @@ export async function refreshBilibiliCookie(
   if (!auth.refresh_token) return { refreshed: false, reason: "no refresh_token (set BILIBILI_REFRESH_TOKEN)" };
 
   // Run the refresh in the container (WARP egress).
-  const instance = getContainer(env.PIPELINE_CONTAINER, "bili-refresh");
+  const instance = getContainer(env.PIPELINE_CONTAINER, containerKey(env, "bili-refresh"));
   const res = await instance.fetch(
     new Request("http://pipeline/refresh-cookie", {
       method: "POST",

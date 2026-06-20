@@ -45,6 +45,10 @@ export interface Env {
   // Optional single proxy (http(s)://… / socks5://…) for yt-dlp egress; only
   // used when PROXY_URLS (WARP rotation) is not set.
   YT_DLP_PROXY?: string;
+  // Container instance-key generation. Bump (in wrangler.jsonc vars) to force
+  // every job onto a brand-new container instance running the freshly built
+  // image (otherwise long-lived instances keep a stale image after a deploy).
+  CONTAINER_GEN?: string;
 
   // Secrets
   GEMINI_API_KEY: string;
