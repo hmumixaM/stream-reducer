@@ -157,7 +157,7 @@
     "ADMIN_EMAILS": "huyangmax@gmail.com",
     // Bump to force all container jobs onto fresh instances (new image) after a
     // deploy — avoids long-lived DO instances running a stale container image.
-    "CONTAINER_GEN": "2"
+    "CONTAINER_GEN": "3"
   }
 
   // Secrets (set via `wrangler secret put`):

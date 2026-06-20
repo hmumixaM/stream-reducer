@@ -26,9 +26,12 @@ logger = logging.getLogger("pipeline")
 app = FastAPI(title="stream-reduce-pipeline")
 
 
+BUILD_MARKER = "bld-2026-06-20-v7-summarize-timeout"
+
+
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "build": BUILD_MARKER}
 
 
 def _curl(args: list[str], timeout: int = 25) -> str:
@@ -57,7 +60,7 @@ def proxy_check() -> dict:
         warp = next((ln.split("=", 1)[1] for ln in trace.splitlines() if ln.startswith("warp=")), None)
         zone = _curl([*socks, "https://api.bilibili.com/x/web-interface/zone"])
         results.append({"proxy": proxy, "ip": ip, "loc": loc, "warp": warp, "bili_zone": zone[:300]})
-    return {"proxy_urls": raw, "results": results}
+    return {"build": BUILD_MARKER, "proxy_urls": raw, "results": results}
 
 
 @app.post("/metadata")
