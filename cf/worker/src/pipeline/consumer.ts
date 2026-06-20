@@ -434,7 +434,22 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
     }
     if (result.error) throw new Error(result.error);
 
-    await persistResult(env, itemId, result);
+    try {
+      await persistResult(env, itemId, result);
+    } catch (perr) {
+      // Diagnostic: dump the result shape so an object-typed scalar bind
+      // (D1_TYPE_ERROR) can be pinpointed.
+      const dump = {
+        metadata: result.metadata,
+        media: result.media ? { ...result.media, audio_b64: result.media.audio_b64 ? "<b64>" : null } : null,
+        summary: result.summary ? { model: result.summary.model, prompt_version: result.summary.prompt_version, markdown_type: typeof result.summary.markdown, structured: result.summary.structured } : null,
+        transcript: result.transcript ? { language: result.transcript.language, source: result.transcript.source, text_type: typeof result.transcript.text, seg0: (result.transcript.segments as unknown[])?.[0] } : null,
+        chunk0: result.chunks?.[0],
+        chunk_count: result.chunks?.length,
+      };
+      console.error("persistResult failed", itemId, JSON.stringify(dump).slice(0, 4000));
+      throw perr;
+    }
     await embedChunks(env, itemId);
 
     await env.DB.prepare(
