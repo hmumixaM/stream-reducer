@@ -404,7 +404,6 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
       let lastStage = "";
       const heartbeat = async (evt: ProgressEvent): Promise<void> => {
         if (evt.event !== "progress") return;
-        console.log("hb", itemId, evt.stage ?? "-", evt.detail ?? "-", evt.pct ?? "-");
         const stage = evt.stage || "";
         const stageChanged = stage !== lastStage;
         const now = Date.now();
@@ -431,13 +430,19 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
     // retried, hidden from the active queue). Metadata is still persisted so
     // the title/channel are recognizable.
     if (result.excluded) {
+      // Membership/paid-gated content (can't be downloaded). Mark the global
+      // item 'excluded' (terminal — never reprocessed, and dedup/ingest skips
+      // it) and REMOVE it from every user's library so member-only videos don't
+      // linger there. Comments/highlights on such items are dropped too.
       if (result.metadata) await persistMetadata(env, itemId, result.metadata);
       await env.DB.prepare(
         "UPDATE item SET status = 'excluded', error = ?, completed_at = ?, retry_count = ? WHERE id = ?",
       )
         .bind((result.error || "members-only").slice(0, 500), isoNow(), MAX_RECLAIM, itemId)
         .run();
-      await env.DB.prepare("UPDATE user_item SET personal_status = 'excluded' WHERE item_id = ?").bind(itemId).run();
+      await env.DB.prepare("DELETE FROM user_item WHERE item_id = ?").bind(itemId).run();
+      await env.DB.prepare("DELETE FROM comment WHERE item_id = ?").bind(itemId).run();
+      await env.DB.prepare("DELETE FROM highlight WHERE item_id = ?").bind(itemId).run();
       return;
     }
     if (result.error) throw new Error(result.error);

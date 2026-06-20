@@ -198,6 +198,11 @@ export async function addUrlToLibrary(
     external_id: opts.external_id ?? opts.meta?.external_id ?? metadata?.external_id,
   });
 
+  // Known membership/paid-gated content: keep the terminal global record (so
+  // dedup recognizes it and it's never reprocessed) but never (re)add it to a
+  // library — member-only videos shouldn't appear there.
+  if (item.status === "excluded") return null;
+
   if (metadata) {
     await persistItemMetadata(env, item.id, metadata);
   }
