@@ -91,6 +91,28 @@ def _is_risk_control(exc: Exception) -> bool:
     return any(marker in msg for marker in _RISK_MARKERS)
 
 
+def await_warp_ready(timeout: int = 30) -> bool:
+    """Block (bounded) until the first configured WARP SOCKS proxy can actually
+    pass traffic, so a cold container's first job doesn't race the WireGuard
+    handshake (the container now binds :8080 immediately and warms WARP in the
+    background). No-op when the first candidate is direct or there's no proxy;
+    returns False on timeout (rotation/direct then handles it)."""
+    proxy = _proxy_candidates()[0]
+    if not proxy or not str(proxy).startswith("socks"):
+        return True
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            resp = httpx.get("https://www.cloudflare.com/cdn-cgi/trace", proxy=proxy, timeout=6)
+            if resp.status_code == 200:
+                return True
+        except Exception:  # noqa: BLE001 — proxy not up yet; keep polling
+            pass
+        time.sleep(2)
+    logger.warning("WARP proxy %s not ready after %ss; proceeding (will rotate)", proxy, timeout)
+    return False
+
+
 # Phrases that mean "this IP is blocked/flagged" (YouTube bot wall, HTTP
 # 403/412/429, geo). Used to prefix a clear, actionable hint on the error.
 _IP_BLOCK_MARKERS = (

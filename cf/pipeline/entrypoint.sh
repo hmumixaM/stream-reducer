@@ -1,41 +1,32 @@
 #!/usr/bin/env bash
 # Container entrypoint: bring up N Cloudflare WARP SOCKS5 proxies (userspace
-# WireGuard via wgcf + wireproxy, so no TUN device / NET_ADMIN is required),
-# export their addresses as PROXY_URLS for the yt-dlp adapter to rotate through,
-# then hand off to the FastAPI pipeline server.
+# WireGuard via wgcf + wireproxy, so no TUN device / NET_ADMIN is required) and
+# hand off to the FastAPI pipeline server.
 #
-# Each proxy is a fresh WARP identity registered at startup, so concurrent
-# container instances don't share one WireGuard key and rotation lands on a
-# different exit IP. `direct` is always appended as the final fallback so a
-# WARP/UDP failure degrades to the previous (datacenter-IP) behaviour instead
-# of breaking the pipeline.
+# IMPORTANT: WARP setup (wgcf register + WireGuard handshake) is done in the
+# BACKGROUND and uvicorn is exec'd immediately, so the container binds :8080
+# right away. Blocking on WARP readiness here previously delayed the bind past
+# Cloudflare's container-start window, causing "container is not listening" /
+# blockConcurrencyWhile timeouts under load. PROXY_URLS is published up front
+# (the ports are known); the yt-dlp adapter rotates WARP -> direct if a proxy
+# isn't healthy yet, and pipeline.run waits briefly for WARP before egress.
 set -u
 
 WARP_INSTANCES="${WARP_INSTANCES:-2}"
 BASE_PORT="${WARP_BASE_PORT:-40000}"
-# Max seconds to wait for the first WARP proxy's WireGuard handshake to pass
-# traffic before starting the server anyway (rotation + `direct` cover misses).
-WARP_READY_TIMEOUT="${WARP_READY_TIMEOUT:-45}"
 
+# Publish PROXY_URLS immediately (optimistic): socks5 ports we're about to bring
+# up, then `direct` as the final fallback.
 proxies=()
+for i in $(seq 1 "$WARP_INSTANCES"); do
+  proxies+=("socks5://127.0.0.1:$((BASE_PORT + i - 1))")
+done
+proxies+=("direct")
+PROXY_URLS="$(IFS=,; echo "${proxies[*]}")"
+export PROXY_URLS
+echo "[warp] PROXY_URLS=${PROXY_URLS}"
 
-# True once the SOCKS proxy can actually fetch through the WARP tunnel.
-proxy_ready() {
-  local hostport="${1#*://}"
-  curl -fsS --max-time 8 --socks5-hostname "$hostport" \
-    https://www.cloudflare.com/cdn-cgi/trace >/dev/null 2>&1
-}
-
-wait_ready() {
-  local url="$1" deadline=$(( $(date +%s) + WARP_READY_TIMEOUT ))
-  while [ "$(date +%s)" -lt "$deadline" ]; do
-    if proxy_ready "$url"; then return 0; fi
-    sleep 2
-  done
-  return 1
-}
-
-start_warp() {
+setup_warp() {
   local idx="$1" port="$2"
   local toml="/tmp/wgcf-${idx}.toml"
   local wg="/tmp/wgcf-${idx}.conf"
@@ -48,42 +39,21 @@ start_warp() {
   if ! wgcf generate --config "$toml" --profile "$wg" >>"$log" 2>&1; then
     echo "[warp] generate #${idx} failed:"; sed 's/^/[warp]   /' "$log"; return 1
   fi
-
   cat > "$wp" <<EOF
 WGConfig = ${wg}
 
 [Socks5]
 BindAddress = 127.0.0.1:${port}
 EOF
-
   wireproxy -c "$wp" >>"$log" 2>&1 &
   echo "[warp] wireproxy #${idx} -> socks5://127.0.0.1:${port} (pid $!)"
-  return 0
 }
 
-for i in $(seq 1 "$WARP_INSTANCES"); do
-  port=$((BASE_PORT + i - 1))
-  if start_warp "$i" "$port"; then
-    proxies+=("socks5://127.0.0.1:${port}")
-  fi
-done
-
-# Always keep a direct egress as the last resort.
-proxies+=("direct")
-
-# Join with commas without spawning a subshell that loses the array.
-PROXY_URLS="$(IFS=,; echo "${proxies[*]}")"
-export PROXY_URLS
-echo "[warp] PROXY_URLS=${PROXY_URLS}"
-
-# Block (bounded) until the first WARP proxy can pass traffic, so the first job
-# doesn't race the WireGuard handshake. Falls through to `direct` on timeout.
-if [ "${proxies[0]}" != "direct" ]; then
-  if wait_ready "${proxies[0]}"; then
-    echo "[warp] ${proxies[0]} ready"
-  else
-    echo "[warp] WARNING: ${proxies[0]} not ready after ${WARP_READY_TIMEOUT}s; relying on rotation/direct"
-  fi
-fi
+# Bring up all WARP instances in the background — never blocks the uvicorn bind.
+{
+  for i in $(seq 1 "$WARP_INSTANCES"); do
+    setup_warp "$i" "$((BASE_PORT + i - 1))" || true
+  done
+} &
 
 exec uvicorn server:app --host 0.0.0.0 --port 8080
