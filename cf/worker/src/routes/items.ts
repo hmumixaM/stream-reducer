@@ -29,6 +29,9 @@ itemsRoutes.get("/", async (c) => {
   if (u.status) {
     where.push("item.status = ?");
     binds.push(u.status);
+  } else {
+    // Hide membership/paid-gated (members-only) items from the public catalog.
+    where.push("item.status != 'excluded'");
   }
   if (u.platform) {
     where.push("item.platform = ?");
@@ -191,6 +194,8 @@ itemsRoutes.get("/:id", async (c) => {
   const userId = user?.id ?? -1;
   const item = await first<ItemRow>(c.env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(id));
   if (!item) return c.json({ error: "item not found" }, 404);
+  // Members-only/paid-gated content is hidden everywhere (can't be viewed).
+  if (item.status === "excluded") return c.json({ error: "item not found" }, 404);
   const ui = await first<UserItemRow>(
     c.env.DB.prepare("SELECT * FROM user_item WHERE user_id = ? AND item_id = ?").bind(userId, id),
   );
