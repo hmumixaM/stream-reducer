@@ -48,6 +48,18 @@ function staleCutoff(): string {
   return new Date(Date.now() - STALE_IN_PROGRESS_MS).toISOString();
 }
 
+// A 503 from the container DO means no free instance right now (all slots busy /
+// still provisioning) — transient, not a real job failure. Re-queue instead of
+// erroring so a capacity blip doesn't permanently fail items.
+function isTransientCapacity(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    m.includes("container 503") ||
+    m.includes("no container instance available") ||
+    m.includes("currently provisioning")
+  );
+}
+
 // SQL predicate (and its bind params) for an item that can be claimed: a fresh
 // 'queued' item, or one orphaned in-progress past the cutoff and under the
 // reclaim cap.
@@ -433,10 +445,25 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
     // Flip every user's saved copy of this content to done (dedup payoff).
     await env.DB.prepare("UPDATE user_item SET personal_status = 'done' WHERE item_id = ?").bind(itemId).run();
   } catch (err) {
+    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    // Transient capacity (503, no free container instance): put the item back to
+    // 'queued' (don't burn a retry, don't mark error) and rethrow so the queue
+    // redelivers with backoff; the cron pump also re-drains it. This prevents a
+    // momentary instance crunch from permanently failing items.
+    if (isTransientCapacity(msg)) {
+      await env.DB.prepare(
+        `UPDATE item SET status = 'queued', error = NULL,
+           progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+         WHERE id = ?`,
+      )
+        .bind(itemId)
+        .run();
+      console.warn("pipeline item deferred — no container slot, re-queued", itemId);
+      throw err;
+    }
     // Record the failure and stop: leave the item in 'error' (not auto-retried)
     // and don't rethrow, so the queue message acks cleanly and the self-drain
     // continuation isn't lost (which previously stranded items in 'fetching').
-    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     await env.DB.prepare(
       `UPDATE item SET status = 'error', error = ?, retry_count = retry_count + 1,
          progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
