@@ -404,6 +404,7 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
       let lastStage = "";
       const heartbeat = async (evt: ProgressEvent): Promise<void> => {
         if (evt.event !== "progress") return;
+        console.log("hb", itemId, evt.stage ?? "-", evt.detail ?? "-", evt.pct ?? "-");
         const stage = evt.stage || "";
         const stageChanged = stage !== lastStage;
         const now = Date.now();
