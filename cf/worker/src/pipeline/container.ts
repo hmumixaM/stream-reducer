@@ -209,7 +209,14 @@ export async function runPipelineStreaming(
   }
 
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-  let buf = "";
+  // Accumulates the bytes of the line currently being read. Kept as a separate
+  // partial (instead of one growing buffer that we re-scan from index 0 on every
+  // read) because the FINAL result line is one huge JSON blob (base64 audio +
+  // transcript + chunks). Re-scanning a growing multi-MB buffer with indexOf on
+  // every ~16KB chunk is O(n²) and torched the Worker CPU (exceededCpu kills),
+  // which stranded items mid-run. Here indexOf only ever scans the small
+  // incoming chunk, and the long line is flattened + parsed exactly once.
+  let pending = "";
   let result: PipelineResult | null = null;
   let errorMsg: string | null = null;
 
@@ -260,15 +267,20 @@ export async function runPipelineStreaming(
     }
     const { value, done } = step;
     if (done) break;
-    buf += value;
+    // Scan only the freshly-read chunk for newlines; splice completed lines out
+    // of it and carry any trailing remainder in `pending`. This stays O(total
+    // bytes) even when a single line spans thousands of reads (the big result).
+    let chunk = value;
     let nl: number;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
+    while ((nl = chunk.indexOf("\n")) >= 0) {
+      const line = pending + chunk.slice(0, nl);
+      pending = "";
+      chunk = chunk.slice(nl + 1);
       await handle(line);
     }
+    pending += chunk;
   }
-  await handle(buf); // terminal line without a trailing newline
+  await handle(pending); // terminal line without a trailing newline
 
   if (errorMsg) throw new Error(errorMsg);
   if (!result) throw new Error("pipeline stream ended without a result");
