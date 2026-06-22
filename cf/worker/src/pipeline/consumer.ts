@@ -80,15 +80,19 @@ function claimableBinds(cutoff: string): unknown[] {
 // can be retried) instead of hanging silently.
 export async function failStrandedItems(env: Env): Promise<void> {
   const ph = IN_PROGRESS.map(() => "?").join(",");
-  await env.DB.prepare(
+  const cutoff = staleCutoff();
+  const res = await env.DB.prepare(
     `UPDATE item SET status = 'error',
        error = 'pipeline worker was killed before completing (CPU/time limit) and exhausted automatic reclaims — retry to reprocess',
        completed_at = ?, progress_stage = NULL, progress_pct = NULL,
        progress_detail = NULL, progress_updated_at = NULL
-     WHERE status IN (${ph}) AND started_at < ? AND retry_count >= ${MAX_RECLAIM}`,
+     WHERE status IN (${ph}) AND started_at < ? AND retry_count >= ${MAX_RECLAIM}
+     RETURNING id`,
   )
-    .bind(isoNow(), ...IN_PROGRESS, staleCutoff())
-    .run();
+    .bind(isoNow(), ...IN_PROGRESS, cutoff)
+    .all<{ id: number }>();
+  const reaped = (res.results ?? []).map((r) => r.id);
+  if (reaped.length) console.error("failStrandedItems reaped stranded items to 'error'", reaped);
 }
 
 async function processNextQueuedItem(env: Env): Promise<void> {
@@ -384,6 +388,10 @@ function progressDetail(evt: ProgressEvent): string | null {
 
 async function processClaimedItem(env: Env, item: ItemRow, resummarize = false): Promise<void> {
   const itemId = item.id;
+  const runStart = Date.now();
+  console.log(
+    `pipeline run start item=${itemId} platform=${item.platform} mode=${resummarize ? "resummarize" : "process"} retry=${item.retry_count} url=${item.source_url}`,
+  );
   try {
     // Metadata is no longer pre-fetched in its own container call (avoids extra
     // container instances / 503s); the full pipeline run below returns and
@@ -514,6 +522,7 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
       .run();
     // Flip every user's saved copy of this content to done (dedup payoff).
     await env.DB.prepare("UPDATE user_item SET personal_status = 'done' WHERE item_id = ?").bind(itemId).run();
+    console.log(`pipeline run done item=${itemId} ms=${Date.now() - runStart}`);
   } catch (err) {
     const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     // Transient capacity (503, no free container instance): put the item back to
@@ -541,7 +550,7 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
     )
       .bind(msg.slice(0, 4000), itemId)
       .run();
-    console.error("pipeline item failed", itemId, msg);
+    console.error(`pipeline item failed item=${itemId} ms=${Date.now() - runStart} msg=${msg}`);
   }
 }
 

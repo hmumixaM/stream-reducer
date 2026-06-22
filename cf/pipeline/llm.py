@@ -110,13 +110,16 @@ def generate_text(
     if fallback and fallback != primary:
         attempts.append(fallback)
 
+    log = logging.getLogger("pipeline")
     last_exc: httpx.HTTPError | None = None
     for attempt_model in attempts:
         try:
-            return _chat_once(attempt_model, messages, temperature, max_tokens, key)
+            res = _chat_once(attempt_model, messages, temperature, max_tokens, key)
+            log.info("llm ok model=%s %dms tokens=%d", attempt_model, res.latency_ms, res.total_tokens)
+            return res
         except httpx.HTTPError as exc:
             last_exc = exc
-            logging.getLogger("pipeline").warning("LLM call on model %s failed: %s", attempt_model, exc)
+            log.warning("LLM call on model %s failed: %s", attempt_model, exc)
     raise last_exc  # type: ignore[misc]  # at least one attempt always ran
 
 

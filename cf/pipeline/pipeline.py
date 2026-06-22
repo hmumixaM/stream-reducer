@@ -698,6 +698,8 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
     segments = transcript.get("segments") or []
     chunks = _chunk_segments(segments, SUMMARY_CHUNK_CHARS)
     lang, map_system, section_system = _language_setup(transcript.get("text") or "", target_lang)
+    logger.info("summarize start: %d segments, %d map chunks, transcript=%d chars",
+                len(segments), len(chunks), len(transcript.get("text") or ""))
 
     # Hard wall-clock budget for the whole summarize stage so it can't overrun
     # the worker's ~15min stream budget and leave the item stuck in 'summarizing'.
@@ -723,6 +725,8 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
             st.total_tokens += res.total_tokens
             note_blocks.append(strip_body_timestamps(_strip_fences(res.text).strip()))
         walkthrough = "\n\n".join(note_blocks)
+        logger.info("summarize: map done (%d/%d notes, %d chars), generating structured sections",
+                    len(note_blocks), len(chunks), len(walkthrough))
         structured = _generate_structured_sections(
             item,
             walkthrough,
@@ -734,6 +738,8 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
             deadline=deadline,
             on_progress=emit,
         )
+    logger.info("summarize done: %d requests, %d tokens, %dms",
+                st.request_count, st.total_tokens, st.duration_ms)
     stages.append(st)
     return structured
 

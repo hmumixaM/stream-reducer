@@ -159,7 +159,13 @@ export async function runPipeline(env: Env, job: PipelineJob): Promise<PipelineR
 
 // A streamed pipeline progress event (see cf/pipeline/server.py /process_stream).
 export interface ProgressEvent {
-  event: "progress" | "result" | "error" | "partial";
+  event: "progress" | "result" | "error" | "partial" | "log";
+  // For event === "log": a forwarded container-side `pipeline` logger record.
+  // Container stdout isn't captured by Workers observability, so these are
+  // re-emitted to the Worker console (tagged with the item id) to make the
+  // inside of a pipeline run visible.
+  level?: string;
+  logger?: string;
   stage?: string;
   status?: string;
   pct?: number | null;
@@ -219,6 +225,12 @@ export async function runPipelineStreaming(
   let pending = "";
   let result: PipelineResult | null = null;
   let errorMsg: string | null = null;
+  // Stream stats logged on completion. maxLineLen would have immediately
+  // surfaced the oversized result line behind the O(n²) CPU blowup.
+  const streamStart = Date.now();
+  let bytesStreamed = 0;
+  let lineCount = 0;
+  let maxLineLen = 0;
 
   // Worker-side idle watchdog: the container emits progress events through every
   // stage (download %, transcribe chunk x/y, summarize section-by-section), so a
@@ -253,6 +265,13 @@ export async function runPipelineStreaming(
       await onProgress(evt);
     } else if (evt.event === "partial") {
       if (onPartial) await onPartial(evt);
+    } else if (evt.event === "log") {
+      // Surface container-internal logs in Workers observability, tagged with
+      // the item id so a run's full timeline (stages, LLM latency, failures) is
+      // queryable. Warnings/errors go to console.error so they're filterable.
+      const msg = `[container item=${job.item_id}] ${evt.message ?? ""}`;
+      if (evt.level === "ERROR" || evt.level === "CRITICAL" || evt.level === "WARNING") console.error(msg);
+      else console.log(msg);
     } else await onProgress(evt);
   };
 
@@ -267,6 +286,7 @@ export async function runPipelineStreaming(
     }
     const { value, done } = step;
     if (done) break;
+    bytesStreamed += value.length;
     // Scan only the freshly-read chunk for newlines; splice completed lines out
     // of it and carry any trailing remainder in `pending`. This stays O(total
     // bytes) even when a single line spans thousands of reads (the big result).
@@ -276,12 +296,18 @@ export async function runPipelineStreaming(
       const line = pending + chunk.slice(0, nl);
       pending = "";
       chunk = chunk.slice(nl + 1);
+      lineCount++;
+      if (line.length > maxLineLen) maxLineLen = line.length;
       await handle(line);
     }
     pending += chunk;
   }
+  if (pending.length > maxLineLen) maxLineLen = pending.length;
   await handle(pending); // terminal line without a trailing newline
 
+  console.log(
+    `pipeline stream complete item=${job.item_id} bytes=${bytesStreamed} lines=${lineCount} maxLineLen=${maxLineLen} ms=${Date.now() - streamStart} result=${result ? "yes" : "no"}`,
+  );
   if (errorMsg) throw new Error(errorMsg);
   if (!result) throw new Error("pipeline stream ended without a result");
   return result;

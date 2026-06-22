@@ -26,7 +26,7 @@ logger = logging.getLogger("pipeline")
 app = FastAPI(title="stream-reduce-pipeline")
 
 
-BUILD_MARKER = "bld-2026-06-22-v9-llm-fallback"
+BUILD_MARKER = "bld-2026-06-22-v10-stream-logs"
 
 
 @app.get("/health")
@@ -108,6 +108,27 @@ async def process_stream(request: Request):
     sentinel = object()
     state = {"stage": None}
 
+    # Forward the container's own `pipeline` logger through the NDJSON stream as
+    # {"event":"log"} lines. Container stdout/stderr is NOT captured by Workers
+    # observability, so without this the entire inside of the pipeline run (which
+    # stage, LLM latency/failures, summarize progress) is invisible when
+    # diagnosing stuck/slow items. The Worker re-emits these via console so they
+    # land in queryable Workers logs, tagged with the item id.
+    class _StreamLogHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            try:
+                events.put_nowait({
+                    "event": "log",
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "message": self.format(record),
+                })
+            except queue.Full:
+                pass  # drop logs under backpressure; never block the pipeline
+
+    log_handler = _StreamLogHandler()
+    log_handler.setFormatter(logging.Formatter("%(message)s"))
+
     def on_progress(evt: dict) -> None:
         # Partial stage content (e.g. the transcript once transcribe finishes) is
         # streamed so the Worker can persist + show it before later stages run.
@@ -124,13 +145,18 @@ async def process_stream(request: Request):
             pass  # drop progress under backpressure; never block the pipeline
 
     def worker() -> None:
+        pipe_logger = logging.getLogger("pipeline")
+        pipe_logger.addHandler(log_handler)
         try:
+            logger.info("run start item=%s platform=%s mode=%s url=%s",
+                        body.get("item_id"), body.get("platform"), body.get("mode"), body.get("source_url"))
             result = pipeline.run(body, on_progress=on_progress)
             events.put({"event": "result", "result": result})
         except Exception as exc:  # noqa: BLE001 — surface the captured reason
             logger.exception("process_stream failed for %s", body.get("source_url"))
             events.put({"event": "error", "stage": state["stage"], "message": f"{type(exc).__name__}: {exc}"})
         finally:
+            pipe_logger.removeHandler(log_handler)
             events.put(sentinel)
 
     threading.Thread(target=worker, daemon=True).start()
@@ -140,7 +166,18 @@ async def process_stream(request: Request):
             evt = events.get()
             if evt is sentinel:
                 break
-            yield json.dumps(evt, ensure_ascii=False) + "\n"
+            line = json.dumps(evt, ensure_ascii=False) + "\n"
+            # The result line is by far the largest payload (it carries the
+            # base64 audio + transcript + chunks). Emit its size as a log line so
+            # an oversized result — which previously made the Worker's stream
+            # parse blow up — is visible without guessing from raw CPU metrics.
+            # Emitted as a direct stream line (not via the logger) so it can't
+            # race the handler teardown in worker()'s finally.
+            if isinstance(evt, dict) and evt.get("event") == "result":
+                size_evt = {"event": "log", "level": "INFO", "logger": "pipeline",
+                            "message": f"result ready item={body.get('item_id')} bytes={len(line)}"}
+                yield json.dumps(size_evt, ensure_ascii=False) + "\n"
+            yield line
 
     return StreamingResponse(generate(), media_type="application/x-ndjson")
 
