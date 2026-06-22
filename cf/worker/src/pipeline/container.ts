@@ -28,6 +28,9 @@ export class PipelineContainer extends Container<Env> {
     GEMINI_API_KEY: this.env.GEMINI_API_KEY,
     GEMINI_BASE_URL: this.env.LLM_BASE_URL,
     GEMINI_MODEL: this.env.LLM_MODEL,
+    // Backup summarize model: a summarize call that times out/errors on
+    // GEMINI_MODEL is retried once against this (same proxy). Empty = disabled.
+    GEMINI_MODEL_FALLBACK: this.env.LLM_MODEL_FALLBACK ?? "",
     // Image generation: model + a dedicated AI Studio key (falls back to
     // GEMINI_API_KEY inside the container when not set).
     GEMINI_IMAGE_MODEL: this.env.LLM_MODEL_INFOGRAPHIC,
@@ -217,6 +220,16 @@ export async function runPipelineStreaming(
   // in-progress until the Worker invocation is evicted. Reset on every chunk, so
   // legitimately-slow long content (which keeps emitting) is never killed.
   const idleMs = Number(env.PIPELINE_IDLE_MS ?? "240000");
+  // One reusable idle timer per loop iteration, cleared after each race so the
+  // loser's 4-min timeout doesn't linger. The previous code created a fresh
+  // setTimeout on every read and never cleared it, leaking one pending timer
+  // (each holding a closure) per streamed line — over a long run that burned
+  // real CPU and contributed to the Worker's exceededCpu kills.
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const idlePromise = (): Promise<"idle"> =>
+    new Promise<"idle">((resolve) => {
+      idleTimer = setTimeout(() => resolve("idle"), idleMs);
+    });
 
   const handle = async (line: string): Promise<void> => {
     const trimmed = line.trim();
@@ -237,10 +250,8 @@ export async function runPipelineStreaming(
   };
 
   for (;;) {
-    const step = await Promise.race([
-      reader.read(),
-      new Promise<"idle">((resolve) => setTimeout(() => resolve("idle"), idleMs)),
-    ]);
+    const step = await Promise.race([reader.read(), idlePromise()]);
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
     if (step === "idle") {
       try { await reader.cancel(); } catch { /* ignore */ }
       throw new Error(

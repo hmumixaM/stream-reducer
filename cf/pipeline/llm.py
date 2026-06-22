@@ -8,6 +8,7 @@ by the Worker (see cf/worker/src/pipeline/container.ts).
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import random
 import threading
@@ -34,33 +35,22 @@ def _gemini_model() -> str:
     return os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 
 
-def generate_text(
-    prompt: str,
-    *,
-    system: str | None = None,
-    model: str | None = None,
-    max_tokens: int | None = None,
-    temperature: float = 0.2,
-) -> LlmResult:
-    key = os.environ["GEMINI_API_KEY"]
-    messages: list[dict] = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-    payload: dict = {
-        "model": model or _gemini_model(),
-        "messages": messages,
-        "temperature": temperature,
-    }
+def _gemini_model_fallback() -> str:
+    # Backup model on the same proxy; empty disables the fallback retry.
+    return os.environ.get("GEMINI_MODEL_FALLBACK", "").strip()
+
+
+def _chat_once(model: str, messages: list[dict], temperature: float, max_tokens: int | None, key: str) -> LlmResult:
+    payload: dict = {"model": model, "messages": messages, "temperature": temperature}
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
     start = time.monotonic()
     # HARD per-call wall-clock cap. httpx's `timeout` is per-read (gap between
     # bytes), so a proxy that *streams* a response slowly can run for many
     # minutes without tripping it — which let a single summarize call overrun the
-    # worker's ~15min stream budget and leave items stuck in 'summarizing'. Run
-    # the request in a daemon thread and abandon it past the deadline so the
-    # caller can fall back. Normal calls finish in seconds.
+    # worker's stream budget and leave items stuck in 'summarizing'. Run the
+    # request in a daemon thread and abandon it past the deadline so the caller
+    # can fall back. Normal calls finish in seconds.
     deadline = float(os.environ.get("LLM_TIMEOUT", "60"))
     box: dict = {}
 
@@ -81,7 +71,7 @@ def generate_text(
     thread.start()
     thread.join(deadline + 5)
     if thread.is_alive():
-        raise httpx.ReadTimeout(f"LLM call exceeded {deadline + 5:.0f}s hard timeout")
+        raise httpx.ReadTimeout(f"LLM call ({model}) exceeded {deadline + 5:.0f}s hard timeout")
     if "err" in box:
         raise box["err"]
     data = box["data"]
@@ -94,6 +84,40 @@ def generate_text(
         total_tokens=int(usage.get("total_tokens", 0) or 0),
         latency_ms=int((time.monotonic() - start) * 1000),
     )
+
+
+def generate_text(
+    prompt: str,
+    *,
+    system: str | None = None,
+    model: str | None = None,
+    max_tokens: int | None = None,
+    temperature: float = 0.2,
+) -> LlmResult:
+    key = os.environ["GEMINI_API_KEY"]
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    # Try the primary model, then (once) the configured backup model if the
+    # primary times out or errors — so a flaky/overloaded primary doesn't force
+    # the section to fall back to an empty summary. Non-HTTP errors (e.g. a
+    # malformed response) propagate immediately (no point retrying the same).
+    primary = model or _gemini_model()
+    attempts = [primary]
+    fallback = _gemini_model_fallback()
+    if fallback and fallback != primary:
+        attempts.append(fallback)
+
+    last_exc: httpx.HTTPError | None = None
+    for attempt_model in attempts:
+        try:
+            return _chat_once(attempt_model, messages, temperature, max_tokens, key)
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            logging.getLogger("pipeline").warning("LLM call on model %s failed: %s", attempt_model, exc)
+    raise last_exc  # type: ignore[misc]  # at least one attempt always ran
 
 
 @dataclass

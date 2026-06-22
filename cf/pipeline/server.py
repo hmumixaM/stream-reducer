@@ -26,7 +26,7 @@ logger = logging.getLogger("pipeline")
 app = FastAPI(title="stream-reduce-pipeline")
 
 
-BUILD_MARKER = "bld-2026-06-20-v8-partial-stream"
+BUILD_MARKER = "bld-2026-06-22-v9-llm-fallback"
 
 
 @app.get("/health")

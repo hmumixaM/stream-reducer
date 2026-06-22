@@ -31,6 +31,9 @@ export interface Env {
   EMAIL_FROM: string;
   LLM_BASE_URL: string;
   LLM_MODEL: string;
+  // Backup summarize model (same proxy). When non-empty, a summarize LLM call
+  // that times out/errors on LLM_MODEL is retried once against this model.
+  LLM_MODEL_FALLBACK?: string;
   // Image model for on-demand infographics (Gemini 3 Pro Image / Nano Banana Pro).
   LLM_MODEL_INFOGRAPHIC: string;
   STT_MODEL: string;

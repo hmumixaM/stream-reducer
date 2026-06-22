@@ -35,6 +35,14 @@
 
   "observability": { "enabled": true },
 
+  // The pipeline queue consumer orchestrates a long streaming container run
+  // (download -> transcribe -> summarize), shuttling progress + transcript
+  // through the Worker. The default 30s CPU cap killed heavy items mid-run
+  // (outcome: exceededCpu), which strands them in-progress with no error and no
+  // chance for the in-run watchdog/timeouts to fire. Give the orchestrator
+  // headroom (Workers Paid allows up to 300s of CPU per invocation).
+  "limits": { "cpu_ms": 300000 },
+
   // The Worker is served from the custom domain reducer.xgoose.org. That domain
   // is attached out-of-band via the Workers Custom Domains API (the CI deploy
   // token can't manage zone-level Workers routes), so it is intentionally NOT
@@ -147,6 +155,11 @@
     "EMAIL_FROM": "noreply@xgoose.org",
     "LLM_BASE_URL": "https://xgoose-gemini-proxy-1.max-678.workers.dev/v1",
     "LLM_MODEL": "gemini-3.5-flash",
+    // Backup summarize model on the SAME proxy. When set, a summarize LLM call
+    // that times out or errors on LLM_MODEL is retried once against this model
+    // (so a flaky/overloaded primary doesn't produce an empty summary). Empty =
+    // disabled (no behavior change). e.g. "gemini-3-pro" or "gemini-2.5-flash".
+    "LLM_MODEL_FALLBACK": "",
     "LLM_MODEL_INFOGRAPHIC": "gemini-3-pro-image-preview",
     "STT_MODEL": "openai/whisper-large-v3-turbo",
     "EMBEDDING_DIM": "1024",
@@ -157,7 +170,7 @@
     "ADMIN_EMAILS": "huyangmax@gmail.com",
     // Bump to force all container jobs onto fresh instances (new image) after a
     // deploy — avoids long-lived DO instances running a stale container image.
-    "CONTAINER_GEN": "7"
+    "CONTAINER_GEN": "8"
   }
 
   // Secrets (set via `wrangler secret put`):

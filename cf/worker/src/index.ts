@@ -15,7 +15,7 @@ import { settingsRoutes } from "./routes/settings";
 import { adminRoutes } from "./routes/admin";
 import { oauthRoutes } from "./routes/oauth";
 import { mcpHandler } from "./routes/mcp";
-import { handleMessage } from "./pipeline/consumer";
+import { handleMessage, failStrandedItems } from "./pipeline/consumer";
 import { pollDueSubscriptions } from "./pipeline/subscriptions";
 import { refreshBilibiliCookie } from "./lib/biliRefresh";
 
@@ -99,6 +99,9 @@ export default {
         console.error("bilibili cookie refresh failed", err);
       }
     } else {
+      // Reap items orphaned in-progress by a killed consumer (e.g. exceededCpu)
+      // that can no longer be auto-reclaimed, so they don't hang forever.
+      await failStrandedItems(env);
       await pollDueSubscriptions(env);
     }
     // Safety pump: kick the self-draining pipeline in case the continuation

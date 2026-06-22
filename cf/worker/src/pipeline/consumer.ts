@@ -71,7 +71,30 @@ function claimableBinds(cutoff: string): unknown[] {
   return [...IN_PROGRESS, cutoff];
 }
 
+// An item orphaned in-progress past the stale cutoff that has ALSO exhausted
+// its automatic reclaims is, by definition, no longer claimable (see
+// claimableClause) — without this it would sit in 'summarizing'/'fetching'
+// forever. This happens when the queue consumer is hard-killed (e.g.
+// exceededCpu) before its catch block can record an error. Flip such items to a
+// terminal, user-visible 'error' so they surface in the queue as failed (and
+// can be retried) instead of hanging silently.
+export async function failStrandedItems(env: Env): Promise<void> {
+  const ph = IN_PROGRESS.map(() => "?").join(",");
+  await env.DB.prepare(
+    `UPDATE item SET status = 'error',
+       error = 'pipeline worker was killed before completing (CPU/time limit) and exhausted automatic reclaims — retry to reprocess',
+       completed_at = ?, progress_stage = NULL, progress_pct = NULL,
+       progress_detail = NULL, progress_updated_at = NULL
+     WHERE status IN (${ph}) AND started_at < ? AND retry_count >= ${MAX_RECLAIM}`,
+  )
+    .bind(isoNow(), ...IN_PROGRESS, staleCutoff())
+    .run();
+}
+
 async function processNextQueuedItem(env: Env): Promise<void> {
+  // Clear out items that can never be reclaimed again (orphaned + over the
+  // reclaim cap) before claiming fresh work, so they don't hang forever.
+  await failStrandedItems(env);
   const item = await claimNextQueuedItem(env);
   if (!item) return;
   // Enqueue the continuation BEFORE processing. concurrency=1 keeps it from
