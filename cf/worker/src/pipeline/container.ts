@@ -39,6 +39,10 @@ export class PipelineContainer extends Container<Env> {
     // This is the static seed; the per-job request body carries the freshest
     // (auto-refreshed) cookie and wins inside the container.
     BILIBILI_COOKIE: this.env.BILIBILI_COOKIE ?? "",
+    // Logged-in YouTube web cookies ("name=value; …") for yt-dlp, materialized
+    // into a cookie file inside the container — clears YouTube's "confirm you're
+    // not a bot" wall and age/region gates so downloads are more reliable.
+    YOUTUBE_COOKIE: this.env.YOUTUBE_COOKIE ?? "",
     // Number of Cloudflare WARP SOCKS5 proxies entrypoint.sh brings up; yt-dlp
     // rotates through them (then `direct`) to dodge Bilibili IP risk-control.
     WARP_INSTANCES: this.env.WARP_INSTANCES ?? "2",

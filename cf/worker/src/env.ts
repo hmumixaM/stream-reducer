@@ -68,6 +68,10 @@ export interface Env {
   // Bilibili persistent refresh token (browser localStorage `ac_time_value`),
   // required to seed the cookie auto-refresh. Optional.
   BILIBILI_REFRESH_TOKEN?: string;
+  // Logged-in YouTube web cookies as a "name=value; …" header, injected into the
+  // pipeline container so yt-dlp can authenticate (clears the bot wall / gated
+  // content). Optional. Set via `wrangler secret put YOUTUBE_COOKIE`.
+  YOUTUBE_COOKIE?: string;
 
   // Comma-separated emails auto-granted admin on sign-in.
   ADMIN_EMAILS?: string;
