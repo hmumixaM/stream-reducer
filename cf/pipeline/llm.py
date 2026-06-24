@@ -229,9 +229,16 @@ class TranscribeResult:
 
 
 def transcribe_chunk(client: httpx.Client, chunk_path: str, usage: SttUsage) -> tuple[str, str | None]:
+    log = logging.getLogger("pipeline")
     model = os.environ.get("STT_MODEL", "openai/whisper-large-v3-turbo")
     base = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     key = os.environ["OPENROUTER_API_KEY"]
+    chunk_bytes = os.path.getsize(chunk_path)
+    # An empty/near-empty segment (ffmpeg can emit a tiny trailing chunk) has no
+    # decodable audio; POSTing it makes the STT provider 400. Skip it cleanly.
+    if chunk_bytes < 1024:
+        log.warning("transcribe_chunk skipping tiny chunk=%s bytes=%d", os.path.basename(chunk_path), chunk_bytes)
+        return "", None
     with open(chunk_path, "rb") as f:
         audio_b64 = base64.b64encode(f.read()).decode("ascii")
     payload = {"model": model, "input_audio": {"data": audio_b64, "format": "mp3"}}
@@ -249,6 +256,14 @@ def transcribe_chunk(client: httpx.Client, chunk_path: str, usage: SttUsage) -> 
             time.sleep(backoff + random.uniform(0, 1))
             backoff *= 2
             continue
+        if resp.status_code >= 400:
+            # Log the provider's reason (size/format/model/audio) before raising —
+            # raise_for_status() drops the body, which hid WHY STT 400'd.
+            log.error(
+                "transcribe_chunk HTTP %d model=%s chunk=%s bytes=%d b64len=%d body=%s",
+                resp.status_code, model, os.path.basename(chunk_path), chunk_bytes,
+                len(audio_b64), resp.text[:600],
+            )
         resp.raise_for_status()
         data = resp.json()
         u = data.get("usage") or {}
