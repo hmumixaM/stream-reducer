@@ -26,7 +26,7 @@ logger = logging.getLogger("pipeline")
 app = FastAPI(title="stream-reduce-pipeline")
 
 
-BUILD_MARKER = "bld-2026-06-24-v11-stt-body-log"
+BUILD_MARKER = "bld-2026-06-24-v14-danmaku-tokens"
 
 
 @app.get("/health")

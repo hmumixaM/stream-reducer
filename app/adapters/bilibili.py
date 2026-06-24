@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
 from app.adapters.danmaku import fetch_bilibili_danmaku
-from app.adapters.ytdlp_base import YtDlpAdapter
+from app.adapters.ytdlp_base import YtDlpAdapter, _proxy_candidates
 
 
 class BilibiliAdapter(YtDlpAdapter):
@@ -17,4 +19,7 @@ class BilibiliAdapter(YtDlpAdapter):
     cookie_domain = ".bilibili.com"
 
     def get_danmaku(self, url: str) -> list[dict] | None:
-        return fetch_bilibili_danmaku(url) or None
+        # Egress the danmaku APIs through the same WARP proxy candidates + cookie
+        # the downloader uses, so Bilibili IP risk-control doesn't blank them out.
+        cookie = os.environ.get(self.cookie_env) or None
+        return fetch_bilibili_danmaku(url, proxies=_proxy_candidates(), cookie=cookie) or None

@@ -27,6 +27,8 @@ from app.adapters.registry import detect_platform, get_adapter
 from app.pipeline.audio import decodable_duration, probe_duration, split_audio
 from app.pipeline.jsonparse import extract_json
 from app.pipeline.prompts import (
+    DANMAKU_SYSTEM,
+    DANMAKU_TEMPLATE,
     HEADLINE_TEMPLATE,
     KEY_POINTS_TEMPLATE,
     MAP_SYSTEM,
@@ -58,6 +60,11 @@ TRANSCRIBE_CHUNK_SECONDS = int(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "300")
 EMBED_CHUNK_CHARS = int(os.environ.get("EMBED_CHUNK_CHARS", "1500"))
 MEDIA_MAX_BYTES = int(os.environ.get("MEDIA_MAX_BYTES", str(25 * 1024 * 1024)))
 PROMPT_VERSION = os.environ.get("SUMMARY_PROMPT_VERSION", "v2")
+# Max danmaku (Bilibili bullet-comments) rendered into the mood-summary prompt.
+DANMAKU_MAX_PROMPT_ITEMS = int(os.environ.get("DANMAKU_MAX_PROMPT_ITEMS", "3000"))
+# Generous budget: gemini-flash spends tokens on thinking, and a tight cap left
+# the completion empty (no JSON). Match the other reduce sections' headroom.
+DANMAKU_MAX_TOKENS = int(os.environ.get("DANMAKU_MAX_TOKENS", "16000"))
 
 PLATFORM_LABELS = {
     "youtube": "YouTube", "bilibili": "Bilibili", "apple_podcast": "Apple Podcasts",
@@ -262,9 +269,52 @@ def render_markdown(item: ItemView, structured: dict) -> str:
         lines += [f"> {prefix}{q.get('text', '')}{who}", ""]
     if structured.get("entities"):
         lines += ["## Mentioned", ", ".join(str(e) for e in structured["entities"]), ""]
+    danmaku = structured.get("danmaku")
+    if isinstance(danmaku, dict):
+        lines += render_danmaku_markdown(danmaku)
     if item.source_url:
         lines.append(f"[Source]({item.source_url})")
     return "\n".join(lines).strip()
+
+
+def render_danmaku_markdown(danmaku: dict) -> list[str]:
+    """Render the Bilibili 弹幕 (audience mood) summary block (ported from the
+    legacy local pipeline). Returns markdown lines appended to the report."""
+    lines: list[str] = []
+    count = danmaku.get("count")
+    header = "## 弹幕氛围 (Danmaku mood)"
+    if count:
+        header += f" — {count} 条"
+    lines.append(header)
+
+    mood = danmaku.get("overall_mood")
+    if mood:
+        lines += [mood, ""]
+
+    sentiment = danmaku.get("sentiment") or {}
+    if sentiment:
+        pos = sentiment.get("positive", 0)
+        neu = sentiment.get("neutral", 0)
+        neg = sentiment.get("negative", 0)
+        lines += [f"**整体情绪**：😊 正面 {pos}% · 😐 中性 {neu}% · 😞 负面 {neg}%", ""]
+
+    themes = danmaku.get("themes") or []
+    if themes:
+        lines.append("**热议点**")
+        for t in themes:
+            topic = t.get("topic", "") if isinstance(t, dict) else str(t)
+            example = t.get("example") if isinstance(t, dict) else None
+            tail = f" —— “{example}”" if example else ""
+            lines.append(f"- **{topic}**{tail}")
+        lines.append("")
+
+    highlights = danmaku.get("highlights") or []
+    if highlights:
+        lines.append("**代表弹幕**")
+        for h in highlights:
+            lines += [f"> {h}", ""]
+
+    return lines
 
 
 # --- metadata --------------------------------------------------------------
@@ -622,6 +672,8 @@ def _generate_structured_sections(
             "headline": headline.get("headline") or existing.get("headline", ""),
             "subhead": headline.get("subhead") or existing.get("subhead", ""),
             "walkthrough": preserved_walkthrough,
+            # Preserve the Bilibili 弹幕 mood block across structured backfills.
+            **({"danmaku": existing["danmaku"]} if existing.get("danmaku") else {}),
         }
 
     if active_stage is not None:
@@ -744,6 +796,41 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
     return structured
 
 
+def _render_danmaku_list(items: list[dict]) -> str:
+    out: list[str] = []
+    for d in items[:DANMAKU_MAX_PROMPT_ITEMS]:
+        out.append(f"[{fmt_timestamp(d.get('time'))}] {d.get('text', '')}")
+    return "\n".join(out)
+
+
+def summarize_danmaku(items: list[dict], stages: list[Stage]) -> dict | None:
+    """Characterize the audience mood from Bilibili 弹幕 in one LLM call. Returns
+    {overall_mood, sentiment, themes, highlights, count} or None. Best-effort:
+    never raises (danmaku are optional and must not fail the item)."""
+    if not items:
+        return None
+    prompt = DANMAKU_TEMPLATE.format(count=len(items), danmaku=_render_danmaku_list(items))
+    with Stage("danmaku", provider="gemini", model=os.environ.get("GEMINI_MODEL")) as st:
+        data = None
+        try:
+            res = llm.generate_text(prompt, system=DANMAKU_SYSTEM, max_tokens=DANMAKU_MAX_TOKENS)
+            st.request_count += 1
+            st.total_tokens += res.total_tokens
+            try:
+                data = extract_json(res.text)
+            except (json.JSONDecodeError, ValueError) as exc:
+                logger.warning("danmaku summarize unparseable (%s): completion=%r",
+                               exc, (res.text or "")[:300])
+        except httpx.HTTPError as exc:
+            logger.warning("danmaku summarize LLM call failed: %s", exc)
+    stages.append(st)
+    if not isinstance(data, dict):
+        return None
+    data["count"] = len(items)
+    logger.info("danmaku summarized: %d comments, %d tokens", len(items), st.total_tokens)
+    return data
+
+
 def regenerate_structured(
     item: ItemView,
     existing: dict,
@@ -855,6 +942,7 @@ def run(job: dict, on_progress=None) -> dict:
     metadata: dict = {}
     transcript: dict | None = job.get("transcript")
     media = {"bytes": 0, "duration_s": None, "audio_b64": None, "format": None}
+    danmaku: list[dict] = []  # Bilibili bullet-comments (audience mood); optional.
 
     if mode == "infographic":
         existing = job.get("summary") or {}
@@ -916,6 +1004,13 @@ def run(job: dict, on_progress=None) -> dict:
                     item.view_count = metadata.get("view_count") or supplied.get("view_count")
                     item.like_count = metadata.get("like_count") or supplied.get("like_count")
 
+                    # Bilibili 弹幕 (audience bullet-comments) for a separate mood
+                    # summary. Best-effort: [] for non-bilibili or on any error.
+                    danmaku = adapter.get_danmaku(source_url) or []
+                    logger.info("danmaku fetched: %d items for %s", len(danmaku), source_url)
+                    if danmaku:
+                        emit({"stage": "download", "detail": f"{len(danmaku)} 弹幕"})
+
                     native = adapter.get_native_transcript(source_url, os.environ.get("DEFAULT_LANGUAGE") or None)
                     if native and native.segments:
                         segs = [{**s, "text": to_simplified(s.get("text", ""))} for s in native.segments]
@@ -968,6 +1063,13 @@ def run(job: dict, on_progress=None) -> dict:
 
     emit({"stage": "summarize", "status": "start"})
     structured = summarize(item, transcript, stages, target_lang=target_lang, on_progress=emit)
+    # Bilibili audience mood from 弹幕 — a separate LLM call, merged into the
+    # structured summary so it renders + persists alongside the spoken summary.
+    if danmaku:
+        emit({"stage": "summarize", "detail": "danmaku mood"})
+        dm = summarize_danmaku(danmaku, stages)
+        if dm:
+            structured["danmaku"] = dm
     markdown = render_markdown(item, structured)
     chunks = _chunk_for_embed(transcript, structured, markdown)
 
