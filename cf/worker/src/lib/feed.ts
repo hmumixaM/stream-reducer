@@ -74,13 +74,21 @@ export async function resolveFeedUrl(input: string): Promise<string> {
     return input;
   }
   const host = url.hostname.toLowerCase();
-  // Apple Podcasts show page -> the show's RSS feed (via the iTunes lookup API).
+  // Apple Podcasts show page -> the show's RSS feed.
   if (host.endsWith("podcasts.apple.com") || host.endsWith("itunes.apple.com")) {
     const idMatch = url.pathname.match(/\/id(\d+)/);
+    // 1. iTunes Lookup API — clean + canonical, but Apple returns 403 to shared
+    //    datacenter egress (incl. Cloudflare Workers), so it often fails here.
     if (idMatch) {
       const feed = await itunesFeedUrl(idMatch[1]);
       if (feed) return feed;
     }
+    // 2. Fallback: scrape the show PAGE, which embeds the RSS feed URL as
+    //    `"feedUrl":"…"`. The page host (podcasts.apple.com) is served from a
+    //    different CDN than the lookup API and is usually reachable when the API
+    //    is 403'd.
+    const scraped = await applePageFeedUrl(input);
+    if (scraped) return scraped;
     return input;
   }
 
@@ -102,12 +110,70 @@ export async function resolveFeedUrl(input: string): Promise<string> {
   return input;
 }
 
+// Resolve an Apple Podcasts show id to its RSS feed via the iTunes Lookup API.
+// Apple aggressively rate-limits/blocks shared datacenter egress (a bare,
+// UA-less request from the Worker often gets a 403/empty body), so this sends a
+// browser-ish UA, checks the status, retries with backoff, and — crucially —
+// LOGS failures. Previously this swallowed every error and returned null, which
+// silently stored the raw podcasts.apple.com URL as the feed (unpollable) with
+// no trace of why.
 async function itunesFeedUrl(id: string): Promise<string | null> {
+  const url = `https://itunes.apple.com/lookup?id=${id}`;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "user-agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+          accept: "application/json,text/javascript,*/*",
+        },
+      });
+      if (!res.ok) {
+        console.warn(`itunesFeedUrl id=${id} http ${res.status} (attempt ${attempt}/3)`);
+      } else {
+        // iTunes serves this as text/javascript; parse the body as text->JSON so
+        // the content-type doesn't matter.
+        const data = JSON.parse(await res.text()) as { results?: { feedUrl?: string }[] };
+        const feed = data.results?.[0]?.feedUrl ?? null;
+        if (feed) return feed;
+        console.warn(`itunesFeedUrl id=${id} returned no feedUrl (attempt ${attempt}/3)`);
+      }
+    } catch (err) {
+      console.warn(`itunesFeedUrl id=${id} failed (attempt ${attempt}/3): ${String(err)}`);
+    }
+    if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 400));
+  }
+  console.error(`itunesFeedUrl id=${id} could not resolve a feed after 3 attempts`);
+  return null;
+}
+
+// Fallback resolver: fetch the Apple Podcasts show page and extract the RSS feed
+// URL embedded in its serialized data (`"feedUrl":"https://…"`). Used when the
+// iTunes Lookup API is blocked (403) for the Worker's egress.
+async function applePageFeedUrl(pageUrl: string): Promise<string | null> {
   try {
-    const res = await fetch(`https://itunes.apple.com/lookup?id=${id}`);
-    const data = (await res.json()) as { results?: { feedUrl?: string }[] };
-    return data.results?.[0]?.feedUrl ?? null;
-  } catch {
+    const res = await fetch(pageUrl, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "accept-language": "en-US,en;q=0.9",
+      },
+    });
+    if (!res.ok) {
+      console.warn(`applePageFeedUrl ${pageUrl} http ${res.status}`);
+      return null;
+    }
+    const html = await res.text();
+    const m = html.match(/"feedUrl"\s*:\s*"(https:(?:\\\/|\/)[^"]+?)"/);
+    if (!m) {
+      console.warn(`applePageFeedUrl ${pageUrl} no feedUrl found in page (${html.length} bytes)`);
+      return null;
+    }
+    const feed = m[1].replace(/\\\//g, "/");
+    console.log(`applePageFeedUrl ${pageUrl} -> ${feed}`);
+    return feed;
+  } catch (err) {
+    console.warn(`applePageFeedUrl ${pageUrl} failed: ${String(err)}`);
     return null;
   }
 }

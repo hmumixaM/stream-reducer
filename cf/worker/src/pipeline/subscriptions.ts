@@ -3,7 +3,7 @@ import { first, type SubscriptionRow } from "../db";
 import { isoNow } from "../lib/crypto";
 import { addUrlToLibrary } from "../lib/ingest";
 import { detectPlatform } from "../lib/url";
-import { fetchFeed, type FeedEntry } from "../lib/feed";
+import { fetchFeed, resolveFeedUrl, type FeedEntry } from "../lib/feed";
 
 const MAX_NEW_PER_POLL = 10;
 // Subscriptions skip videos shorter than this (avoids flooding a library with
@@ -66,6 +66,30 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
     env.DB.prepare("SELECT * FROM subscription WHERE id = ?").bind(subId),
   );
   if (!sub || !sub.enabled) return 0;
+
+  // Self-heal: an Apple Podcasts show URL still stored as feed_url means the
+  // iTunes lookup failed when the subscription was created (Apple rate-limits
+  // the Worker egress). Re-resolve to the real RSS feed now and persist it, so a
+  // transient creation-time failure doesn't leave the subscription permanently
+  // stuck returning zero entries.
+  let healHost = "";
+  try { healHost = new URL(sub.feed_url).hostname.toLowerCase(); } catch { /* not a URL */ }
+  if (healHost.endsWith("podcasts.apple.com") || healHost.endsWith("itunes.apple.com")) {
+    const resolved = await resolveFeedUrl(sub.feed_url);
+    if (resolved !== sub.feed_url) {
+      console.log(`subscription ${subId} feed_url self-healed: ${sub.feed_url} -> ${resolved}`);
+      try {
+        await env.DB.prepare("UPDATE subscription SET feed_url = ?, platform = ? WHERE id = ?")
+          .bind(resolved, detectPlatform(resolved), subId)
+          .run();
+      } catch (e) {
+        // UNIQUE(user_id, feed_url) collision (already subscribed to the resolved
+        // feed): use it for this poll without persisting.
+        console.warn(`subscription ${subId} feed_url persist skipped: ${String(e)}`);
+      }
+      sub.feed_url = resolved;
+    }
+  }
 
   let feed: { title: string | null; entries: FeedEntry[] };
   try {
