@@ -537,8 +537,18 @@ class YtDlpAdapter(Adapter):
             "skip_download": False,
             # Best *audio-only* track; if none exists fall back to the *smallest*
             # combined stream (worst) rather than a full (4K) video just to strip
-            # its audio.
+            # its audio. We only transcribe speech, so the lowest quality is fine
+            # and premium-gated HD video formats are irrelevant.
             "format": "bestaudio/worst",
+            # A multi-part (分P) Bilibili video or a ?list= URL otherwise makes
+            # yt-dlp iterate the whole set — touching premium-gated sibling parts
+            # (the "1080P 高码率 ... premium member" noise) and returning a
+            # playlist info dict that doesn't map to a single file. One item = one
+            # video here, so download only the single requested video/part.
+            "noplaylist": True,
+            # A premium-only part has no free format; skip it instead of aborting
+            # the whole download.
+            "ignore_no_formats_error": True,
             "outtmpl": outtmpl,
             # 10MB HTTP chunks make large DASH audio reads robust against the
             # "Downloaded X, expected Y bytes" / read-timeout failures.
@@ -552,11 +562,22 @@ class YtDlpAdapter(Adapter):
         })
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
+            # Even with noplaylist a multi-part URL can come back as a one-entry
+            # playlist; unwrap to the downloaded entry so prepare_filename maps to
+            # the real file (e.g. BVxxx_p2.m4a) instead of the playlist title.
+            if info.get("_type") == "playlist":
+                entries = [e for e in (info.get("entries") or []) if e]
+                info = entries[0] if entries else info
             path = Path(ydl.prepare_filename(info))
-        if not path.exists():
-            # postprocessing may have changed extension; find by id
-            matches = list(dest_dir.glob(f"{info.get('id')}.*"))
-            if matches:
-                return matches[0]
-            raise FileNotFoundError(f"downloaded audio not found for {url}")
-        return path
+        if path.exists():
+            return path
+        # Postprocessing may have changed the extension, or a part suffix shifted
+        # the name. dest_dir is a fresh per-job temp dir holding only this
+        # download, so fall back to the newest real media file in it.
+        media = [
+            p for p in dest_dir.iterdir()
+            if p.is_file() and not p.name.endswith((".part", ".ytdl"))
+        ]
+        if media:
+            return max(media, key=lambda p: p.stat().st_mtime)
+        raise FileNotFoundError(f"downloaded audio not found for {url}")
