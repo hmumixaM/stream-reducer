@@ -5,6 +5,7 @@ import { all, first, type ItemRow, type UserItemRow } from "../db";
 import { toItemRead } from "../lib/serialize";
 import { addUrlToLibrary, recomputePriority } from "../lib/ingest";
 import { splitUrls, nonItemUrlError } from "../lib/url";
+import { readJson } from "../lib/request";
 
 export const itemsRoutes = new Hono<AppContext>();
 
@@ -69,14 +70,14 @@ itemsRoutes.get("/", async (c) => {
       toItemRead(
         r,
         r._ui_id
-          ? ({
+          ? {
               folder_id: r.ui_folder_id,
               is_favorite: r.ui_is_favorite ?? 0,
               is_archived: r.ui_is_archived ?? 0,
               personal_status: r.ui_status ?? "waiting",
               subscription_id: null,
               group_position: null,
-            } as UserItemRow)
+            }
           : null,
         { is_interested: r._interest_id != null },
       ),
@@ -136,7 +137,7 @@ itemsRoutes.get("/library", requireAuth, async (c) => {
   );
   return c.json(
     rows.map((r) =>
-      toItemRead(r, r as unknown as UserItemRow, { is_interested: r._interest_id != null }),
+      toItemRead(r, r, { is_interested: r._interest_id != null }),
     ),
   );
 });
@@ -152,13 +153,77 @@ interface UserItemRowAlias {
   _interest_id: number | null;
 }
 
+interface StageRunRow {
+  id: number;
+  item_id: number;
+  stage: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number;
+  attempts: number;
+  provider: string | null;
+  model: string | null;
+  request_count: number;
+  chunk_count: number;
+  chunk_done: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+  http_429_count: number;
+  error: string | null;
+}
+
+interface CommentRow {
+  id: number;
+  item_id: number;
+  user_id: number;
+  body: string;
+  created_at: string;
+}
+
+interface HighlightRow {
+  id: number;
+  item_id: number;
+  user_id: number;
+  source: string;
+  quote: string;
+  note: string;
+  color: string;
+  prefix: string;
+  suffix: string;
+  created_at: string;
+}
+
+interface TranslationRow {
+  lang: string;
+  status: string;
+  model: string | null;
+  markdown: string;
+  structured: string;
+  error: string | null;
+  updated_at: string;
+}
+
+interface RelatedItemRow {
+  id: number;
+  item_id: number;
+  title: string | null;
+  platform: string;
+  author: string | null;
+  thumbnail: string | null;
+  source_url: string;
+  score: number;
+}
+
 // Add one or more URLs to the user's library (dedup + enqueue).
 itemsRoutes.post("/library", requireAuth, async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as {
+  const body = await readJson<{
     url?: string;
     urls?: string[];
     folder_id?: number;
-  };
+  }>(c);
   const raw: string[] = [...(body.urls ?? [])];
   if (body.url) raw.push(body.url);
   const urls = raw.flatMap((entry) => splitUrls(entry));
@@ -178,10 +243,10 @@ itemsRoutes.post("/library", requireAuth, async (c) => {
   }
 
   const userId = c.get("user").id;
-  const created: unknown[] = [];
+  const created: ReturnType<typeof toItemRead>[] = [];
   for (const url of urls) {
-    const res = await addUrlToLibrary(c.env, userId, url, { folderId: body.folder_id ?? null });
-    if (res) created.push(toItemRead(res.item));
+    const addResult = await addUrlToLibrary(c.env, userId, url, { folderId: body.folder_id ?? null });
+    if (addResult) created.push(toItemRead(addResult.item));
   }
   return c.json(created);
 });
@@ -205,13 +270,13 @@ itemsRoutes.get("/:id", async (c) => {
   const transcript = await first<{ id: number; language: string | null; source: string; segments: string; text: string }>(
     c.env.DB.prepare("SELECT * FROM transcript WHERE item_id = ?").bind(id),
   );
-  const stages = await all<Record<string, unknown>>(
+  const stages = await all<StageRunRow>(
     c.env.DB.prepare("SELECT * FROM stage_run WHERE item_id = ? ORDER BY id").bind(id),
   );
-  const comments = await all<Record<string, unknown>>(
+  const comments = await all<CommentRow>(
     c.env.DB.prepare("SELECT * FROM comment WHERE item_id = ? AND user_id = ? ORDER BY created_at").bind(id, userId),
   );
-  const highlights = await all<Record<string, unknown>>(
+  const highlights = await all<HighlightRow>(
     c.env.DB.prepare("SELECT * FROM highlight WHERE item_id = ? AND user_id = ? ORDER BY created_at").bind(id, userId),
   );
   const interested = await first<{ id: number }>(
@@ -256,18 +321,18 @@ const TRANSLATE_LANGS = new Set(["en", "zh", "ja", "ko", "es", "fr", "de", "ru"]
 itemsRoutes.get("/:id/translation", async (c) => {
   const id = Number(c.req.param("id"));
   const lang = (c.req.query("lang") || "").trim();
-  const row = await first<Record<string, unknown>>(
+  const row = await first<TranslationRow>(
     c.env.DB.prepare("SELECT lang, status, model, markdown, structured, error, updated_at FROM item_translation WHERE item_id = ? AND lang = ?").bind(id, lang),
   );
   if (!row) return c.json({ error: "not found" }, 404);
-  return c.json({ ...row, structured: JSON.parse((row.structured as string) || "{}") });
+  return c.json({ ...row, structured: JSON.parse(row.structured || "{}") });
 });
 
 // Request a translation (auth'd). Idempotent: returns the existing row, or
 // creates a queued one + enqueues the job. Shared across all users.
 itemsRoutes.post("/:id/translate", requireAuth, async (c) => {
   const id = Number(c.req.param("id"));
-  const body = (await c.req.json().catch(() => ({}))) as { lang?: string };
+  const body = await readJson<{ lang?: string }>(c);
   const lang = (body.lang || "").trim();
   if (!TRANSLATE_LANGS.has(lang)) return c.json({ error: "unsupported language" }, 400);
 
@@ -341,7 +406,7 @@ itemsRoutes.post("/:id/infographic", requireAuth, async (c) => {
 // Related articles (global recommendations) for an item.
 itemsRoutes.get("/:id/related", async (c) => {
   const id = Number(c.req.param("id"));
-  const rows = await all<Record<string, unknown>>(
+  const rows = await all<RelatedItemRow>(
     c.env.DB.prepare(
       `SELECT r.related_item_id AS item_id, r.score,
               i.id, i.title, i.platform, i.author, i.thumbnail, i.source_url
@@ -352,7 +417,7 @@ itemsRoutes.get("/:id/related", async (c) => {
   return c.json(rows);
 });
 
-// Re-enqueue processing for a global item (any signed-in user may trigger).
+// Re-enqueue processing for a global item (signed-in users may trigger it).
 itemsRoutes.post("/:id/retry", requireAuth, async (c) => {
   const id = Number(c.req.param("id"));
   const item = await first<ItemRow>(c.env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(id));
@@ -401,7 +466,7 @@ itemsRoutes.post("/:id/archive", requireAuth, async (c) => {
 itemsRoutes.post("/:id/group", requireAuth, async (c) => {
   const id = Number(c.req.param("id"));
   const userId = c.get("user").id;
-  const body = (await c.req.json().catch(() => ({}))) as { group_id?: number | null };
+  const body = await readJson<{ group_id?: number | null }>(c);
   await c.env.DB.prepare(
     "UPDATE user_item SET folder_id = ? WHERE user_id = ? AND item_id = ?",
   ).bind(body.group_id ?? null, userId, id).run();

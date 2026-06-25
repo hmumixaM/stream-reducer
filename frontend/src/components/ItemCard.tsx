@@ -226,7 +226,7 @@ function MenuRow({ onClick, children }: { onClick: () => void; children: ReactNo
   );
 }
 
-export function CardAction({
+function CardAction({
   title,
   active,
   onClick,

@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 
 // Tailwind needs the class strings to appear literally so they survive the JIT
 // scan; keep the full classes (not interpolated) in this map.
-export const HL_COLORS: Record<string, string> = {
+const HL_COLORS: Record<string, string> = {
   yellow: "bg-yellow-300/50 dark:bg-yellow-400/25",
   green: "bg-emerald-300/50 dark:bg-emerald-400/25",
   blue: "bg-sky-300/50 dark:bg-sky-400/25",

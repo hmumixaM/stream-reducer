@@ -1,5 +1,10 @@
 import { MIRROR } from "@/lib/mirror";
 
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+export interface JsonObject {
+  [key: string]: JsonValue;
+}
+
 export type ItemStatus =
   | "queued"
   | "fetching"
@@ -125,7 +130,7 @@ export interface Summary {
   model: string;
   prompt_version: string;
   markdown: string;
-  structured: Record<string, unknown>;
+  structured: JsonObject;
   created_at: string;
 }
 
@@ -199,7 +204,7 @@ export interface Translation {
   status: TranslationStatus;
   model?: string;
   markdown: string;
-  structured: Record<string, unknown>;
+  structured: JsonObject;
   error?: string | null;
   updated_at?: string;
 }
@@ -267,6 +272,44 @@ export interface Subscription {
   consecutive_failures?: number;
   created_at: string;
 }
+
+export interface SubscriptionComment {
+  id: number;
+  subscription_id: number;
+  user_id: number;
+  body: string;
+  created_at: string;
+}
+
+export interface SubscriptionHighlight {
+  id: number;
+  subscription_id: number;
+  user_id: number;
+  quote: string;
+  note?: string | null;
+  color?: string | null;
+  created_at: string;
+}
+
+export type SubscriptionAnnotation =
+  | {
+      kind: "comment";
+      id: number;
+      body: string;
+      quote: null;
+      note: null;
+      color: null;
+      created_at: string;
+    }
+  | {
+      kind: "highlight";
+      id: number;
+      body: null;
+      quote: string;
+      note: string | null;
+      color: string | null;
+      created_at: string;
+    };
 
 export interface PlatformStat {
   platform: string;
@@ -444,6 +487,7 @@ export interface SearchParams {
 // fetched once and cached for the lifetime of the page.
 
 type SearchDoc = SearchHit & { id: number };
+type MirrorSearchResult = SearchDoc & { score: number };
 
 const mirrorJson = (() => {
   const cache = new Map<string, Promise<unknown>>();
@@ -451,10 +495,11 @@ const mirrorJson = (() => {
     if (!cache.has(path)) {
       cache.set(
         path,
-        fetch(path).then((r) => {
-          if (!r.ok) throw new Error(`${r.status}: ${path}`);
-          return r.json();
-        }),
+        (async () => {
+          const response = await fetch(path);
+          if (!response.ok) throw new Error(`${response.status}: ${path}`);
+          return response.json();
+        })(),
       );
     }
     return cache.get(path) as Promise<T>;
@@ -474,7 +519,7 @@ async function fetchGzipJson<T>(path: string): Promise<T> {
 }
 
 let mirrorSearchIndex: Promise<{
-  search: (q: string) => Array<Record<string, unknown>>;
+  search: (q: string) => MirrorSearchResult[];
 }> | null = null;
 
 function loadMirrorSearchIndex() {
@@ -482,6 +527,7 @@ function loadMirrorSearchIndex() {
     mirrorSearchIndex = (async () => {
       const { default: MiniSearch } = await import("minisearch");
       const docs = await fetchGzipJson<SearchDoc[]>("/data/search-index.json.gz");
+      const docById = new Map(docs.map((doc) => [doc.id, doc]));
       const ms = new MiniSearch<SearchDoc>({
         idField: "id",
         fields: ["text", "title"],
@@ -502,7 +548,13 @@ function loadMirrorSearchIndex() {
         searchOptions: { boost: { title: 2 }, prefix: true, fuzzy: 0.2 },
       });
       ms.addAll(docs);
-      return ms;
+      return {
+        search: (query: string) =>
+          ms.search(query).flatMap((result) => {
+            const doc = docById.get(Number(result.id));
+            return doc ? [{ ...doc, score: result.score }] : [];
+          }),
+      };
     })();
   }
   return mirrorSearchIndex;
@@ -517,19 +569,19 @@ async function mirrorSearch(params: SearchParams): Promise<SearchHit[]> {
   const k = params.k ?? 10;
   return results.slice(0, k).map(
     (r): SearchHit => ({
-      chunk_id: r.chunk_id as number,
-      item_id: r.item_id as number,
-      title: (r.title as string | null) ?? null,
-      source_url: r.source_url as string,
-      platform: r.platform as Platform,
-      author: (r.author as string | null) ?? null,
-      source: r.source as "transcript" | "summary",
-      field: r.field as string,
-      text: r.text as string,
-      start_s: (r.start_s as number | null) ?? null,
-      end_s: (r.end_s as number | null) ?? null,
-      deep_link: (r.deep_link as string | null) ?? null,
-      score: r.score as number,
+      chunk_id: r.chunk_id,
+      item_id: r.item_id,
+      title: r.title ?? null,
+      source_url: r.source_url,
+      platform: r.platform,
+      author: r.author ?? null,
+      source: r.source,
+      field: r.field,
+      text: r.text,
+      start_s: r.start_s ?? null,
+      end_s: r.end_s ?? null,
+      deep_link: r.deep_link ?? null,
+      score: r.score,
     }),
   );
 }
@@ -678,17 +730,17 @@ export const api = {
   listSubscriptionItems: (id: number) =>
     req<Item[]>(`/api/subscriptions/${id}/items`),
   addSubscriptionComment: (id: number, body: string) =>
-    req<Record<string, unknown>>(`/api/subscriptions/${id}/comments`, {
+    req<SubscriptionComment>(`/api/subscriptions/${id}/comments`, {
       method: "POST",
       body: JSON.stringify({ body }),
     }),
   addSubscriptionHighlight: (id: number, quote: string, note = "") =>
-    req<Record<string, unknown>>(`/api/subscriptions/${id}/highlights`, {
+    req<SubscriptionHighlight>(`/api/subscriptions/${id}/highlights`, {
       method: "POST",
       body: JSON.stringify({ quote, note }),
     }),
   listSubscriptionAnnotations: (id: number) =>
-    req<Record<string, unknown>[]>(`/api/subscriptions/${id}/annotations`),
+    req<SubscriptionAnnotation[]>(`/api/subscriptions/${id}/annotations`),
   deleteSubscription: (id: number) =>
     req<void>(`/api/subscriptions/${id}`, { method: "DELETE" }),
 

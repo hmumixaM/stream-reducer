@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppContext } from "../auth";
 import { requireAuth } from "../auth";
 import { all, first } from "../db";
+import { readJson } from "../lib/request";
 
 export const folderRoutes = new Hono<AppContext>();
 folderRoutes.use("*", requireAuth);
@@ -24,24 +25,24 @@ folderRoutes.get("/", async (c) => {
   const groups = await all<GroupRow>(
     c.env.DB.prepare("SELECT * FROM itemgroup WHERE user_id = ? ORDER BY created_at DESC").bind(userId),
   );
-  const out: GroupRow[] = [];
-  for (const g of groups) {
+  const groupsWithCounts: GroupRow[] = [];
+  for (const group of groups) {
     let countSql = "SELECT COUNT(*) AS n FROM user_item WHERE user_id = ? AND folder_id = ?";
-    const binds: unknown[] = [userId, g.id];
+    const binds: unknown[] = [userId, group.id];
     if (archived !== undefined) {
       countSql += " AND is_archived = ?";
       binds.push(archived === "true" ? 1 : 0);
     }
     const row = await first<{ n: number }>(c.env.DB.prepare(countSql).bind(...binds));
-    g.item_count = row?.n ?? 0;
-    if (archived === undefined || g.item_count > 0) out.push(g);
+    const groupWithCount = { ...group, item_count: row?.n ?? 0 };
+    if (archived === undefined || groupWithCount.item_count > 0) groupsWithCounts.push(groupWithCount);
   }
-  return c.json(out);
+  return c.json(groupsWithCounts);
 });
 
 folderRoutes.post("/", async (c) => {
   const userId = c.get("user").id;
-  const body = (await c.req.json().catch(() => ({}))) as { title?: string };
+  const body = await readJson<{ title?: string }>(c);
   const title = (body.title || "").trim();
   if (!title) return c.json({ error: "empty folder name" }, 400);
   const res = await c.env.DB.prepare(
@@ -56,7 +57,7 @@ folderRoutes.post("/", async (c) => {
 folderRoutes.patch("/:id", async (c) => {
   const userId = c.get("user").id;
   const id = Number(c.req.param("id"));
-  const body = (await c.req.json().catch(() => ({}))) as { title?: string };
+  const body = await readJson<{ title?: string }>(c);
   const title = (body.title || "").trim();
   if (!title) return c.json({ error: "empty folder name" }, 400);
   await c.env.DB.prepare("UPDATE itemgroup SET title = ? WHERE id = ? AND user_id = ?")

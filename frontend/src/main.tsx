@@ -14,7 +14,11 @@ import "./index.css";
 const named = <T extends string>(
   loader: () => Promise<Record<T, React.ComponentType>>,
   name: T,
-) => lazy(() => loader().then((m) => ({ default: m[name] })));
+) =>
+  lazy(async () => {
+    const module = await loader();
+    return { default: module[name] };
+  });
 
 const Library = named(() => import("@/pages/Library"), "Library");
 const Browse = named(() => import("@/pages/Browse"), "Browse");

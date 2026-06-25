@@ -51,11 +51,49 @@ export function parseBilibiliUrl(input: string): BiliSource | null {
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-async function biliGet(url: string, referer: string, cookie: string | undefined): Promise<Record<string, unknown>> {
+interface BiliArchive {
+  bvid?: string | number;
+  title?: string | null;
+  pubdate?: string | number | null;
+  duration?: string | number | null;
+}
+
+interface BiliArchiveListResponse {
+  data?: {
+    archives?: BiliArchive[];
+  };
+}
+
+interface BiliDynamicArchive {
+  bvid?: string | number;
+  title?: string | null;
+  duration_text?: string | null;
+}
+
+interface BiliDynamicItem {
+  modules?: {
+    module_dynamic?: {
+      major?: {
+        archive?: BiliDynamicArchive;
+      };
+    };
+    module_author?: {
+      pub_ts?: string | number | null;
+    };
+  };
+}
+
+interface BiliDynamicResponse {
+  data?: {
+    items?: BiliDynamicItem[];
+  };
+}
+
+async function biliGet<T>(url: string, referer: string, cookie: string | undefined): Promise<T> {
   const headers: Record<string, string> = { "user-agent": UA, referer };
   if (cookie) headers["cookie"] = cookie;
   const res = await fetch(url, { headers });
-  return (await res.json()) as Record<string, unknown>;
+  return (await res.json()) as T;
 }
 
 function videoEntry(bvid: string, title: string, tsSeconds: number | null, duration?: string | number | null): FeedEntry {
@@ -74,31 +112,34 @@ export async function fetchBilibiliEntries(env: Env, src: BiliSource): Promise<F
   const cookie = await getBilibiliCookie(env);
   if (src.kind === "season") {
     const url = `https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=${src.mid}&season_id=${src.sid}&sort_reverse=false&page_num=1&page_size=30`;
-    const d = await biliGet(url, `https://space.bilibili.com/${src.mid}`, cookie);
-    const archives = (((d.data as Record<string, unknown>)?.archives as Record<string, unknown>[]) ?? []);
-    return archives.map((a) => videoEntry(String(a.bvid), String(a.title ?? ""), Number(a.pubdate) || null, a.duration as string | number));
+    const response = await biliGet<BiliArchiveListResponse>(url, `https://space.bilibili.com/${src.mid}`, cookie);
+    return (response.data?.archives ?? []).map((archive) =>
+      videoEntry(String(archive.bvid), String(archive.title ?? ""), Number(archive.pubdate) || null, archive.duration),
+    );
   }
 
   if (src.kind === "series") {
     const url = `https://api.bilibili.com/x/series/archives?mid=${src.mid}&series_id=${src.sid}&only_normal=true&sort=desc&pn=1&ps=30`;
-    const d = await biliGet(url, `https://space.bilibili.com/${src.mid}`, cookie);
-    const archives = (((d.data as Record<string, unknown>)?.archives as Record<string, unknown>[]) ?? []);
-    return archives.map((a) => videoEntry(String(a.bvid), String(a.title ?? ""), Number(a.pubdate) || null, a.duration as string | number));
+    const response = await biliGet<BiliArchiveListResponse>(url, `https://space.bilibili.com/${src.mid}`, cookie);
+    return (response.data?.archives ?? []).map((archive) =>
+      videoEntry(String(archive.bvid), String(archive.title ?? ""), Number(archive.pubdate) || null, archive.duration),
+    );
   }
 
   // space: the UP主's dynamic feed, filtered to video posts.
   const url = `https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?offset=&host_mid=${src.mid}&timezone_offset=-480&features=itemOpusStyle`;
-  const d = await biliGet(url, `https://space.bilibili.com/${src.mid}/dynamic`, cookie);
-  const items = (((d.data as Record<string, unknown>)?.items as Record<string, unknown>[]) ?? []);
-  const out: FeedEntry[] = [];
-  for (const it of items) {
-    const modules = (it.modules as Record<string, unknown>) ?? {};
-    const dyn = (modules.module_dynamic as Record<string, unknown>) ?? {};
-    const major = (dyn.major as Record<string, unknown>) ?? {};
-    const archive = major.archive as Record<string, unknown> | undefined;
-    if (!archive?.bvid) continue;
-    const author = (modules.module_author as Record<string, unknown>) ?? {};
-    out.push(videoEntry(String(archive.bvid), String(archive.title ?? ""), Number(author.pub_ts) || null, archive.duration_text as string));
-  }
-  return out;
+  const response = await biliGet<BiliDynamicResponse>(url, `https://space.bilibili.com/${src.mid}/dynamic`, cookie);
+  return (response.data?.items ?? []).flatMap((item) => {
+    const archive = item.modules?.module_dynamic?.major?.archive;
+    if (!archive?.bvid) return [];
+
+    return [
+      videoEntry(
+        String(archive.bvid),
+        String(archive.title ?? ""),
+        Number(item.modules?.module_author?.pub_ts) || null,
+        archive.duration_text,
+      ),
+    ];
+  });
 }

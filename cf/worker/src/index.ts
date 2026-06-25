@@ -93,8 +93,7 @@ export default {
       // Keep the Bilibili cookie alive (self-gates via cookie/info; only the
       // first daily check actually rolls the cookie when Bilibili asks for it).
       try {
-        const r = await refreshBilibiliCookie(env);
-        console.log("bilibili cookie refresh:", r.reason);
+        await refreshBilibiliCookie(env);
       } catch (err) {
         console.error("bilibili cookie refresh failed", err);
       }

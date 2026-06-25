@@ -7,6 +7,30 @@ import { embedTexts } from "../lib/embed";
 export const searchRoutes = new Hono<AppContext>();
 searchRoutes.use("*", requireAuth);
 
+interface VectorChunkMetadata {
+  item_id?: number | string;
+  source?: string;
+}
+
+interface SearchRow {
+  chunk_id: number;
+  item_id: number;
+  source: string;
+  field: string;
+  text: string;
+  start_s: number | null;
+  end_s: number | null;
+  title: string | null;
+  source_url: string;
+  platform: string;
+  author: string | null;
+}
+
+interface SearchHit extends SearchRow {
+  score: number;
+  deep_link: string | null;
+}
+
 // Semantic search over chunk embeddings via Vectorize. Scoped to the user's
 // saved items by default (their personal knowledge); `scope=global` searches
 // everything.
@@ -37,10 +61,10 @@ searchRoutes.get("/", async (c) => {
     savedIds = new Set(rows.map((r) => r.item_id));
   }
 
-  const hits: Record<string, unknown>[] = [];
+  const hits: SearchHit[] = [];
   for (const m of matches.matches) {
     const chunkId = Number(m.id);
-    const meta = (m.metadata || {}) as Record<string, unknown>;
+    const meta = (m.metadata || {}) as VectorChunkMetadata;
     const itemId = Number(meta.item_id);
     if (savedIds && !savedIds.has(itemId)) continue;
     if (itemFilter && itemId !== Number(itemFilter)) continue;
@@ -51,7 +75,7 @@ searchRoutes.get("/", async (c) => {
               ch.start_s, ch.end_s, i.title, i.source_url, i.platform, i.author
          FROM chunk ch JOIN item i ON i.id = ch.item_id
         WHERE ch.id = ?`,
-    ).bind(chunkId).first<Record<string, unknown>>();
+    ).bind(chunkId).first<SearchRow>();
     if (!row) continue;
     hits.push({ ...row, score: m.score, deep_link: deepLink(row) });
     if (hits.length >= k) break;
@@ -59,9 +83,9 @@ searchRoutes.get("/", async (c) => {
   return c.json(hits);
 });
 
-function deepLink(row: Record<string, unknown>): string | null {
-  const start = row.start_s as number | null;
-  const url = row.source_url as string;
+function deepLink(row: Pick<SearchRow, "start_s" | "source_url" | "platform">): string | null {
+  const start = row.start_s;
+  const url = row.source_url;
   if (start == null || !url) return null;
   if (row.platform === "youtube" || row.platform === "bilibili") {
     const sep = url.includes("?") ? "&" : "?";

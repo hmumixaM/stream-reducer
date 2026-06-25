@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Network, RefreshCw, Search as SearchIcon, X } from "lucide-react";
-import { api, type GraphFilters } from "@/lib/api";
+import { api } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Input, Spinner } from "@/components/ui";
 import { GraphCanvas, type GraphCanvasHandle } from "@/components/GraphCanvas";
 import { NodePanel } from "@/components/NodePanel";
 import { timeAgo } from "@/lib/utils";
+import { graphFilters, parseGraphQuery } from "@/lib/graphModel";
 
 const PLATFORMS = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
 
@@ -40,19 +41,16 @@ export function Graph() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [topicQuery, setTopicQuery] = useState("");
 
-  const favorite = params.get("favorite") === "1";
-  const archived = params.get("archived") === "1";
-  const platform = params.get("platform") ?? "";
-  const folders = (params.get("folders") ?? "")
-    .split(",")
-    .map((s) => Number(s))
-    .filter((n) => Number.isFinite(n) && n > 0);
-  const focus = params.get("focus");
+  const { favorite, archived, platform, folders, focus } = useMemo(
+    () => parseGraphQuery(params),
+    [params],
+  );
 
   // In the mirror the graph is unified; filters are not exposed.
-  const filters: GraphFilters | undefined = MIRROR
-    ? undefined
-    : { favorite, archived, platform: platform || undefined, folders };
+  const filters = useMemo(
+    () => graphFilters({ favorite, archived, platform, folders, focus }, MIRROR),
+    [favorite, archived, platform, folders, focus],
+  );
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params);
@@ -94,13 +92,24 @@ export function Graph() {
   const focusedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!focus || !data || focusedRef.current === focus) return;
+    let cancelled = false;
     focusedRef.current = focus;
-    api.getItemFocus(Number(focus)).then((nodeId) => {
-      if (nodeId != null) {
-        setSelectedId(nodeId);
-        setTimeout(() => canvasRef.current?.focusNode(nodeId), 800);
-      }
-    });
+
+    async function focusItemNode(): Promise<void> {
+      const nodeId = await api.getItemFocus(Number(focus));
+      if (cancelled || nodeId == null) return;
+
+      setSelectedId(nodeId);
+      setTimeout(() => {
+        if (!cancelled) canvasRef.current?.focusNode(nodeId);
+      }, 800);
+    }
+
+    void focusItemNode();
+
+    return () => {
+      cancelled = true;
+    };
   }, [focus, data]);
 
   const runSearch = (e: React.FormEvent) => {

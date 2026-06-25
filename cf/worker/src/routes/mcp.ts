@@ -48,6 +48,27 @@ interface SearchArgs {
   item_id?: number;
 }
 
+interface VectorChunkMetadata {
+  item_id?: number | string;
+  source?: string;
+}
+
+interface SearchHit {
+  chunk_id: number;
+  item_id: number;
+  source: string;
+  field: string;
+  text: string;
+  start_s: number | null;
+  end_s: number | null;
+  title: string | null;
+  source_url: string;
+  platform: string;
+  author: string | null;
+  score: number;
+  deep_link: string | null;
+}
+
 // Semantic search over chunk embeddings. When `libraryUserId` is set, results
 // are restricted to that user's saved items; otherwise the whole catalog is
 // searched. Over-fetches from Vectorize so post-filtering (library / source /
@@ -77,9 +98,9 @@ async function runSearch(
     savedIds = new Set(saved.map((r) => r.item_id));
   }
 
-  const hits: Record<string, unknown>[] = [];
+  const hits: SearchHit[] = [];
   for (const m of matches.matches) {
-    const meta = (m.metadata || {}) as Record<string, unknown>;
+    const meta = (m.metadata || {}) as VectorChunkMetadata;
     const itemId = Number(meta.item_id);
     if (savedIds && !savedIds.has(itemId)) continue;
     if (item_id && itemId !== item_id) continue;

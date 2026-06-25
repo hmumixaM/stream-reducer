@@ -67,109 +67,128 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
   );
   if (!sub || !sub.enabled) return 0;
 
-  // Self-heal: an Apple Podcasts show URL still stored as feed_url means the
-  // iTunes lookup failed when the subscription was created (Apple rate-limits
-  // the Worker egress). Re-resolve to the real RSS feed now and persist it, so a
-  // transient creation-time failure doesn't leave the subscription permanently
-  // stuck returning zero entries.
+  const healedSub = await selfHealSubscriptionFeed(env, sub);
+  const feed = await fetchSubscriptionFeed(env, subId, healedSub.feed_url);
+  if (!feed) return 0;
+  if (!feed.entries.length) {
+    await recordEmptyPoll(env, subId);
+    return 0;
+  }
+
+  const pollBatch = await selectPollBatch(env, healedSub, feed.entries);
+  const enqueued = await enqueueSubscriptionBatch(env, healedSub, feed.title, pollBatch.entries);
+  await recordPollSuccess(env, subId, feed, pollBatch.nextSeenGuid, enqueued);
+  return enqueued;
+}
+
+async function selfHealSubscriptionFeed(env: Env, sub: SubscriptionRow): Promise<SubscriptionRow> {
   let healHost = "";
   try { healHost = new URL(sub.feed_url).hostname.toLowerCase(); } catch { /* not a URL */ }
-  if (healHost.endsWith("podcasts.apple.com") || healHost.endsWith("itunes.apple.com")) {
-    const resolved = await resolveFeedUrl(sub.feed_url);
-    if (resolved !== sub.feed_url) {
-      console.log(`subscription ${subId} feed_url self-healed: ${sub.feed_url} -> ${resolved}`);
-      try {
-        await env.DB.prepare("UPDATE subscription SET feed_url = ?, platform = ? WHERE id = ?")
-          .bind(resolved, detectPlatform(resolved), subId)
-          .run();
-      } catch (e) {
-        // UNIQUE(user_id, feed_url) collision (already subscribed to the resolved
-        // feed): use it for this poll without persisting.
-        console.warn(`subscription ${subId} feed_url persist skipped: ${String(e)}`);
-      }
-      sub.feed_url = resolved;
-    }
+  if (!healHost.endsWith("podcasts.apple.com") && !healHost.endsWith("itunes.apple.com")) return sub;
+
+  const resolved = await resolveFeedUrl(sub.feed_url);
+  if (resolved === sub.feed_url) return sub;
+
+  try {
+    await env.DB.prepare("UPDATE subscription SET feed_url = ?, platform = ? WHERE id = ?")
+      .bind(resolved, detectPlatform(resolved), sub.id)
+      .run();
+  } catch (e) {
+    // UNIQUE(user_id, feed_url) collision (already subscribed to the resolved
+    // feed): use it for this poll without persisting.
+    console.warn(`subscription ${sub.id} feed_url persist skipped: ${String(e)}`);
   }
 
-  let feed: { title: string | null; entries: FeedEntry[] };
+  return { ...sub, feed_url: resolved, platform: detectPlatform(resolved) };
+}
+
+async function fetchSubscriptionFeed(
+  env: Env,
+  subId: number,
+  feedUrl: string,
+): Promise<{ title: string | null; entries: FeedEntry[] } | null> {
   try {
-    feed = await fetchFeed(env, sub.feed_url);
+    return await fetchFeed(env, feedUrl);
   } catch (err) {
     await recordPollError(env, subId, err);
-    return 0;
+    return null;
   }
-  const entries = feed.entries;
-  if (!entries.length) {
-    // No entries can mean an empty feed OR a feed that fetched but parsed to
-    // nothing (e.g. bilibili risk-control HTML). Flag it as 'empty' so the UI
-    // can warn when a feed that should have content keeps returning zero.
-    await env.DB.prepare(
-      `UPDATE subscription
-          SET last_checked_at = ?, last_status = 'empty', last_error = NULL,
-              last_entry_count = 0, last_new_count = 0
-        WHERE id = ?`,
-    )
-      .bind(isoNow(), subId)
-      .run();
-    return 0;
-  }
+}
 
-  const newestGuid = entries[0].guid;
-  // Stop at the last-seen entry; cap the batch to avoid flooding.
-  const fresh: FeedEntry[] = [];
-  for (const e of entries) {
-    if (sub.last_seen_guid && e.guid === sub.last_seen_guid) break;
-    fresh.push(e);
-  }
-  // Two subscription filters: (1) the publish-date window (天数限制) so a channel
-  // only backfills its last N days, and (2) the duration floor (default 10 min)
-  // so shorts/clips stay out. A subscription pulls EVERY video that passes both
-  // — not just the channel feed's latest 15 — drained MAX_NEW_PER_POLL per poll.
-  // Entries with an unknown publish date / duration are kept (we can't tell).
-  // Manual adds don't go through here, so they're unaffected.
+async function recordEmptyPoll(env: Env, subId: number): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE subscription
+        SET last_checked_at = ?, last_status = 'empty', last_error = NULL,
+            last_entry_count = 0, last_new_count = 0
+      WHERE id = ?`,
+  )
+    .bind(isoNow(), subId)
+    .run();
+}
+
+interface PollBatch {
+  entries: FeedEntry[];
+  nextSeenGuid: string | null;
+}
+
+async function selectPollBatch(env: Env, sub: SubscriptionRow, entries: FeedEntry[]): Promise<PollBatch> {
   const minPublished = sub.min_published_at; // window cutoff (e.g. last 90 days)
+  const lastSeenIndex = sub.last_seen_guid
+    ? entries.findIndex((entry) => entry.guid === sub.last_seen_guid)
+    : -1;
+  const fresh = lastSeenIndex >= 0 ? entries.slice(0, lastSeenIndex) : entries;
   const inWindow = fresh.filter((e) => !minPublished || !e.published || e.published >= minPublished);
   const minDuration = Number(env.SUBSCRIPTION_MIN_DURATION_S || DEFAULT_MIN_DURATION_S);
   const durations = await Promise.all(inWindow.map((e) => entryDuration(e, entryUrl(e).platform)));
   const within = inWindow.filter((_, i) => durations[i] == null || durations[i]! >= minDuration);
 
-  // Drain the backfill window from oldest -> newest. When the window is larger
-  // than one poll batch, move last_seen_guid only up to the newest item actually
-  // processed so later polls continue with the remaining recent entries.
   const newestFirstBatch = within.length > MAX_NEW_PER_POLL
     ? within.slice(-MAX_NEW_PER_POLL)
     : within;
-  const batch = newestFirstBatch.slice().reverse(); // oldest first
+  const nextSeenGuid = within.length > MAX_NEW_PER_POLL
+    ? newestFirstBatch[0]?.guid ?? null
+    : entries[0]?.guid ?? null;
 
+  return { entries: newestFirstBatch.slice().reverse(), nextSeenGuid };
+}
+
+async function enqueueSubscriptionBatch(
+  env: Env,
+  sub: SubscriptionRow,
+  feedTitle: string | null,
+  entries: FeedEntry[],
+): Promise<number> {
   let enqueued = 0;
-  for (const e of batch) {
-    const { url, platform } = entryUrl(e);
+  for (const entry of entries) {
+    const { url, platform } = entryUrl(entry);
     if (!url) continue;
-    const res = await addUrlToLibrary(env, sub.user_id, url, {
-      title: e.title,
-      external_id: e.guid,
+    const addResult = await addUrlToLibrary(env, sub.user_id, url, {
+      title: entry.title,
+      external_id: entry.guid,
       platform,
       subscriptionId: sub.id,
       feedUrl: sub.feed_url,
-      // Carry the feed's episode metadata so podcasts keep their title, show
-      // notes, date, and artwork even when the audio URL has none.
       meta: {
-        title: e.title,
-        description: e.description ?? null,
-        published_at: e.published ?? null,
-        duration_s: e.duration_s ?? null,
-        thumbnail: e.thumbnail ?? null,
-        // Show/program name (feed title) when the episode carries no author, so
-        // the summary knows which program it belongs to.
-        author: e.author ?? feed.title ?? null,
+        title: entry.title,
+        description: entry.description ?? null,
+        published_at: entry.published ?? null,
+        duration_s: entry.duration_s ?? null,
+        thumbnail: entry.thumbnail ?? null,
+        author: entry.author ?? feedTitle ?? null,
       },
     });
-    if (res) enqueued++;
+    if (addResult) enqueued++;
   }
+  return enqueued;
+}
 
-  const nextSeenGuid = within.length > MAX_NEW_PER_POLL
-    ? newestFirstBatch[0]?.guid
-    : newestGuid;
+async function recordPollSuccess(
+  env: Env,
+  subId: number,
+  feed: { title: string | null; entries: FeedEntry[] },
+  nextSeenGuid: string | null,
+  enqueued: number,
+): Promise<void> {
   await env.DB.prepare(
     `UPDATE subscription
         SET last_checked_at = ?, last_seen_guid = COALESCE(?, last_seen_guid),
@@ -177,9 +196,8 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
             last_entry_count = ?, last_new_count = ?, consecutive_failures = 0
       WHERE id = ?`,
   )
-    .bind(isoNow(), nextSeenGuid, feed.title, entries.length, enqueued, subId)
+    .bind(isoNow(), nextSeenGuid, feed.title, feed.entries.length, enqueued, subId)
     .run();
-  return enqueued;
 }
 
 // Cron entrypoint: enqueue polls for every subscription whose interval elapsed.

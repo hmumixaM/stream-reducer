@@ -8,10 +8,21 @@ import { toItemRead } from "../lib/serialize";
 import { cacheThumbnail } from "../lib/ingest";
 import { refreshBilibiliCookie } from "../lib/biliRefresh";
 import { loadBiliAuth } from "../lib/biliAuth";
+import { readJson } from "../lib/request";
 
 // Admin-only: user management + global processing-queue oversight.
 export const adminRoutes = new Hono<AppContext>();
 adminRoutes.use("*", requireAdmin);
+
+interface AdminUserRow {
+  id: number;
+  email: string;
+  is_admin: number;
+  created_at: string;
+  library_count: number;
+  queued_count: number;
+  subscription_count: number;
+}
 
 // Manually run the Bilibili cookie refresh (cron runs it daily). `?force=true`
 // skips the cookie/info "needs refresh" gate. Reports the outcome + KV state so
@@ -47,7 +58,7 @@ adminRoutes.get("/proxy-check", async (c) => {
 
 // --- Users ---------------------------------------------------------------
 adminRoutes.get("/users", async (c) => {
-  const rows = await all<Record<string, unknown>>(
+  const rows = await all<AdminUserRow>(
     c.env.DB.prepare(
       `SELECT u.id, u.email, u.is_admin, u.created_at,
               (SELECT COUNT(*) FROM user_item ui WHERE ui.user_id = u.id) AS library_count,
@@ -62,7 +73,7 @@ adminRoutes.get("/users", async (c) => {
 
 adminRoutes.post("/users/:id/admin", async (c) => {
   const id = Number(c.req.param("id"));
-  const body = (await c.req.json().catch(() => ({}))) as { is_admin?: boolean };
+  const body = await readJson<{ is_admin?: boolean }>(c);
   const next = body.is_admin ? 1 : 0;
   // Don't allow removing the last admin.
   if (!next) {
@@ -84,8 +95,12 @@ adminRoutes.delete("/users/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (id === c.get("user").id) return c.json({ error: "cannot delete yourself" }, 400);
   // Per-user rows cascade via FKs; remove them explicitly to be safe.
-  for (const t of ["user_item", "comment", "highlight", "subscription", "itemgroup", "session", "item_interest"]) {
-    await c.env.DB.prepare(`DELETE FROM ${t} WHERE user_id = ?`).bind(id).run().catch(() => {});
+  for (const table of ["user_item", "comment", "highlight", "subscription", "itemgroup", "session", "item_interest"]) {
+    try {
+      await c.env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(id).run();
+    } catch {
+      // Some tables may be absent in older deployments; deleting the user remains authoritative.
+    }
   }
   await c.env.DB.prepare("DELETE FROM user WHERE id = ?").bind(id).run();
   return c.json({ ok: true });

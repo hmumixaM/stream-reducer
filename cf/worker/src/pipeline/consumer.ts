@@ -2,7 +2,7 @@ import type { Env, PipelineMessage } from "../env";
 import { first, type ItemRow } from "../db";
 import { isoNow } from "../lib/crypto";
 import { persistItemMetadata, linkItemFeed, youtubeChannelFeed, cacheThumbnail } from "../lib/ingest";
-import { runPipeline, runPipelineStreaming, type PipelineResult, type ProgressEvent } from "./container";
+import { runPipeline, runPipelineStreaming, type JsonObject, type PipelineResult, type ProgressEvent } from "./container";
 import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
 
@@ -230,7 +230,7 @@ async function generateInfographic(env: Env, itemId: number): Promise<void> {
   ).bind(isoNow(), itemId).run();
 
   try {
-    const structured = JSON.parse(summary.structured || "{}") as Record<string, unknown>;
+    const structured = JSON.parse(summary.structured || "{}") as JsonObject;
     const result = await runPipeline(env, {
       item_id: itemId,
       source_url: item.source_url,
@@ -291,7 +291,7 @@ async function backfillStructuredItem(
   if (!item || !summary) return;
 
   try {
-    const structured = JSON.parse(summary.structured || "{}") as Record<string, unknown>;
+    const structured = JSON.parse(summary.structured || "{}") as JsonObject;
     const result = await runPipeline(env, {
       item_id: itemId,
       source_url: item.source_url,
@@ -374,10 +374,11 @@ const STAGE_STATUS: Record<string, string> = {
 function progressDetail(evt: ProgressEvent): string | null {
   if (typeof evt.detail === "string" && evt.detail) return evt.detail;
   if (evt.stage === "download") {
-    const parts: string[] = [];
-    if (evt.pct != null) parts.push(`${evt.pct}%`);
-    if (evt.speed) parts.push(`${(evt.speed / 1e6).toFixed(1)} MB/s`);
-    if (evt.eta != null) parts.push(`ETA ${evt.eta}s`);
+    const parts = [
+      evt.pct != null ? `${evt.pct}%` : null,
+      evt.speed ? `${(evt.speed / 1e6).toFixed(1)} MB/s` : null,
+      evt.eta != null ? `ETA ${evt.eta}s` : null,
+    ].filter((part): part is string => part !== null);
     return parts.join(" · ") || null;
   }
   if (evt.stage === "transcribe" && evt.chunk_count) {
@@ -389,169 +390,240 @@ function progressDetail(evt: ProgressEvent): string | null {
 async function processClaimedItem(env: Env, item: ItemRow, resummarize = false): Promise<void> {
   const itemId = item.id;
   const runStart = Date.now();
-  console.log(
-    `pipeline run start item=${itemId} platform=${item.platform} mode=${resummarize ? "resummarize" : "process"} retry=${item.retry_count} url=${item.source_url}`,
-  );
   try {
-    // Metadata is no longer pre-fetched in its own container call (avoids extra
-    // container instances / 503s); the full pipeline run below returns and
-    // persists metadata anyway.
-    let transcript = null;
-    if (resummarize) {
-      const t = await first<{ language: string | null; source: string; segments: string; text: string }>(
-        env.DB.prepare("SELECT language, source, segments, text FROM transcript WHERE item_id = ?").bind(itemId),
-      );
-      if (t) transcript = { language: t.language, source: t.source, segments: JSON.parse(t.segments || "[]"), text: t.text };
-    }
+    const transcript = await loadResummarizeTranscript(env, itemId, resummarize);
+    const job = buildPipelineJob(item, resummarize, transcript);
+    const result = await executePipeline(env, itemId, job, resummarize);
 
-    const job = {
-      item_id: itemId,
-      source_url: item.source_url,
-      platform: item.platform,
-      mode: (resummarize ? "resummarize" : "process") as "resummarize" | "process",
-      transcript,
-      // Pass stored metadata as summary context. For podcast/RSS items whose
-      // audio URL has no scrapeable metadata, this carries the feed's title,
-      // show notes, date, and host so the summary isn't context-blind.
-      item: {
-        title: item.title,
-        author: item.author,
-        description: item.description,
-        duration_s: item.duration_s,
-        published_at: item.published_at,
-        view_count: item.view_count,
-        like_count: item.like_count,
-      },
-    };
-
-    // resummarize/translate never download, so stream only the full process run.
-    // The heartbeat throttles D1 writes (~1 / 1.5s) but always writes on a stage
-    // change, so the 3s queue poll renders a live stage + progress bar.
-    let result: PipelineResult;
-    if (resummarize) {
-      result = await runPipeline(env, job);
-    } else {
-      let lastWrite = 0;
-      let lastStage = "";
-      const heartbeat = async (evt: ProgressEvent): Promise<void> => {
-        if (evt.event !== "progress") return;
-        const stage = evt.stage || "";
-        const stageChanged = stage !== lastStage;
-        const now = Date.now();
-        if (!stageChanged && now - lastWrite < 1500) return;
-        lastWrite = now;
-        lastStage = stage;
-        const pct = typeof evt.pct === "number" ? evt.pct : null;
-        const detail = progressDetail(evt);
-        try {
-          await env.DB.prepare(
-            `UPDATE item SET status = COALESCE(?, status), progress_stage = ?, progress_pct = ?,
-               progress_detail = ?, progress_updated_at = ? WHERE id = ?`,
-          )
-            .bind(STAGE_STATUS[stage] ?? null, stage || null, pct, detail, isoNow(), itemId)
-            .run();
-        } catch (herr) {
-          console.error("heartbeat bind failed", itemId, JSON.stringify({ evt, pct, detail }).slice(0, 2000));
-          throw herr;
-        }
-      };
-      // Persist each stage's content the moment it streams in (metadata +
-      // transcript as soon as transcribe finishes) so the item page shows it
-      // WHILE summarize runs — and an empty transcript is immediately visible.
-      const onPartial = async (evt: ProgressEvent): Promise<void> => {
-        if (evt.metadata) await persistMetadata(env, itemId, evt.metadata);
-        if (evt.transcript) {
-          const t = evt.transcript;
-          await env.DB.prepare(
-            `INSERT INTO transcript (item_id, language, source, segments, text)
-             VALUES (?, ?, ?, ?, ?)
-             ON CONFLICT(item_id) DO UPDATE SET language=excluded.language, source=excluded.source,
-               segments=excluded.segments, text=excluded.text`,
-          )
-            .bind(itemId, t.language, t.source, JSON.stringify(t.segments), t.text)
-            .run();
-        }
-      };
-      result = await runPipelineStreaming(env, job, heartbeat, onPartial);
-    }
-    // Membership/paid-gated content: terminal 'excluded' (not an error, not
-    // retried, hidden from the active queue). Metadata is still persisted so
-    // the title/channel are recognizable.
     if (result.excluded) {
-      // Membership/paid-gated content (can't be downloaded). Mark the global
-      // item 'excluded' (terminal — never reprocessed, and dedup/ingest skips
-      // it) and REMOVE it from every user's library so member-only videos don't
-      // linger there. Comments/highlights on such items are dropped too.
-      if (result.metadata) await persistMetadata(env, itemId, result.metadata);
-      await env.DB.prepare(
-        "UPDATE item SET status = 'excluded', error = ?, completed_at = ?, retry_count = ? WHERE id = ?",
-      )
-        .bind((result.error || "members-only").slice(0, 500), isoNow(), MAX_RECLAIM, itemId)
-        .run();
-      await env.DB.prepare("DELETE FROM user_item WHERE item_id = ?").bind(itemId).run();
-      await env.DB.prepare("DELETE FROM comment WHERE item_id = ?").bind(itemId).run();
-      await env.DB.prepare("DELETE FROM highlight WHERE item_id = ?").bind(itemId).run();
+      await persistExcludedResult(env, itemId, result);
       return;
     }
-    if (result.error) throw new Error(result.error);
-
-    try {
-      await persistResult(env, itemId, result);
-    } catch (perr) {
-      // Diagnostic: dump the result shape so an object-typed scalar bind
-      // (D1_TYPE_ERROR) can be pinpointed.
-      const dump = {
-        metadata: result.metadata,
-        media: result.media ? { ...result.media, audio_b64: result.media.audio_b64 ? "<b64>" : null } : null,
-        summary: result.summary ? { model: result.summary.model, prompt_version: result.summary.prompt_version, markdown_type: typeof result.summary.markdown, structured: result.summary.structured } : null,
-        transcript: result.transcript ? { language: result.transcript.language, source: result.transcript.source, text_type: typeof result.transcript.text, seg0: (result.transcript.segments as unknown[])?.[0] } : null,
-        chunk0: result.chunks?.[0],
-        chunk_count: result.chunks?.length,
-      };
-      console.error("persistResult failed", itemId, JSON.stringify(dump).slice(0, 4000));
-      throw perr;
-    }
-    await embedChunks(env, itemId);
-
-    await env.DB.prepare(
-      `UPDATE item SET status = 'done', completed_at = ?, error = NULL,
-         progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
-       WHERE id = ?`,
-    )
-      .bind(isoNow(), itemId)
-      .run();
-    // Flip every user's saved copy of this content to done (dedup payoff).
-    await env.DB.prepare("UPDATE user_item SET personal_status = 'done' WHERE item_id = ?").bind(itemId).run();
-    console.log(`pipeline run done item=${itemId} ms=${Date.now() - runStart}`);
+    await persistCompletedPipeline(env, itemId, result);
   } catch (err) {
-    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-    // Transient capacity (503, no free container instance): put the item back to
-    // 'queued' (don't burn a retry, don't mark error) and rethrow so the queue
-    // redelivers with backoff; the cron pump also re-drains it. This prevents a
-    // momentary instance crunch from permanently failing items.
-    if (isTransientCapacity(msg)) {
-      await env.DB.prepare(
-        `UPDATE item SET status = 'queued', error = NULL,
-           progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
-         WHERE id = ?`,
-      )
-        .bind(itemId)
-        .run();
-      console.warn("pipeline item deferred — no container slot, re-queued", itemId);
-      throw err;
-    }
-    // Record the failure and stop: leave the item in 'error' (not auto-retried)
-    // and don't rethrow, so the queue message acks cleanly and the self-drain
-    // continuation isn't lost (which previously stranded items in 'fetching').
-    await env.DB.prepare(
-      `UPDATE item SET status = 'error', error = ?, retry_count = retry_count + 1,
-         progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
-       WHERE id = ?`,
-    )
-      .bind(msg.slice(0, 4000), itemId)
-      .run();
-    console.error(`pipeline item failed item=${itemId} ms=${Date.now() - runStart} msg=${msg}`);
+    await handlePipelineFailure(env, itemId, runStart, err);
   }
+}
+
+type ClaimedPipelineJob = Parameters<typeof runPipeline>[1];
+
+async function loadResummarizeTranscript(
+  env: Env,
+  itemId: number,
+  resummarize: boolean,
+): Promise<ClaimedPipelineJob["transcript"]> {
+  if (!resummarize) return null;
+
+  const transcript = await first<{ language: string | null; source: string; segments: string; text: string }>(
+    env.DB.prepare("SELECT language, source, segments, text FROM transcript WHERE item_id = ?").bind(itemId),
+  );
+  if (!transcript) return null;
+
+  return {
+    language: transcript.language,
+    source: transcript.source,
+    segments: JSON.parse(transcript.segments || "[]"),
+    text: transcript.text,
+  };
+}
+
+function buildPipelineJob(
+  item: ItemRow,
+  resummarize: boolean,
+  transcript: ClaimedPipelineJob["transcript"],
+): ClaimedPipelineJob {
+  return {
+    item_id: item.id,
+    source_url: item.source_url,
+    platform: item.platform,
+    mode: resummarize ? "resummarize" : "process",
+    transcript,
+    item: {
+      title: item.title,
+      author: item.author,
+      description: item.description,
+      duration_s: item.duration_s,
+      published_at: item.published_at,
+      view_count: item.view_count,
+      like_count: item.like_count,
+    },
+  };
+}
+
+async function executePipeline(
+  env: Env,
+  itemId: number,
+  job: ClaimedPipelineJob,
+  resummarize: boolean,
+): Promise<PipelineResult> {
+  if (resummarize) return runPipeline(env, job);
+
+  return runPipelineStreaming(
+    env,
+    job,
+    createProgressHeartbeat(env, itemId),
+    (event) => persistPipelinePartial(env, itemId, event),
+  );
+}
+
+function createProgressHeartbeat(env: Env, itemId: number): (evt: ProgressEvent) => Promise<void> {
+  let lastWrite = 0;
+  let lastStage = "";
+
+  return async (evt: ProgressEvent): Promise<void> => {
+    if (evt.event !== "progress") return;
+    const stage = evt.stage || "";
+    const now = Date.now();
+    const stageChanged = stage !== lastStage;
+    if (!stageChanged && now - lastWrite < 1500) return;
+
+    lastWrite = now;
+    lastStage = stage;
+    await persistProgressHeartbeat(env, itemId, evt, stage);
+  };
+}
+
+async function persistProgressHeartbeat(
+  env: Env,
+  itemId: number,
+  evt: ProgressEvent,
+  stage: string,
+): Promise<void> {
+  const pct = typeof evt.pct === "number" ? evt.pct : null;
+  const detail = progressDetail(evt);
+  try {
+    await env.DB.prepare(
+      `UPDATE item SET status = COALESCE(?, status), progress_stage = ?, progress_pct = ?,
+         progress_detail = ?, progress_updated_at = ? WHERE id = ?`,
+    )
+      .bind(STAGE_STATUS[stage] ?? null, stage || null, pct, detail, isoNow(), itemId)
+      .run();
+  } catch (err) {
+    console.error("heartbeat bind failed", itemId, JSON.stringify({ evt, pct, detail }).slice(0, 2000));
+    throw err;
+  }
+}
+
+async function persistPipelinePartial(env: Env, itemId: number, evt: ProgressEvent): Promise<void> {
+  if (evt.metadata) await persistMetadata(env, itemId, evt.metadata);
+  if (evt.transcript) await persistTranscript(env, itemId, evt.transcript);
+}
+
+async function persistTranscript(
+  env: Env,
+  itemId: number,
+  transcript: NonNullable<ProgressEvent["transcript"]>,
+): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO transcript (item_id, language, source, segments, text)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(item_id) DO UPDATE SET language=excluded.language, source=excluded.source,
+       segments=excluded.segments, text=excluded.text`,
+  )
+    .bind(itemId, transcript.language, transcript.source, JSON.stringify(transcript.segments), transcript.text)
+    .run();
+}
+
+async function persistExcludedResult(env: Env, itemId: number, result: PipelineResult): Promise<void> {
+  if (result.metadata) await persistMetadata(env, itemId, result.metadata);
+  await env.DB.prepare(
+    "UPDATE item SET status = 'excluded', error = ?, completed_at = ?, retry_count = ? WHERE id = ?",
+  )
+    .bind((result.error || "members-only").slice(0, 500), isoNow(), MAX_RECLAIM, itemId)
+    .run();
+  await env.DB.prepare("DELETE FROM user_item WHERE item_id = ?").bind(itemId).run();
+  await env.DB.prepare("DELETE FROM comment WHERE item_id = ?").bind(itemId).run();
+  await env.DB.prepare("DELETE FROM highlight WHERE item_id = ?").bind(itemId).run();
+}
+
+async function persistCompletedPipeline(env: Env, itemId: number, result: PipelineResult): Promise<void> {
+  if (result.error) throw new Error(result.error);
+
+  await persistResultWithDiagnostics(env, itemId, result);
+  await embedChunks(env, itemId);
+  await markItemDone(env, itemId);
+}
+
+async function persistResultWithDiagnostics(env: Env, itemId: number, result: PipelineResult): Promise<void> {
+  try {
+    await persistResult(env, itemId, result);
+  } catch (err) {
+    console.error("persistResult failed", itemId, JSON.stringify(resultDiagnostic(result)).slice(0, 4000));
+    throw err;
+  }
+}
+
+function resultDiagnostic(result: PipelineResult) {
+  return {
+    metadata: result.metadata,
+    media: result.media ? { ...result.media, audio_b64: result.media.audio_b64 ? "<b64>" : null } : null,
+    summary: result.summary
+      ? {
+          model: result.summary.model,
+          prompt_version: result.summary.prompt_version,
+          markdown_type: typeof result.summary.markdown,
+          structured: result.summary.structured,
+        }
+      : null,
+    transcript: result.transcript
+      ? {
+          language: result.transcript.language,
+          source: result.transcript.source,
+          text_type: typeof result.transcript.text,
+          seg0: result.transcript.segments[0],
+        }
+      : null,
+    chunk0: result.chunks[0],
+    chunk_count: result.chunks.length,
+  };
+}
+
+async function markItemDone(env: Env, itemId: number): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE item SET status = 'done', completed_at = ?, error = NULL,
+       progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+     WHERE id = ?`,
+  )
+    .bind(isoNow(), itemId)
+    .run();
+  await env.DB.prepare("UPDATE user_item SET personal_status = 'done' WHERE item_id = ?").bind(itemId).run();
+}
+
+async function handlePipelineFailure(
+  env: Env,
+  itemId: number,
+  runStart: number,
+  err: unknown,
+): Promise<void> {
+  const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  if (isTransientCapacity(msg)) {
+    await requeueTransientPipelineItem(env, itemId);
+    console.warn("pipeline item deferred — no container slot, re-queued", itemId);
+    throw err;
+  }
+
+  await markItemErrored(env, itemId, msg);
+  console.error(`pipeline item failed item=${itemId} ms=${Date.now() - runStart} msg=${msg}`);
+}
+
+async function requeueTransientPipelineItem(env: Env, itemId: number): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE item SET status = 'queued', error = NULL,
+       progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+     WHERE id = ?`,
+  )
+    .bind(itemId)
+    .run();
+}
+
+async function markItemErrored(env: Env, itemId: number, msg: string): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE item SET status = 'error', error = ?, retry_count = retry_count + 1,
+       progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+     WHERE id = ?`,
+  )
+    .bind(msg.slice(0, 4000), itemId)
+    .run();
 }
 
 async function persistMetadata(env: Env, itemId: number, m: PipelineResult["metadata"]): Promise<void> {
@@ -560,7 +632,7 @@ async function persistMetadata(env: Env, itemId: number, m: PipelineResult["meta
   await persistItemMetadata(env, itemId, cached ? { ...m, thumbnail: cached } : m);
 }
 
-async function persistHeadlineFields(env: Env, itemId: number, structured: Record<string, unknown>): Promise<void> {
+async function persistHeadlineFields(env: Env, itemId: number, structured: JsonObject): Promise<void> {
   const headline = cleanGeneratedText(structured.headline);
   const subhead = cleanGeneratedText(structured.subhead);
   await env.DB.prepare(

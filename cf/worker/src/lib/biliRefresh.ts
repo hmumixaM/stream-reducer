@@ -10,7 +10,7 @@ import { loadBiliAuth, saveBiliAuth } from "./biliAuth";
 import { getContainer } from "@cloudflare/containers";
 import { containerKey } from "../pipeline/container";
 
-export interface RefreshOutcome {
+interface RefreshOutcome {
   refreshed: boolean;
   reason: string;
 }

@@ -1,11 +1,16 @@
 import type { ItemRow, UserItemRow } from "../db";
 
+type ItemReadUserState = Pick<
+  UserItemRow,
+  "subscription_id" | "folder_id" | "group_position" | "is_favorite" | "is_archived" | "personal_status"
+>;
+
 // Shape a global item row (+ optional per-user state) into the JSON the SPA's
 // `Item` type expects. Per-user fields fall back to neutral defaults when the
 // user hasn't saved the item (i.e. when browsing the global catalog).
 export function toItemRead(
   item: ItemRow,
-  ui?: UserItemRow | null,
+  ui?: ItemReadUserState | null,
   extra?: { is_interested?: boolean },
 ) {
   return {

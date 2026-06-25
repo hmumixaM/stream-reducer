@@ -7,16 +7,30 @@ import {
   useRef,
   useState,
 } from "react";
-import ForceGraph2D from "react-force-graph-2d";
+import ForceGraph2D, {
+  type ForceGraphMethods,
+  type LinkObject,
+  type NodeObject,
+} from "react-force-graph-2d";
 import type { GraphData, GraphNode } from "@/lib/api";
+import {
+  buildAdjacency,
+  buildGraphCanvasData,
+  highlightedNodeIds,
+  type GraphCanvasLink,
+  type GraphCanvasNode,
+  type PinnedNodePositions,
+} from "@/lib/graphModel";
 
 export interface GraphCanvasHandle {
   focusNode: (id: number) => void;
   zoomToFit: () => void;
 }
 
-type FGNode = GraphNode & { x?: number; y?: number; fx?: number; fy?: number };
-type FGLink = { source: number | FGNode; target: number | FGNode; weight: number };
+type ForceGraphApi = ForceGraphMethods<
+  NodeObject<GraphCanvasNode>,
+  LinkObject<GraphCanvasNode, GraphCanvasLink>
+>;
 
 // Stable, well-spread color per community (golden-angle hue).
 function communityColor(community: number): string {
@@ -33,38 +47,26 @@ function snippet(node: GraphNode, n: number): string {
   return t.length > n ? t.slice(0, n - 1) + "…" : t;
 }
 
+function linkEndpointId(endpoint: number | GraphCanvasNode): number {
+  return typeof endpoint === "number" ? endpoint : endpoint.id;
+}
+
 export const GraphCanvas = forwardRef<GraphCanvasHandle, {
   data: GraphData;
   selectedId: number | null;
   onSelect: (id: number) => void;
 }>(function GraphCanvas({ data, selectedId, onSelect }, ref) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fgRef = useRef<any>(null);
+  const fgRef = useRef<ForceGraphApi>();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 600, height: 500 });
   const [hoverNode, setHoverNode] = useState<number | null>(null);
+  const [pinnedPositions, setPinnedPositions] = useState<PinnedNodePositions>({});
 
-  const adjacency = useMemo(() => {
-    const map = new Map<number, Set<number>>();
-    for (const e of data.edges) {
-      if (!map.has(e.source)) map.set(e.source, new Set());
-      if (!map.has(e.target)) map.set(e.target, new Set());
-      map.get(e.source)!.add(e.target);
-      map.get(e.target)!.add(e.source);
-    }
-    return map;
-  }, [data.edges]);
+  const adjacency = useMemo(() => buildAdjacency(data.edges), [data.edges]);
 
   const graphData = useMemo(
-    () => ({
-      nodes: data.nodes.map((n) => ({ ...n })) as FGNode[],
-      links: data.edges.map((e) => ({
-        source: e.source,
-        target: e.target,
-        weight: e.weight,
-      })) as FGLink[],
-    }),
-    [data],
+    () => buildGraphCanvasData(data, pinnedPositions),
+    [data, pinnedPositions],
   );
 
   useEffect(() => {
@@ -81,7 +83,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, {
   const focusNode = useCallback((id: number) => {
     const fg = fgRef.current;
     if (!fg) return;
-    const node = (graphData.nodes as FGNode[]).find((n) => n.id === id);
+    const node = graphData.nodes.find((n) => n.id === id);
     if (node && node.x !== undefined && node.y !== undefined) {
       fg.centerAt(node.x, node.y, 600);
       fg.zoom(3, 600);
@@ -98,12 +100,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, {
     return () => clearTimeout(t);
   }, [graphData]);
 
-  const highlighted = useMemo(() => {
-    if (hoverNode == null) return null;
-    const set = new Set<number>([hoverNode]);
-    adjacency.get(hoverNode)?.forEach((n) => set.add(n));
-    return set;
-  }, [hoverNode, adjacency]);
+  const highlighted = useMemo(() => highlightedNodeIds(hoverNode, adjacency), [hoverNode, adjacency]);
 
   return (
     <div ref={wrapRef} className="h-full w-full">
@@ -115,25 +112,28 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, {
         nodeId="id"
         cooldownTicks={120}
         d3VelocityDecay={0.3}
-        nodeLabel={(n: FGNode) =>
+        nodeLabel={(n: GraphCanvasNode) =>
           `<div style="max-width:280px"><b>${(n.title ?? "").replace(/</g, "&lt;")}</b><br/>${snippet(n, 160).replace(/</g, "&lt;")}</div>`
         }
-        onNodeHover={(n: FGNode | null) => setHoverNode(n ? n.id : null)}
-        onNodeClick={(n: FGNode) => onSelect(n.id)}
-        onNodeDragEnd={(n: FGNode) => {
-          n.fx = n.x;
-          n.fy = n.y;
+        onNodeHover={(n: GraphCanvasNode | null) => setHoverNode(n ? n.id : null)}
+        onNodeClick={(n: GraphCanvasNode) => onSelect(n.id)}
+        onNodeDragEnd={(n: GraphCanvasNode) => {
+          if (n.x === undefined || n.y === undefined) return;
+          setPinnedPositions((current) => ({
+            ...current,
+            [n.id]: { fx: n.x as number, fy: n.y as number },
+          }));
         }}
-        linkColor={(l: FGLink) =>
-          highlighted && highlighted.has((l.source as FGNode).id) &&
-          highlighted.has((l.target as FGNode).id)
+        linkColor={(l: GraphCanvasLink) =>
+          highlighted && highlighted.has(linkEndpointId(l.source)) &&
+          highlighted.has(linkEndpointId(l.target))
             ? "rgba(120,160,255,0.85)"
             : highlighted
               ? "rgba(140,140,160,0.06)"
               : "rgba(140,140,160,0.22)"
         }
-        linkWidth={(l: FGLink) => Math.max(0.4, l.weight * 2.5)}
-        nodeCanvasObject={(node: FGNode, ctx, globalScale) => {
+        linkWidth={(l: GraphCanvasLink) => Math.max(0.4, l.weight * 2.5)}
+        nodeCanvasObject={(node: GraphCanvasNode, ctx, globalScale) => {
           const r = nodeRadius(node);
           const faded = highlighted != null && !highlighted.has(node.id);
           const isSelected = node.id === selectedId;
@@ -161,7 +161,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, {
           }
           ctx.globalAlpha = 1;
         }}
-        nodePointerAreaPaint={(node: FGNode, color: string, ctx: CanvasRenderingContext2D) => {
+        nodePointerAreaPaint={(node: GraphCanvasNode, color: string, ctx: CanvasRenderingContext2D) => {
           ctx.fillStyle = color;
           ctx.beginPath();
           ctx.arc(node.x!, node.y!, nodeRadius(node) + 2, 0, 2 * Math.PI);

@@ -1,15 +1,36 @@
 import { Hono } from "hono";
 import type { AppContext } from "../auth";
 import { requireAuth } from "../auth";
-import { all, first, type ItemRow, type SubscriptionRow, type UserItemRow } from "../db";
+import { all, first, type ItemRow, type SubscriptionRow } from "../db";
 import { toItemRead } from "../lib/serialize";
 import { detectPlatform } from "../lib/url";
 import { isoNow } from "../lib/crypto";
 import { recomputePriority } from "../lib/ingest";
 import { resolveFeedUrl } from "../lib/feed";
+import { readJson } from "../lib/request";
 
 export const subscriptionRoutes = new Hono<AppContext>();
 subscriptionRoutes.use("*", requireAuth);
+
+type SubscriptionAnnotationRow =
+  | {
+      kind: "comment";
+      id: number;
+      body: string;
+      quote: null;
+      note: null;
+      color: null;
+      created_at: string;
+    }
+  | {
+      kind: "highlight";
+      id: number;
+      body: string | null;
+      quote: string;
+      note: string | null;
+      color: string | null;
+      created_at: string;
+    };
 
 function serialize(s: SubscriptionRow) {
   return { ...s, enabled: !!s.enabled };
@@ -34,13 +55,13 @@ subscriptionRoutes.get("/", async (c) => {
 
 subscriptionRoutes.post("/", async (c) => {
   const userId = c.get("user").id;
-  const b = (await c.req.json().catch(() => ({}))) as {
+  const body = await readJson<{
     feed_url?: string;
     title?: string;
     interval_minutes?: number;
     window_days?: number;
-  };
-  const raw = (b.feed_url || "").trim();
+  }>(c);
+  const raw = (body.feed_url || "").trim();
   if (!raw) return c.json({ error: "feed_url required" }, 400);
   // Built-in: convert channel pages / @handles into their pollable RSS feed.
   const feed = await resolveFeedUrl(raw);
@@ -50,7 +71,7 @@ subscriptionRoutes.post("/", async (c) => {
   );
   if (existing) return c.json(serialize(existing));
 
-  const windowDays = b.window_days ?? Number(c.env.SUBSCRIPTION_WINDOW_DAYS || "90");
+  const windowDays = body.window_days ?? Number(c.env.SUBSCRIPTION_WINDOW_DAYS || "90");
   // New channels only pull in videos published within the window (last 3 months
   // by default), so subscribing doesn't backfill the entire archive.
   const minPublished = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
@@ -58,7 +79,7 @@ subscriptionRoutes.post("/", async (c) => {
     `INSERT INTO subscription (user_id, platform, feed_url, title, interval_minutes, window_days, min_published_at, enabled)
      VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
   )
-    .bind(userId, detectPlatform(feed), feed, b.title ?? null, b.interval_minutes ?? 60, windowDays, minPublished)
+    .bind(userId, detectPlatform(feed), feed, body.title ?? null, body.interval_minutes ?? 60, windowDays, minPublished)
     .run();
   const row = await first<SubscriptionRow>(
     c.env.DB.prepare("SELECT * FROM subscription WHERE id = ?").bind(res.meta.last_row_id),
@@ -117,13 +138,13 @@ subscriptionRoutes.get("/:id/items", async (c) => {
         LIMIT 200`,
     ).bind(userId, id),
   );
-  return c.json(rows.map((r) => toItemRead(r, r as unknown as UserItemRow)));
+  return c.json(rows.map((row) => toItemRead(row, row)));
 });
 
 subscriptionRoutes.post("/:id/comments", async (c) => {
   const userId = c.get("user").id;
   const id = Number(c.req.param("id"));
-  const body = (await c.req.json().catch(() => ({}))) as { body?: string };
+  const body = await readJson<{ body?: string }>(c);
   const text = (body.body || "").trim();
   if (!text) return c.json({ error: "empty comment" }, 400);
   const sub = await first<{ id: number }>(
@@ -140,7 +161,7 @@ subscriptionRoutes.post("/:id/comments", async (c) => {
 subscriptionRoutes.post("/:id/highlights", async (c) => {
   const userId = c.get("user").id;
   const id = Number(c.req.param("id"));
-  const body = (await c.req.json().catch(() => ({}))) as { quote?: string; note?: string; color?: string };
+  const body = await readJson<{ quote?: string; note?: string; color?: string }>(c);
   const quote = (body.quote || "").trim();
   if (!quote) return c.json({ error: "empty highlight" }, 400);
   const sub = await first<{ id: number }>(
@@ -161,12 +182,12 @@ subscriptionRoutes.get("/:id/annotations", async (c) => {
     c.env.DB.prepare("SELECT id FROM subscription WHERE id = ? AND user_id = ?").bind(id, userId),
   );
   if (!sub) return c.json({ error: "subscription not found" }, 404);
-  const comments = await all<Record<string, unknown>>(
+  const comments = await all<SubscriptionAnnotationRow>(
     c.env.DB.prepare(
       "SELECT 'comment' AS kind, id, body, NULL AS quote, NULL AS note, NULL AS color, created_at FROM subscription_comment WHERE subscription_id = ? AND user_id = ?",
     ).bind(id, userId),
   );
-  const highlights = await all<Record<string, unknown>>(
+  const highlights = await all<SubscriptionAnnotationRow>(
     c.env.DB.prepare(
       "SELECT 'highlight' AS kind, id, note AS body, quote, note, color, created_at FROM subscription_highlight WHERE subscription_id = ? AND user_id = ?",
     ).bind(id, userId),

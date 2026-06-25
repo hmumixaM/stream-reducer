@@ -9,6 +9,7 @@ import {
   resolveUser,
   clearSession,
 } from "../auth";
+import { readForm, readJson } from "../lib/request";
 import { OAUTH_RETURN_COOKIE } from "./oauth";
 
 export const authRoutes = new Hono<AppContext>();
@@ -26,7 +27,7 @@ function postLoginRedirect(c: Parameters<typeof setSessionCookie>[0]): string {
 
 // Request a magic link. Always returns ok (don't leak which emails exist).
 authRoutes.post("/request", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { email?: string };
+  const body = await readJson<{ email?: string }>(c);
   const email = (body.email || "").trim().toLowerCase();
   if (!isValidEmail(email)) return c.json({ error: "invalid email" }, 400);
   try {
@@ -72,9 +73,10 @@ authRoutes.post("/verify", async (c) => {
   const contentType = c.req.header("content-type") || "";
   let token = "";
   if (contentType.includes("application/json")) {
-    token = (((await c.req.json().catch(() => ({}))) as { token?: string }).token || "");
+    const body = await readJson<{ token?: string }>(c);
+    token = body.token || "";
   } else {
-    const body = (await c.req.parseBody().catch(() => ({}))) as Record<string, string | File>;
+    const body = await readForm(c);
     token = typeof body.token === "string" ? body.token : "";
   }
   const session = token ? await verifyMagicLink(c.env, token) : null;

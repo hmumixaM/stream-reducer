@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { getCookie, setCookie } from "hono/cookie";
+import { setCookie } from "hono/cookie";
 import type { AppContext } from "../auth";
 import { requireAuth, resolveUser } from "../auth";
 

@@ -89,10 +89,6 @@ export async function all<T>(stmt: D1PreparedStatement): Promise<T[]> {
   return res.results ?? [];
 }
 
-export function db(env: Env) {
-  return env.DB;
-}
-
 // Find-or-create a global item for a normalized URL. Returns the row and
 // whether it was freshly created (used to decide whether to enqueue).
 export async function upsertItem(

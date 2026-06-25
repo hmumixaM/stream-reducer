@@ -1,6 +1,5 @@
 import type { Env } from "../env";
 import { parseBilibiliUrl, fetchBilibiliEntries } from "./bilibili";
-import { fetchFeedEntries } from "../pipeline/container";
 
 // Minimal RSS / Atom parser for Workers (no DOM). Handles the common shapes:
 // RSS <item> (link/guid/pubDate/enclosure) and Atom <entry> (link href/id/published).
@@ -28,7 +27,7 @@ export function parseDuration(raw: string | number | null | undefined): number |
   return null;
 }
 
-export interface ParsedFeed {
+interface ParsedFeed {
   title: string | null;
   entries: FeedEntry[];
 }
@@ -169,9 +168,7 @@ async function applePageFeedUrl(pageUrl: string): Promise<string | null> {
       console.warn(`applePageFeedUrl ${pageUrl} no feedUrl found in page (${html.length} bytes)`);
       return null;
     }
-    const feed = m[1].replace(/\\\//g, "/");
-    console.log(`applePageFeedUrl ${pageUrl} -> ${feed}`);
-    return feed;
+    return m[1].replace(/\\\//g, "/");
   } catch (err) {
     console.warn(`applePageFeedUrl ${pageUrl} failed: ${String(err)}`);
     return null;
@@ -197,6 +194,7 @@ export async function fetchFeed(env: Env, feedUrl: string): Promise<ParsedFeed> 
   const ytChannel = feedUrl.match(YT_CHANNEL_FEED_RE);
   if (ytChannel) {
     const channelUrl = `https://www.youtube.com/channel/${ytChannel[1]}/videos`;
+    const { fetchFeedEntries } = await import("../pipeline/container");
     const raw = await fetchFeedEntries(env, channelUrl);
     const entries: FeedEntry[] = raw
       .filter((e) => e.external_id)

@@ -54,7 +54,12 @@ export class PipelineContainer extends Container<Env> {
   };
 }
 
-export interface PipelineJob {
+type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
+export interface JsonObject {
+  [key: string]: JsonValue;
+}
+
+interface PipelineJob {
   item_id: number;
   source_url: string;
   platform: string;
@@ -67,7 +72,7 @@ export interface PipelineJob {
   // uses the current cookie instead of the static deploy-time secret.
   bilibili_cookie?: string;
   transcript?: { language: string | null; source: string; segments: unknown[]; text: string } | null;
-  summary?: Record<string, unknown> | null;
+  summary?: JsonObject | null;
   // When set, the summary is regenerated in this language (on-demand translation).
   target_lang?: string;
   // Caller-supplied stored metadata used as summary context (title, show notes,
@@ -85,7 +90,7 @@ export interface PipelineJob {
   };
 }
 
-export interface ChunkOut {
+interface ChunkOut {
   source: string;
   field: string;
   chunk_index: number;
@@ -112,7 +117,7 @@ export interface PipelineResult {
     channel_id?: string | null;
   };
   transcript: { language: string | null; source: string; segments: unknown[]; text: string } | null;
-  summary: { model: string; prompt_version: string; markdown: string; structured: Record<string, unknown> } | null;
+  summary: { model: string; prompt_version: string; markdown: string; structured: JsonObject } | null;
   // Present only for mode: "infographic". The base64 image plus usage/cost.
   infographic?: { image_b64: string; mime_type: string; model: string; total_tokens: number; cost_usd: number } | null;
   chunks: ChunkOut[];
@@ -197,10 +202,37 @@ export async function runPipelineStreaming(
   onProgress: (evt: ProgressEvent) => void | Promise<void>,
   onPartial?: (evt: ProgressEvent) => void | Promise<void>,
 ): Promise<PipelineResult> {
+  const resolvedJob = await withBilibiliCookie(env, job);
+  const reader = await openPipelineStream(env, resolvedJob);
+  const state: PipelineStreamState = { result: null, errorMsg: null };
+  const idleMs = Number(env.PIPELINE_IDLE_MS ?? "240000");
+
+  await readNdjsonLines(
+    reader,
+    idleMs,
+    createStreamEventHandler(resolvedJob, state, onProgress, onPartial),
+  );
+
+  if (state.errorMsg) throw new Error(state.errorMsg);
+  if (!state.result) throw new Error("pipeline stream ended without a result");
+  return state.result;
+}
+
+interface PipelineStreamState {
+  result: PipelineResult | null;
+  errorMsg: string | null;
+}
+
+async function withBilibiliCookie(env: Env, job: PipelineJob): Promise<PipelineJob> {
+  if (job.platform !== "bilibili" || job.bilibili_cookie) return job;
+  return { ...job, bilibili_cookie: await getBilibiliCookie(env) };
+}
+
+async function openPipelineStream(
+  env: Env,
+  job: PipelineJob,
+): Promise<ReadableStreamDefaultReader<string>> {
   const key = containerKey(env, `job-${job.item_id}`);
-  if (job.platform === "bilibili" && !job.bilibili_cookie) {
-    job = { ...job, bilibili_cookie: await getBilibiliCookie(env) };
-  }
   const instance = getContainer(env.PIPELINE_CONTAINER, key);
   const res = await instance.fetch(
     new Request("http://pipeline/process_stream", {
@@ -214,43 +246,16 @@ export async function runPipelineStreaming(
     throw new Error(`pipeline container ${res.status}: ${text.slice(0, 500)}`);
   }
 
-  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-  // Accumulates the bytes of the line currently being read. Kept as a separate
-  // partial (instead of one growing buffer that we re-scan from index 0 on every
-  // read) because the FINAL result line is one huge JSON blob (base64 audio +
-  // transcript + chunks). Re-scanning a growing multi-MB buffer with indexOf on
-  // every ~16KB chunk is O(n²) and torched the Worker CPU (exceededCpu kills),
-  // which stranded items mid-run. Here indexOf only ever scans the small
-  // incoming chunk, and the long line is flattened + parsed exactly once.
-  let pending = "";
-  let result: PipelineResult | null = null;
-  let errorMsg: string | null = null;
-  // Stream stats logged on completion. maxLineLen would have immediately
-  // surfaced the oversized result line behind the O(n²) CPU blowup.
-  const streamStart = Date.now();
-  let bytesStreamed = 0;
-  let lineCount = 0;
-  let maxLineLen = 0;
+  return res.body.pipeThrough(new TextDecoderStream()).getReader();
+}
 
-  // Worker-side idle watchdog: the container emits progress events through every
-  // stage (download %, transcribe chunk x/y, summarize section-by-section), so a
-  // gap with NO output means a genuine stall (e.g. an LLM summarize call the
-  // proxy never answers). Abort + fail cleanly instead of letting the item hang
-  // in-progress until the Worker invocation is evicted. Reset on every chunk, so
-  // legitimately-slow long content (which keeps emitting) is never killed.
-  const idleMs = Number(env.PIPELINE_IDLE_MS ?? "240000");
-  // One reusable idle timer per loop iteration, cleared after each race so the
-  // loser's 4-min timeout doesn't linger. The previous code created a fresh
-  // setTimeout on every read and never cleared it, leaking one pending timer
-  // (each holding a closure) per streamed line — over a long run that burned
-  // real CPU and contributed to the Worker's exceededCpu kills.
-  let idleTimer: ReturnType<typeof setTimeout> | undefined;
-  const idlePromise = (): Promise<"idle"> =>
-    new Promise<"idle">((resolve) => {
-      idleTimer = setTimeout(() => resolve("idle"), idleMs);
-    });
-
-  const handle = async (line: string): Promise<void> => {
+function createStreamEventHandler(
+  job: PipelineJob,
+  state: PipelineStreamState,
+  onProgress: (evt: ProgressEvent) => void | Promise<void>,
+  onPartial?: (evt: ProgressEvent) => void | Promise<void>,
+): (line: string) => Promise<void> {
+  return async (line: string): Promise<void> => {
     const trimmed = line.trim();
     if (!trimmed) return;
     let evt: ProgressEvent;
@@ -259,9 +264,9 @@ export async function runPipelineStreaming(
     } catch {
       return;
     }
-    if (evt.event === "result") result = evt.result ?? null;
+    if (evt.event === "result") state.result = evt.result ?? null;
     else if (evt.event === "error") {
-      errorMsg = evt.message ?? "pipeline error";
+      state.errorMsg = evt.message ?? "pipeline error";
       await onProgress(evt);
     } else if (evt.event === "partial") {
       if (onPartial) await onPartial(evt);
@@ -271,49 +276,59 @@ export async function runPipelineStreaming(
       // queryable. Warnings/errors go to console.error so they're filterable.
       const msg = `[container item=${job.item_id}] ${evt.message ?? ""}`;
       if (evt.level === "ERROR" || evt.level === "CRITICAL" || evt.level === "WARNING") console.error(msg);
-      else console.log(msg);
     } else await onProgress(evt);
   };
-
-  for (;;) {
-    const step = await Promise.race([reader.read(), idlePromise()]);
-    if (idleTimer !== undefined) clearTimeout(idleTimer);
-    if (step === "idle") {
-      try { await reader.cancel(); } catch { /* ignore */ }
-      throw new Error(
-        `pipeline stalled — no progress for ${Math.round(idleMs / 60000)}min (likely an LLM summarize stall)`,
-      );
-    }
-    const { value, done } = step;
-    if (done) break;
-    bytesStreamed += value.length;
-    // Scan only the freshly-read chunk for newlines; splice completed lines out
-    // of it and carry any trailing remainder in `pending`. This stays O(total
-    // bytes) even when a single line spans thousands of reads (the big result).
-    let chunk = value;
-    let nl: number;
-    while ((nl = chunk.indexOf("\n")) >= 0) {
-      const line = pending + chunk.slice(0, nl);
-      pending = "";
-      chunk = chunk.slice(nl + 1);
-      lineCount++;
-      if (line.length > maxLineLen) maxLineLen = line.length;
-      await handle(line);
-    }
-    pending += chunk;
-  }
-  if (pending.length > maxLineLen) maxLineLen = pending.length;
-  await handle(pending); // terminal line without a trailing newline
-
-  console.log(
-    `pipeline stream complete item=${job.item_id} bytes=${bytesStreamed} lines=${lineCount} maxLineLen=${maxLineLen} ms=${Date.now() - streamStart} result=${result ? "yes" : "no"}`,
-  );
-  if (errorMsg) throw new Error(errorMsg);
-  if (!result) throw new Error("pipeline stream ended without a result");
-  return result;
 }
 
-export interface FeedEntryOut {
+async function readNdjsonLines(
+  reader: ReadableStreamDefaultReader<string>,
+  idleMs: number,
+  handleLine: (line: string) => Promise<void>,
+): Promise<void> {
+  let pending = "";
+  for (;;) {
+    const { value, done } = await readWithIdleTimeout(reader, idleMs);
+    if (done) break;
+    const split = splitNdjsonChunk(pending, value);
+    pending = split.pending;
+    for (const line of split.lines) await handleLine(line);
+  }
+  await handleLine(pending);
+}
+
+async function readWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<string>,
+  idleMs: number,
+): Promise<ReadableStreamReadResult<string>> {
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const idle = new Promise<"idle">((resolve) => {
+    idleTimer = setTimeout(() => resolve("idle"), idleMs);
+  });
+  const step = await Promise.race([reader.read(), idle]);
+  if (idleTimer !== undefined) clearTimeout(idleTimer);
+  if (step !== "idle") return step;
+
+  try {
+    await reader.cancel();
+  } catch {
+    // ignore cancellation failures; the stall error below is the useful signal.
+  }
+  throw new Error(
+    `pipeline stalled — no progress for ${Math.round(idleMs / 60000)}min (likely an LLM summarize stall)`,
+  );
+}
+
+function splitNdjsonChunk(previousPending: string, chunk: string): { lines: string[]; pending: string } {
+  const parts = chunk.split("\n");
+  if (parts.length === 1) return { lines: [], pending: previousPending + chunk };
+
+  return {
+    lines: [previousPending + parts[0], ...parts.slice(1, -1)],
+    pending: parts[parts.length - 1],
+  };
+}
+
+interface FeedEntryOut {
   external_id: string | null;
   title: string | null;
   url: string;

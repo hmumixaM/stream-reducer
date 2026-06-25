@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowUpRight, Network } from "lucide-react";
 import type { GraphData, GraphNode } from "@/lib/api";
 import { PlatformBadge } from "@/components/badges";
+import { connectedNeighbors } from "@/lib/graphModel";
 
 const FIELD_LABELS: Record<string, string> = {
   tldr: "Overview",
@@ -31,24 +32,10 @@ export function NodePanel({
   graph: GraphData;
   onSelectNode: (id: number) => void;
 }) {
-  const nodeById = useMemo(() => {
-    const m = new Map<number, GraphNode>();
-    for (const n of graph.nodes) m.set(n.id, n);
-    return m;
-  }, [graph.nodes]);
-
   const neighbors = useMemo(() => {
     if (!node) return [];
-    const weights = new Map<number, number>();
-    for (const e of graph.edges) {
-      if (e.source === node.id) weights.set(e.target, e.weight);
-      else if (e.target === node.id) weights.set(e.source, e.weight);
-    }
-    return [...weights.entries()]
-      .map(([id, w]) => ({ node: nodeById.get(id), weight: w }))
-      .filter((x): x is { node: GraphNode; weight: number } => !!x.node)
-      .sort((a, b) => b.weight - a.weight);
-  }, [node, graph.edges, nodeById]);
+    return connectedNeighbors(graph, node);
+  }, [node, graph]);
 
   if (!node) {
     return (

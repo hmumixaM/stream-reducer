@@ -3,7 +3,7 @@ import { first, upsertItem, type ItemRow } from "../db";
 import { detectPlatform, normalizeUrl } from "./url";
 import { priorityScore } from "./priority";
 
-export interface ItemMetadata {
+interface ItemMetadata {
   title?: string | null;
   author?: string | null;
   description?: string | null;
@@ -114,7 +114,7 @@ export async function persistItemMetadata(
 
 // Recompute an item's demand counters + priority score from current state:
 //   request_count    = # of users who have it in their library
-//   subscriber_demand = # of subscriptions (across all users) to any feed that
+//   subscriber_demand = # of subscriptions (across all users) to each feed that
 //                       produced this item for someone
 export async function recomputePriority(env: Env, itemId: number): Promise<void> {
   const reqRow = await first<{ n: number }>(
@@ -126,7 +126,7 @@ export async function recomputePriority(env: Env, itemId: number): Promise<void>
   );
   const interest_count = interestRow?.n ?? 0;
 
-  // Subscribed people: distinct users subscribed to any feed/channel this item
+  // Subscribed people: distinct users subscribed to a feed/channel this item
   // belongs to (via the global item_feed association, independent of who has it
   // saved). This credits popular channels even for manually-added videos.
   const subRow = await first<{ n: number }>(
@@ -154,7 +154,7 @@ export async function recomputePriority(env: Env, itemId: number): Promise<void>
     .run();
 }
 
-export interface AddResult {
+interface AddResult {
   item: ItemRow;
   created: boolean;
   newlySaved: boolean;

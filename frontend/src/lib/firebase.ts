@@ -18,7 +18,7 @@ const firebaseConfig = {
   measurementId: "G-1V0P7TPJ9Z",
 };
 
-export const firebaseApp = initializeApp(firebaseConfig);
+const firebaseApp = initializeApp(firebaseConfig);
 
 // Performance Monitoring: automatic page-load + HTTP/S request traces.
 try {
@@ -29,10 +29,12 @@ try {
 
 // Google Analytics: only where the SDK is supported (needs a browser with
 // cookies/IndexedDB; skipped in unsupported contexts).
-void analyticsSupported()
-  .then((ok) => {
-    if (ok) getAnalytics(firebaseApp);
-  })
-  .catch(() => {
+async function initializeAnalytics(): Promise<void> {
+  try {
+    if (await analyticsSupported()) getAnalytics(firebaseApp);
+  } catch {
     // ignore — monitoring is non-critical
-  });
+  }
+}
+
+void initializeAnalytics();

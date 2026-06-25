@@ -4,9 +4,9 @@
 // BILIBILI_COOKIE secret is only the initial seed / fallback.
 import type { Env } from "../env";
 
-export const BILI_KV_KEY = "bilibili";
+const BILI_KV_KEY = "bilibili";
 
-export interface BiliAuth {
+interface BiliAuth {
   // Full browser cookie header: "name=value; name2=value2; …".
   cookie: string;
   // Persistent refresh token (localStorage `ac_time_value`). Empty when the
