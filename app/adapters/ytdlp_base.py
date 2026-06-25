@@ -297,7 +297,13 @@ class YtDlpAdapter(Adapter):
         """
         extra: dict = {"extract_flat": "in_playlist", "playlistend": limit}
         if self.name == "youtube":
-            extra["extractor_args"] = {"youtubetab": {"approximate_date": ["true"]}}
+            # approximate_date: carry an upload timestamp on flat entries.
+            # skip=authcheck: the container's YOUTUBE_COOKIE is for one account/
+            # channel, so yt-dlp's auth check otherwise 500s on a *different*
+            # public channel's tab ("Playlists that require authentication …").
+            extra["extractor_args"] = {
+                "youtubetab": {"approximate_date": ["true"], "skip": ["authcheck"]}
+            }
         info = self._extract_info(url, extra=extra)
         out: list[dict] = []
         for entry in info.get("entries") or []:
@@ -322,7 +328,12 @@ class YtDlpAdapter(Adapter):
         Returns {"title", "external_id", "entries": [{source_url, title,
         external_id}, ...]} or None when the URL isn't a non-empty playlist.
         """
-        info = self._extract_info(url, extra={"extract_flat": "in_playlist"})
+        extra: dict = {"extract_flat": "in_playlist"}
+        if self.name == "youtube":
+            # Skip yt-dlp's auth check so a single-account YOUTUBE_COOKIE doesn't
+            # 500 when expanding a different public channel's playlist/tab.
+            extra["extractor_args"] = {"youtubetab": {"skip": ["authcheck"]}}
+        info = self._extract_info(url, extra=extra)
         if info.get("_type") != "playlist":
             return None
         entries: list[dict] = []
