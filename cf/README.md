@@ -89,14 +89,53 @@ npx wrangler secret put OPENROUTER_API_KEY   # OpenRouter Whisper key
 npx wrangler d1 migrations apply stream_reduce --remote
 ```
 
-## Build the SPA + deploy
+## Deploy with GitHub Actions
+
+Production deploys should go through the repository workflow:
+`.github/workflows/deploy-cloudflare.yml`.
+
+The workflow runs automatically on pushes to `main` that touch `cf/**`,
+`frontend/**`, `app/**`, or the workflow file itself. It can also be started
+manually from the GitHub Actions tab with `workflow_dispatch`.
+
+The deploy job performs the full Cloudflare release sequence:
+
+1. Build the React SPA in `frontend/` so the Worker can upload
+   `frontend/dist` as static assets.
+2. Install Worker dependencies in `cf/worker/`.
+3. Apply remote D1 migrations with
+   `wrangler d1 migrations apply stream_reduce --remote`.
+4. Deploy the Worker, static assets, queues, cron triggers, Durable Object, and
+   pipeline Container with `wrangler deploy`.
+
+Required GitHub repository secrets:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+- `GEMINI_API_KEY`
+- `OPENROUTER_API_KEY`
+- `GEMINI_IMAGE_API_KEY`
+- `ADMIN_TOKEN`
+
+This is preferred over deploying from a laptop because the workflow provides a
+consistent Node/Wrangler/Docker environment and avoids depending on local Docker
+Desktop state.
+
+## Manual deploy fallback
 
 ```bash
-# 1. Build the frontend (the Worker serves ../../frontend/dist as static assets)
-cd ../../frontend && npm install && npm run build
+# From the repository root:
 
-# 2. Deploy the Worker + Container (Docker must be running to build the image)
-cd ../cf/worker && npx wrangler deploy
+# 1. Build the frontend; the Worker serves ../../frontend/dist as static assets.
+cd frontend && npm install && npm run build
+
+# 2. Apply pending remote D1 migrations.
+cd ../cf/worker
+npx wrangler d1 migrations apply stream_reduce --remote
+
+# 3. Deploy the Worker + Container.
+# Docker must be running locally because Wrangler builds cf/pipeline/Dockerfile.
+npx wrangler deploy
 ```
 
 `wrangler deploy` builds `cf/pipeline/Dockerfile` from the repo root, pushes it
