@@ -2,6 +2,20 @@ import type { Env } from "../env";
 import { first, upsertItem, type ItemRow } from "../db";
 import { detectPlatform, normalizeUrl } from "./url";
 import { priorityScore } from "./priority";
+import { parseBilibiliUrl, fetchBilibiliEntries } from "./bilibili";
+
+// Expand a playlist/collection URL into its member video URLs so a whole list
+// can be added directly (each episode becomes its own library item). Currently
+// supports Bilibili 合集/系列 lists; returns null when the URL is not an
+// expandable list, so callers treat it as a single item.
+export async function expandPlaylistUrls(env: Env, rawUrl: string): Promise<string[] | null> {
+  const bili = parseBilibiliUrl(rawUrl);
+  if (bili && bili.kind !== "space") {
+    const entries = await fetchBilibiliEntries(env, bili);
+    return entries.map((entry) => entry.link).filter((link): link is string => link !== null);
+  }
+  return null;
+}
 
 interface ItemMetadata {
   title?: string | null;

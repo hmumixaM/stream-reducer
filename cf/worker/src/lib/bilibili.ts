@@ -14,6 +14,11 @@ export interface BiliSource {
   kind: "space" | "season" | "series";
   mid: string;
   sid?: string; // season_id / series_id
+  // 合集 (season) and 系列 (series) share the modern /lists/<sid> URL shape but
+  // live in SEPARATE sid namespaces, so the same number resolves to two
+  // unrelated lists. When the URL didn't disambiguate via ?type=, this carries
+  // the other list kind to try if the primary one yields no videos.
+  fallbackKind?: "season" | "series";
 }
 
 // Parse a bilibili space / playlist URL into a feed source descriptor.
@@ -29,13 +34,19 @@ export function parseBilibiliUrl(input: string): BiliSource | null {
   const mid = url.pathname.split("/").filter(Boolean)[0];
   if (!mid || !/^\d+$/.test(mid)) return null;
 
-  // Modern playlist URL: /<mid>/lists/<sid>?type=season|series
-  const lists = url.pathname.match(/\/lists\/(\d+)/);
-  if (lists) {
-    const type = url.searchParams.get("type");
-    return { kind: type === "series" ? "series" : "season", mid, sid: lists[1] };
+  // Modern unified UI: /<mid>/lists/<sid> or /<mid>/lists?sid=<sid>, optionally
+  // disambiguated by ?type=season|series. A bare /lists/<sid> (no type) is
+  // ambiguous, so default to season and keep series as a fallback.
+  const listsMatch = url.pathname.match(/^\/\d+\/lists(?:\/(\d+))?/);
+  if (listsMatch) {
+    const sid = listsMatch[1] || url.searchParams.get("sid") || "";
+    if (sid) {
+      const type = (url.searchParams.get("type") || "").toLowerCase();
+      if (type === "series") return { kind: "series", mid, sid, fallbackKind: "season" };
+      return { kind: "season", mid, sid, fallbackKind: "series" };
+    }
   }
-  // Legacy playlist URLs.
+  // Legacy playlist URLs carry an explicit kind, so no fallback is needed.
   if (url.pathname.includes("/channel/collectiondetail")) {
     const sid = url.searchParams.get("sid");
     if (sid) return { kind: "season", mid, sid };
@@ -46,6 +57,15 @@ export function parseBilibiliUrl(input: string): BiliSource | null {
   }
   // Bare space (optionally /video, /dynamic, …) -> the UP主's uploads.
   return { kind: "space", mid };
+}
+
+// True when the URL points at a Bilibili 合集/系列 (an expandable list), as
+// opposed to a single video or a bare UP主 space (channel). Used by the add
+// validation + expansion: lists are addable directly (they expand into their
+// videos), but a bare channel belongs in a subscription.
+export function isBilibiliListUrl(input: string): boolean {
+  const src = parseBilibiliUrl(input);
+  return src !== null && src.kind !== "space";
 }
 
 const UA =
@@ -107,23 +127,34 @@ function videoEntry(bvid: string, title: string, tsSeconds: number | null, durat
   };
 }
 
+// Fetch the archives of a single 合集 (season) or 系列 (series) list.
+async function fetchListEntries(
+  kind: "season" | "series",
+  mid: string,
+  sid: string,
+  cookie: string | undefined,
+): Promise<FeedEntry[]> {
+  const url = kind === "season"
+    ? `https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=${mid}&season_id=${sid}&sort_reverse=false&page_num=1&page_size=30`
+    : `https://api.bilibili.com/x/series/archives?mid=${mid}&series_id=${sid}&only_normal=true&sort=desc&pn=1&ps=30`;
+  const response = await biliGet<BiliArchiveListResponse>(url, `https://space.bilibili.com/${mid}`, cookie);
+  return (response.data?.archives ?? []).map((archive) =>
+    videoEntry(String(archive.bvid), String(archive.title ?? ""), Number(archive.pubdate) || null, archive.duration),
+  );
+}
+
 // Fetch recent entries for a bilibili source. Returns newest-first.
 export async function fetchBilibiliEntries(env: Env, src: BiliSource): Promise<FeedEntry[]> {
   const cookie = await getBilibiliCookie(env);
-  if (src.kind === "season") {
-    const url = `https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=${src.mid}&season_id=${src.sid}&sort_reverse=false&page_num=1&page_size=30`;
-    const response = await biliGet<BiliArchiveListResponse>(url, `https://space.bilibili.com/${src.mid}`, cookie);
-    return (response.data?.archives ?? []).map((archive) =>
-      videoEntry(String(archive.bvid), String(archive.title ?? ""), Number(archive.pubdate) || null, archive.duration),
-    );
-  }
 
-  if (src.kind === "series") {
-    const url = `https://api.bilibili.com/x/series/archives?mid=${src.mid}&series_id=${src.sid}&only_normal=true&sort=desc&pn=1&ps=30`;
-    const response = await biliGet<BiliArchiveListResponse>(url, `https://space.bilibili.com/${src.mid}`, cookie);
-    return (response.data?.archives ?? []).map((archive) =>
-      videoEntry(String(archive.bvid), String(archive.title ?? ""), Number(archive.pubdate) || null, archive.duration),
-    );
+  if (src.kind === "season" || src.kind === "series") {
+    if (!src.sid) return [];
+    // A bare /lists/<sid> URL can't tell a 合集 from a 系列, so try the primary
+    // kind and fall back to the other when it yields nothing (e.g. the sid is
+    // actually a series, not the assumed season).
+    const primary = await fetchListEntries(src.kind, src.mid, src.sid, cookie);
+    if (primary.length || !src.fallbackKind) return primary;
+    return fetchListEntries(src.fallbackKind, src.mid, src.sid, cookie);
   }
 
   // space: the UP主's dynamic feed, filtered to video posts.

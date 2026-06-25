@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Env } from "../env";
 import { all, first, type ItemRow } from "../db";
-import { addUrlToLibrary } from "../lib/ingest";
+import { addUrlToLibrary, expandPlaylistUrls } from "../lib/ingest";
 import { splitUrls } from "../lib/url";
 import { embedTexts } from "../lib/embed";
 
@@ -163,10 +163,15 @@ function buildServer(env: Env, userId: number): McpServer {
       const out: ReturnType<typeof brief>[] = [];
       const seen = new Set<number>();
       for (const url of urls.flatMap((entry) => splitUrls(entry))) {
-        const res = await addUrlToLibrary(env, userId, url, { folderId: null });
-        if (res && !seen.has(res.item.id)) {
-          seen.add(res.item.id);
-          out.push(brief(res.item));
+        // A Bilibili 合集/系列 list expands into its member videos; everything
+        // else is added as-is.
+        const expanded = await expandPlaylistUrls(env, url);
+        for (const target of expanded ?? [url]) {
+          const res = await addUrlToLibrary(env, userId, target, { folderId: null });
+          if (res && !seen.has(res.item.id)) {
+            seen.add(res.item.id);
+            out.push(brief(res.item));
+          }
         }
       }
       return text(out);

@@ -2,6 +2,8 @@
 // Keeping these identical to the Python implementation guarantees the same
 // dedup key for a given source URL across the Worker and the pipeline container.
 
+import { isBilibiliListUrl } from "./bilibili";
+
 export type Platform =
   | "youtube"
   | "bilibili"
@@ -94,9 +96,12 @@ export function nonItemUrlError(rawUrl: string): string | null {
   const platform = detectPlatform(rawUrl);
 
   if (platform === "bilibili") {
-    // space.bilibili.com/<mid> is an UP主 (channel), not a video.
     if (host.endsWith("space.bilibili.com")) {
-      return "This is a Bilibili channel page, not a video — add it as a subscription instead.";
+      // 合集/系列 lists are expandable playlists: the add path expands them into
+      // their videos, so allow them here. A bare UP主 space (channel) is not a
+      // single item and belongs in a subscription.
+      if (isBilibiliListUrl(rawUrl)) return null;
+      return "This is a Bilibili channel page, not a video — add it as a subscription, or open a specific 合集/系列 list.";
     }
     if (BV_RE.test(path) || /\/av\d+/i.test(path) || host === "b23.tv") return null;
     return "This Bilibili link isn't a single video — paste a /video/BV… URL, or add the channel as a subscription.";

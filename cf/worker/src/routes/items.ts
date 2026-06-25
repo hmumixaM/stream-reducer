@@ -3,7 +3,7 @@ import type { AppContext } from "../auth";
 import { requireAuth, resolveUser } from "../auth";
 import { all, first, type ItemRow, type UserItemRow } from "../db";
 import { toItemRead } from "../lib/serialize";
-import { addUrlToLibrary, recomputePriority } from "../lib/ingest";
+import { addUrlToLibrary, expandPlaylistUrls, recomputePriority } from "../lib/ingest";
 import { splitUrls, nonItemUrlError } from "../lib/url";
 import { readJson } from "../lib/request";
 
@@ -226,12 +226,27 @@ itemsRoutes.post("/library", requireAuth, async (c) => {
   }>(c);
   const raw: string[] = [...(body.urls ?? [])];
   if (body.url) raw.push(body.url);
-  const urls = raw.flatMap((entry) => splitUrls(entry));
-  if (!urls.length) return c.json({ error: "no urls provided" }, 400);
+  const inputUrls = raw.flatMap((entry) => splitUrls(entry));
+  if (!inputUrls.length) return c.json({ error: "no urls provided" }, 400);
 
-  // Reject channel/playlist/feed links: only single videos/episodes can be added
-  // to the library (channels belong in subscriptions). All-or-nothing so the
-  // user gets a clear error instead of a silently-skipped link.
+  // Expand Bilibili 合集/系列 lists into their member videos so a whole list can
+  // be added directly (each episode becomes its own library item). Non-list URLs
+  // pass through untouched.
+  const urls: string[] = [];
+  for (const inputUrl of inputUrls) {
+    const expanded = await expandPlaylistUrls(c.env, inputUrl);
+    if (expanded === null) {
+      urls.push(inputUrl);
+    } else if (expanded.length === 0) {
+      return c.json({ error: `Couldn't read any videos from this Bilibili list: ${inputUrl}` }, 400);
+    } else {
+      urls.push(...expanded);
+    }
+  }
+
+  // Reject channel/feed links: only single videos/episodes (or expanded list
+  // members) can be added to the library (bare channels belong in subscriptions).
+  // All-or-nothing so the user gets a clear error instead of a silently-skipped link.
   const invalid = urls
     .map((url) => ({ url, error: nonItemUrlError(url) }))
     .filter((x): x is { url: string; error: string } => x.error !== null);
