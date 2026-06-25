@@ -71,19 +71,6 @@ export function isBilibiliListUrl(input: string): boolean {
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-interface BiliArchive {
-  bvid?: string | number;
-  title?: string | null;
-  pubdate?: string | number | null;
-  duration?: string | number | null;
-}
-
-interface BiliArchiveListResponse {
-  data?: {
-    archives?: BiliArchive[];
-  };
-}
-
 interface BiliDynamicArchive {
   bvid?: string | number;
   title?: string | null;
@@ -113,7 +100,16 @@ async function biliGet<T>(url: string, referer: string, cookie: string | undefin
   const headers: Record<string, string> = { "user-agent": UA, referer };
   if (cookie) headers["cookie"] = cookie;
   const res = await fetch(url, { headers });
-  return (await res.json()) as T;
+  // Bilibili risk-controls the Worker's Cloudflare egress IP by serving an HTML
+  // challenge page instead of JSON; surface a clear reason rather than letting
+  // JSON.parse throw a cryptic "Unexpected token '<'".
+  const body = await res.text();
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    const hint = body.trimStart().startsWith("<") ? " — likely IP risk control" : "";
+    throw new Error(`Bilibili returned a non-JSON response (HTTP ${res.status})${hint}`);
+  }
 }
 
 function videoEntry(bvid: string, title: string, tsSeconds: number | null, duration?: string | number | null): FeedEntry {
@@ -127,36 +123,50 @@ function videoEntry(bvid: string, title: string, tsSeconds: number | null, durat
   };
 }
 
-// Fetch the archives of a single 合集 (season) or 系列 (series) list.
-async function fetchListEntries(
-  kind: "season" | "series",
-  mid: string,
-  sid: string,
-  cookie: string | undefined,
-): Promise<FeedEntry[]> {
-  const url = kind === "season"
-    ? `https://api.bilibili.com/x/polymer/web-space/seasons_archives_list?mid=${mid}&season_id=${sid}&sort_reverse=false&page_num=1&page_size=30`
-    : `https://api.bilibili.com/x/series/archives?mid=${mid}&series_id=${sid}&only_normal=true&sort=desc&pn=1&ps=30`;
-  const response = await biliGet<BiliArchiveListResponse>(url, `https://space.bilibili.com/${mid}`, cookie);
-  return (response.data?.archives ?? []).map((archive) =>
-    videoEntry(String(archive.bvid), String(archive.title ?? ""), Number(archive.pubdate) || null, archive.duration),
-  );
+// Enumerate a 合集 (season) or 系列 (series) list via the container's yt-dlp,
+// which egresses through WARP with the login cookie. The Worker's own calls to
+// Bilibili's list APIs get risk-controlled (HTML challenge) from Cloudflare IPs,
+// so this is the reliable path (it's the same one that downloads the videos).
+// A bare /lists/<sid> URL can't tell a 合集 from a 系列 — they share the sid
+// shape but live in separate namespaces — so try the URL's kind, then the other.
+async function fetchBilibiliListEntries(env: Env, src: BiliSource): Promise<FeedEntry[]> {
+  if (!src.sid) return [];
+  const { fetchFeedEntries } = await import("../pipeline/container");
+  const kinds: ("season" | "series")[] = [];
+  if (src.kind === "season" || src.kind === "series") kinds.push(src.kind);
+  if (src.fallbackKind) kinds.push(src.fallbackKind);
+
+  for (const kind of kinds) {
+    const detail = kind === "series" ? "seriesdetail" : "collectiondetail";
+    const listUrl = `https://space.bilibili.com/${src.mid}/channel/${detail}?sid=${src.sid}`;
+    let raw: Awaited<ReturnType<typeof fetchFeedEntries>>;
+    try {
+      raw = await fetchFeedEntries(env, listUrl);
+    } catch {
+      continue; // wrong list kind / transient — try the other
+    }
+    const entries = raw
+      .filter((entry) => entry.external_id)
+      .map((entry): FeedEntry => ({
+        title: entry.title,
+        link: `https://www.bilibili.com/video/${entry.external_id}`,
+        guid: entry.external_id,
+        published: entry.published,
+        audio: null,
+        duration_s: entry.duration_s,
+      }));
+    if (entries.length) return entries;
+  }
+  return [];
 }
 
 // Fetch recent entries for a bilibili source. Returns newest-first.
 export async function fetchBilibiliEntries(env: Env, src: BiliSource): Promise<FeedEntry[]> {
-  const cookie = await getBilibiliCookie(env);
-
   if (src.kind === "season" || src.kind === "series") {
-    if (!src.sid) return [];
-    // A bare /lists/<sid> URL can't tell a 合集 from a 系列, so try the primary
-    // kind and fall back to the other when it yields nothing (e.g. the sid is
-    // actually a series, not the assumed season).
-    const primary = await fetchListEntries(src.kind, src.mid, src.sid, cookie);
-    if (primary.length || !src.fallbackKind) return primary;
-    return fetchListEntries(src.fallbackKind, src.mid, src.sid, cookie);
+    return fetchBilibiliListEntries(env, src);
   }
 
+  const cookie = await getBilibiliCookie(env);
   // space: the UP主's dynamic feed, filtered to video posts.
   const url = `https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?offset=&host_mid=${src.mid}&timezone_offset=-480&features=itemOpusStyle`;
   const response = await biliGet<BiliDynamicResponse>(url, `https://space.bilibili.com/${src.mid}/dynamic`, cookie);
