@@ -234,11 +234,17 @@ itemsRoutes.post("/library", requireAuth, async (c) => {
   // pass through untouched.
   const urls: string[] = [];
   for (const inputUrl of inputUrls) {
-    const expanded = await expandPlaylistUrls(c.env, inputUrl);
+    let expanded: string[] | null;
+    try {
+      expanded = await expandPlaylistUrls(c.env, inputUrl);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return c.json({ error: `Couldn't read this Bilibili list (${inputUrl}): ${reason}` }, 502);
+    }
     if (expanded === null) {
       urls.push(inputUrl);
     } else if (expanded.length === 0) {
-      return c.json({ error: `Couldn't read any videos from this Bilibili list: ${inputUrl}` }, 400);
+      return c.json({ error: `This Bilibili list has no videos: ${inputUrl}` }, 400);
     } else {
       urls.push(...expanded);
     }

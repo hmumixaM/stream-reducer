@@ -136,14 +136,16 @@ async function fetchBilibiliListEntries(env: Env, src: BiliSource): Promise<Feed
   if (src.kind === "season" || src.kind === "series") kinds.push(src.kind);
   if (src.fallbackKind) kinds.push(src.fallbackKind);
 
+  let lastError: unknown = null;
   for (const kind of kinds) {
     const detail = kind === "series" ? "seriesdetail" : "collectiondetail";
     const listUrl = `https://space.bilibili.com/${src.mid}/channel/${detail}?sid=${src.sid}`;
     let raw: Awaited<ReturnType<typeof fetchFeedEntries>>;
     try {
       raw = await fetchFeedEntries(env, listUrl);
-    } catch {
-      continue; // wrong list kind / transient — try the other
+    } catch (err) {
+      lastError = err; // wrong list kind / transient — try the other
+      continue;
     }
     const entries = raw
       .filter((entry) => entry.external_id)
@@ -156,6 +158,11 @@ async function fetchBilibiliListEntries(env: Env, src: BiliSource): Promise<Feed
         duration_s: entry.duration_s,
       }));
     if (entries.length) return entries;
+  }
+  // No entries from any candidate. Surface the real extractor failure (so the
+  // poll/add error isn't a generic "couldn't read") rather than a silent empty.
+  if (lastError) {
+    throw new Error(lastError instanceof Error ? lastError.message : String(lastError));
   }
   return [];
 }
