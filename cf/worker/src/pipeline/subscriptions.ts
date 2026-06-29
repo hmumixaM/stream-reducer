@@ -75,10 +75,18 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
     return 0;
   }
 
-  const pollBatch = await selectPollBatch(env, healedSub, feed.entries);
-  const enqueued = await enqueueSubscriptionBatch(env, healedSub, feed.title, pollBatch.entries);
-  await recordPollSuccess(env, subId, feed, pollBatch.nextSeenGuid, enqueued);
-  return enqueued;
+  try {
+    const pollBatch = await selectPollBatch(env, healedSub, feed.entries);
+    const enqueued = await enqueueSubscriptionBatch(env, healedSub, feed.title, pollBatch.entries);
+    await recordPollSuccess(env, subId, feed, pollBatch.nextSeenGuid, enqueued);
+    return enqueued;
+  } catch (err) {
+    // A post-fetch failure must never throw uncaught: that leaves the poll
+    // unrecorded (last_checked_at stays NULL) so the cron re-enqueues it every
+    // tick forever. Record it so the reason is visible and the loop stops.
+    await recordPollError(env, subId, err);
+    return 0;
+  }
 }
 
 async function selfHealSubscriptionFeed(env: Env, sub: SubscriptionRow): Promise<SubscriptionRow> {
@@ -162,22 +170,28 @@ async function enqueueSubscriptionBatch(
   for (const entry of entries) {
     const { url, platform } = entryUrl(entry);
     if (!url) continue;
-    const addResult = await addUrlToLibrary(env, sub.user_id, url, {
-      title: entry.title,
-      external_id: entry.guid,
-      platform,
-      subscriptionId: sub.id,
-      feedUrl: sub.feed_url,
-      meta: {
+    try {
+      const addResult = await addUrlToLibrary(env, sub.user_id, url, {
         title: entry.title,
-        description: entry.description ?? null,
-        published_at: entry.published ?? null,
-        duration_s: entry.duration_s ?? null,
-        thumbnail: entry.thumbnail ?? null,
-        author: entry.author ?? feedTitle ?? null,
-      },
-    });
-    if (addResult) enqueued++;
+        external_id: entry.guid,
+        platform,
+        subscriptionId: sub.id,
+        feedUrl: sub.feed_url,
+        meta: {
+          title: entry.title,
+          description: entry.description ?? null,
+          published_at: entry.published ?? null,
+          duration_s: entry.duration_s ?? null,
+          thumbnail: entry.thumbnail ?? null,
+          author: entry.author ?? feedTitle ?? null,
+        },
+      });
+      if (addResult) enqueued++;
+    } catch (err) {
+      // One bad entry (e.g. a transient metadata/DB error) shouldn't abort the
+      // whole poll; skip it and keep going so the rest of the batch lands.
+      console.error("subscription enqueue failed", sub.id, url, String(err));
+    }
   }
   return enqueued;
 }
