@@ -349,6 +349,11 @@ def _apply_bilibili_cookie(cookie: str | None) -> None:
 
 def fetch_metadata(source_url: str, platform: str | None = None, bilibili_cookie: str | None = None) -> dict:
     _apply_bilibili_cookie(bilibili_cookie)
+    # A cold container serves requests before WARP finishes its handshake (it
+    # warms in the background), so yt-dlp's first proxied call would otherwise
+    # hit "[Errno 111] Connection refused". Block (bounded) until WARP is ready.
+    from app.adapters.ytdlp_base import await_warp_ready
+    await_warp_ready()
     # The adapter registry is keyed by the Platform enum; always resolve it from
     # the URL (the string `platform` from the Worker is informational only).
     adapter = get_adapter(detect_platform(source_url))
@@ -361,6 +366,10 @@ def fetch_feed_entries(source_url: str, limit: int = 300) -> dict:
     subscription polling. Routed through the container because the Worker can't
     run yt-dlp and a channel's RSS feed is capped at its latest ~15 uploads.
     """
+    # Wait for WARP before the first proxied yt-dlp call so a cold container
+    # doesn't fail with "[Errno 111] Connection refused" (see fetch_metadata).
+    from app.adapters.ytdlp_base import await_warp_ready
+    await_warp_ready()
     adapter = get_adapter(detect_platform(source_url))
     extract = getattr(adapter, "extract_feed_entries", None)
     return {"entries": extract(source_url, limit) if extract else []}
