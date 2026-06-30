@@ -759,6 +759,7 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
     segments = transcript.get("segments") or []
     chunks = _chunk_segments(segments, SUMMARY_CHUNK_CHARS)
     lang, map_system, section_system = _language_setup(transcript.get("text") or "", target_lang)
+    context = _build_context(item)  # title/description used to correct ASR errors
     logger.info("summarize start: %d segments, %d map chunks, transcript=%d chars",
                 len(segments), len(chunks), len(transcript.get("text") or ""))
 
@@ -774,7 +775,7 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
                 break
             try:
                 res = llm.generate_text(
-                    MAP_TEMPLATE.format(index=i, total=len(chunks), chunk=chunk, language_instruction=lang),
+                    MAP_TEMPLATE.format(context=context, index=i, total=len(chunks), chunk=chunk, language_instruction=lang),
                     system=map_system, max_tokens=SUMMARY_MAP_MAX_TOKENS,
                 )
             except httpx.HTTPError as exc:

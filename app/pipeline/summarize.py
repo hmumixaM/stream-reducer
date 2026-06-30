@@ -222,13 +222,15 @@ def summarize_item(session: Session, item_id: int, tracker: StageTracker | None 
     # --- Map step: each chunk becomes a detailed chronological walkthrough. ---
     if tracker is not None:
         tracker.set_chunks(len(chunks))
+    # Page title/description, used by the map step to fix obvious ASR errors.
+    map_context = _build_context(item)
     note_blocks: list[str] = []
     for idx, chunk in enumerate(chunks, start=1):
         # Use the fast model for map; the reduce below uses the main model.
         map_model = effective_summary_map_model()
         result = generate_text(
             MAP_TEMPLATE.format(
-                index=idx, total=len(chunks), chunk=chunk,
+                context=map_context, index=idx, total=len(chunks), chunk=chunk,
                 language_instruction=lang_instruction,
             ),
             system=MAP_SYSTEM,
