@@ -13,6 +13,7 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "firebase": "^12.14.0",
+    "katex": "^0.17.0",
     "lucide-react": "^0.456.0",
     "minisearch": "^7.2.0",
     "react": "^18.3.1",
@@ -21,6 +22,8 @@
     "react-markdown": "^9.0.1",
     "react-router-dom": "^6.27.0",
     "recharts": "^2.13.0",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "^6.0.0",
     "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {

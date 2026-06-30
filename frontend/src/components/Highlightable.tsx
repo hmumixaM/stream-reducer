@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { Highlighter, Trash2, Check } from "lucide-react";
 import type { Highlight, HighlightSource, NewHighlight } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -116,8 +118,14 @@ export function HighlightableMarkdown({
 }) {
   // Memoize so parent re-renders (after a highlight mutation) reuse the same
   // element and React leaves the DOM — and our marks — intact.
+  // remark-math + rehype-katex render $inline$ and $$block$$ LaTeX so formulas
+  // in summaries/translations display correctly (KaTeX CSS loaded in main.tsx).
   const rendered = useMemo(
-    () => <ReactMarkdown>{markdown}</ReactMarkdown>,
+    () => (
+      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+        {markdown}
+      </ReactMarkdown>
+    ),
     [markdown],
   );
   return <HighlightLayer {...rest}>{rendered}</HighlightLayer>;
