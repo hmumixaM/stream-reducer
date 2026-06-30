@@ -39,7 +39,8 @@ function tag(block: string, name: string): string | null {
 }
 
 function attr(block: string, name: string, attrName: string): string | null {
-  const m = new RegExp(`<${name}\\b[^>]*\\b${attrName}=["']([^"']+)["'][^>]*>`, "i").exec(block);
+  // Allow whitespace around `=` (some feeds write `href = "…"`, e.g. wavpub).
+  const m = new RegExp(`<${name}\\b[^>]*\\b${attrName}\\s*=\\s*["']([^"']+)["'][^>]*>`, "i").exec(block);
   return m ? decode(m[1]) : null;
 }
 

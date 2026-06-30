@@ -28,7 +28,7 @@ describe("parseFeed", () => {
   it("falls back to the channel image when an episode has none", () => {
     const feed = parseFeed(`
       <rss><channel><title>Show</title>
-        <itunes:image href="https://cdn.example.com/show-cover.jpg" />
+        <itunes:image href = "https://cdn.example.com/show-cover.jpg" />
         <item>
           <title>No image episode</title>
           <guid>e1</guid>
