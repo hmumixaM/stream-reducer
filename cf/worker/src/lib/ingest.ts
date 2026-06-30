@@ -217,12 +217,18 @@ export async function addUrlToLibrary(
   // library — member-only videos shouldn't appear there.
   if (item.status === "excluded") return null;
 
+  // Mirror the cover into R2 (and rewrite to the /media path) at ingest, so the
+  // SPA can show it immediately — raw remote covers either can't load (Bilibili
+  // hdslb hotlink 403, http mixed-content) or aren't under our control.
   if (metadata) {
-    await persistItemMetadata(env, item.id, metadata);
+    const cached = await cacheThumbnail(env, item.id, metadata.thumbnail);
+    await persistItemMetadata(env, item.id, cached ? { ...metadata, thumbnail: cached } : metadata);
   }
-  // Feed metadata overrides the (often empty) scraped metadata for podcasts.
+  // Feed metadata overrides the (often empty) scraped metadata for podcasts; its
+  // cover (per-episode or the show fallback) is mirrored the same way.
   if (opts.meta) {
-    await persistItemMetadata(env, item.id, opts.meta);
+    const cached = await cacheThumbnail(env, item.id, opts.meta.thumbnail);
+    await persistItemMetadata(env, item.id, cached ? { ...opts.meta, thumbnail: cached } : opts.meta);
   }
 
   // Link this item to its channel feed (derived from metadata) and the feed it

@@ -25,6 +25,28 @@ describe("parseFeed", () => {
     });
   });
 
+  it("falls back to the channel image when an episode has none", () => {
+    const feed = parseFeed(`
+      <rss><channel><title>Show</title>
+        <itunes:image href="https://cdn.example.com/show-cover.jpg" />
+        <item>
+          <title>No image episode</title>
+          <guid>e1</guid>
+          <enclosure url="https://cdn.example.com/e1.mp3" type="audio/mpeg" />
+        </item>
+        <item>
+          <title>Own image episode</title>
+          <guid>e2</guid>
+          <itunes:image href="https://cdn.example.com/e2.jpg" />
+          <enclosure url="https://cdn.example.com/e2.mp3" type="audio/mpeg" />
+        </item>
+      </channel></rss>
+    `);
+
+    expect(feed.entries[0].thumbnail).toBe("https://cdn.example.com/show-cover.jpg");
+    expect(feed.entries[1].thumbnail).toBe("https://cdn.example.com/e2.jpg");
+  });
+
   it("parses Atom entries such as YouTube feeds", () => {
     const feed = parseFeed(`
       <feed>

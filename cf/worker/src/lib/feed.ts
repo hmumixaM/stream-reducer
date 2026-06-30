@@ -239,8 +239,21 @@ async function fetchYoutubeChannelId(pageUrl: string): Promise<string | null> {
   }
 }
 
+// The channel/show-level cover: <itunes:image href> or RSS <image><url>. Many
+// podcasts (e.g. 毕业进化录) ship NO per-episode image, so episodes fall back to
+// this so they aren't cover-less.
+function feedLevelImage(xml: string): string | null {
+  // Strip <item> blocks first so we read the CHANNEL image, not the first item's.
+  const channel = xml.replace(/<item\b[\s\S]*?<\/item>/gi, "");
+  const itunes = attr(channel, "itunes:image", "href");
+  if (itunes) return itunes;
+  const m = /<image\b[^>]*>[\s\S]*?<url>([\s\S]*?)<\/url>/i.exec(channel);
+  return m ? decode(m[1].trim()) : null;
+}
+
 export function parseFeed(xml: string): ParsedFeed {
   const feedTitle = tag(xml, "title");
+  const feedImage = feedLevelImage(xml);
   const entries: FeedEntry[] = [];
 
   // RSS items
@@ -260,7 +273,7 @@ export function parseFeed(xml: string): ParsedFeed {
       audio,
       duration_s: parseDuration(tag(block, "itunes:duration")),
       description: tag(block, "itunes:summary") || tag(block, "description") || tag(block, "content:encoded"),
-      thumbnail: attr(block, "itunes:image", "href"),
+      thumbnail: attr(block, "itunes:image", "href") || feedImage,
       author: tag(block, "itunes:author") || tag(block, "dc:creator"),
     });
   }
