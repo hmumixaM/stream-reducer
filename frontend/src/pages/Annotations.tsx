@@ -116,7 +116,7 @@ function AnnotationCard({ a }: { a: Annotation }) {
       {isHighlight && a.quote && (
         <blockquote
           className={cn(
-            "mt-2 rounded-md border-l-2 border-border px-3 py-1.5 text-sm italic",
+            "mt-2 whitespace-pre-wrap rounded-md border-l-2 border-border px-3 py-1.5 text-sm italic",
             hlClass(a.color),
           )}
         >

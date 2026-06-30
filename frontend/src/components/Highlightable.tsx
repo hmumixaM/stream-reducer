@@ -47,6 +47,34 @@ function unwrapMarks(root: HTMLElement) {
   });
 }
 
+// Text nodes under `root`, skipping any already inside a highlight mark so
+// overlapping highlights don't nest.
+function collectTextNodes(root: HTMLElement): Text[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let node = walker.nextNode() as Text | null;
+  while (node) {
+    if (!node.parentElement?.closest("mark[data-hl]")) nodes.push(node);
+    node = walker.nextNode() as Text | null;
+  }
+  return nodes;
+}
+
+function markFor(hl: Highlight, onClick: (id: number, el: HTMLElement) => void): HTMLElement {
+  const mark = document.createElement("mark");
+  mark.setAttribute("data-hl", String(hl.id));
+  mark.className = cn(
+    "rounded-[2px] px-0.5 text-inherit cursor-pointer transition-colors",
+    hlClass(hl.color),
+    hl.note ? "underline decoration-dotted underline-offset-2" : "",
+  );
+  mark.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onClick(hl.id, mark);
+  });
+  return mark;
+}
+
 function wrapQuote(
   root: HTMLElement,
   hl: Highlight,
@@ -54,38 +82,51 @@ function wrapQuote(
 ) {
   const quote = hl.quote;
   if (!quote) return;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let node = walker.nextNode() as Text | null;
-  while (node) {
-    if (node.parentElement?.closest("mark[data-hl]")) {
-      node = walker.nextNode() as Text | null;
-      continue;
-    }
-    const idx = (node.textContent ?? "").indexOf(quote);
-    if (idx !== -1) {
-      const range = document.createRange();
-      range.setStart(node, idx);
-      range.setEnd(node, idx + quote.length);
-      const mark = document.createElement("mark");
-      mark.setAttribute("data-hl", String(hl.id));
-      mark.className = cn(
-        "rounded-[2px] px-0.5 text-inherit cursor-pointer transition-colors",
-        hlClass(hl.color),
-        hl.note ? "underline decoration-dotted underline-offset-2" : "",
-      );
-      try {
-        range.surroundContents(mark);
-        mark.addEventListener("click", (e) => {
-          e.stopPropagation();
-          onClick(hl.id, mark);
-        });
-      } catch {
-        // Range spanned element boundaries (e.g. across bold/links); skip — the
-        // highlight still shows in the sidebar / annotations feed.
+
+  // A highlight can span multiple paragraphs, i.e. several text nodes across
+  // block elements, and the stored quote carries the selection's newlines that
+  // the rendered DOM doesn't. So match on a whitespace-stripped index of all
+  // text (CJK has no spaces; English spaces are dropped on both sides), map the
+  // hit back to (node, offset) positions, and wrap each spanned text node's
+  // segment in its own <mark> — surroundContents can't cross block boundaries.
+  const nodes = collectTextNodes(root);
+  let norm = "";
+  const map: { node: Text; offset: number }[] = [];
+  for (const node of nodes) {
+    const text = node.textContent ?? "";
+    for (let i = 0; i < text.length; i++) {
+      if (!/\s/.test(text[i])) {
+        norm += text[i];
+        map.push({ node, offset: i });
       }
-      return;
     }
-    node = walker.nextNode() as Text | null;
+  }
+
+  const target = quote.replace(/\s+/g, "");
+  if (!target) return;
+  const start = norm.indexOf(target);
+  if (start === -1) return;
+  const end = start + target.length - 1;
+
+  // The covered [min, max] character offset within each spanned text node.
+  const ranges = new Map<Text, { min: number; max: number }>();
+  for (let i = start; i <= end; i++) {
+    const { node, offset } = map[i];
+    const existing = ranges.get(node);
+    if (!existing) ranges.set(node, { min: offset, max: offset });
+    else existing.max = offset; // offsets are monotonic per node
+  }
+
+  for (const [node, { min, max }] of ranges) {
+    const range = document.createRange();
+    range.setStart(node, min);
+    range.setEnd(node, max + 1);
+    try {
+      range.surroundContents(markFor(hl, onClick));
+    } catch {
+      // Range crossed an inline element boundary inside the node (rare); skip
+      // this segment — the highlight still shows in the annotations feed.
+    }
   }
 }
 
