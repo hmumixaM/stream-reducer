@@ -98,6 +98,21 @@
     border-top: 1px solid hsl(var(--border));
     margin: 1.5rem 0;
   }
+  .prose-sr table {
+    width: 100%;
+    margin: 1rem 0;
+    border-collapse: collapse;
+    font-size: 0.875em;
+    display: block;
+    overflow-x: auto;
+  }
+  .prose-sr th, .prose-sr td {
+    border: 1px solid hsl(var(--border));
+    padding: 0.4rem 0.6rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  .prose-sr th { background-color: hsl(var(--muted)); font-weight: 600; }
 
   /* Read mode prose (larger, wider, more relaxed) */
   .prose-read h2 {
@@ -153,4 +168,20 @@
     border-top: 1px solid hsl(var(--border));
     margin: 2.5rem 0;
   }
+  .prose-read table {
+    width: 100%;
+    margin: 1.5rem 0;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+    display: block;
+    overflow-x: auto;
+  }
+  .prose-read th, .prose-read td {
+    border: 1px solid hsl(var(--border));
+    padding: 0.6rem 0.85rem;
+    text-align: left;
+    vertical-align: top;
+    line-height: 1.6;
+  }
+  .prose-read th { background-color: hsl(var(--muted)); font-weight: 600; }
 }
