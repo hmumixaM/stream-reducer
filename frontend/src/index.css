@@ -49,6 +49,13 @@
 }
 
 @layer components {
+  /* KaTeX renders a visually-hidden MathML copy of every formula for screen
+     readers; exclude it from text selection so highlighting a formula captures
+     only the visible math (otherwise the quote doubles each token, e.g. "𝑇 T"). */
+  .katex-mathml {
+    user-select: none;
+  }
+
   /* Default prose for cards */
   .prose-sr h2 {
     font-size: 1.1rem;

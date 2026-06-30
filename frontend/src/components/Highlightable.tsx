@@ -47,14 +47,16 @@ function unwrapMarks(root: HTMLElement) {
   });
 }
 
-// Text nodes under `root`, skipping any already inside a highlight mark so
-// overlapping highlights don't nest.
+// Text nodes under `root`, skipping any already inside a highlight mark (so
+// overlapping highlights don't nest) and the KaTeX MathML copy (a visually
+// hidden accessibility duplicate of each formula — including it would double
+// every math token, e.g. "𝑇 T", and break matching).
 function collectTextNodes(root: HTMLElement): Text[] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = [];
   let node = walker.nextNode() as Text | null;
   while (node) {
-    if (!node.parentElement?.closest("mark[data-hl]")) nodes.push(node);
+    if (!node.parentElement?.closest("mark[data-hl], .katex-mathml")) nodes.push(node);
     node = walker.nextNode() as Text | null;
   }
   return nodes;
