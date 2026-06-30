@@ -17,7 +17,13 @@ const YT_UA =
 function entryUrl(entry: FeedEntry): { url: string | null; platform: string } {
   if (entry.link) {
     const p = detectPlatform(entry.link);
-    if (p === "youtube" || p === "bilibili") return { url: entry.link, platform: p };
+    // Prefer a supported episode/video page over the raw audio enclosure: it
+    // carries far richer metadata than the bare media file. In particular a
+    // Xiaoyuzhou episode page exposes the FULL show notes (chapters, reference
+    // links), whereas the RSS bridge's <description> is just the short intro.
+    if (p === "youtube" || p === "bilibili" || p === "xiaoyuzhou") {
+      return { url: entry.link, platform: p };
+    }
   }
   if (entry.audio) return { url: entry.audio, platform: "rss" };
   return { url: entry.link, platform: entry.link ? detectPlatform(entry.link) : "rss" };

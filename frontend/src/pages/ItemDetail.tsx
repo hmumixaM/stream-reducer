@@ -261,6 +261,8 @@ export function ItemDetail() {
             />
           )}
 
+          {d.description && <ShowNotesView description={d.description} readMode={readMode} />}
+
           {d.summary ? (
             <SummaryView
               itemId={itemId}
@@ -387,6 +389,50 @@ export function ItemDetail() {
 
       {["done", "error"].includes(d.status) && <RelatedArticles itemId={itemId} />}
     </div>
+  );
+}
+
+// Flatten show-notes HTML (podcast feeds store <p>/<br>/links) into readable
+// plain text so the original notes are visible alongside the AI summary.
+function shownotesToText(raw: string): string {
+  return raw
+    .replace(/<\s*(br|\/p|\/div|\/li)\s*\/?>/gi, "\n")
+    .replace(/<\s*li[^>]*>/gi, "- ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#3?9;|&apos;/gi, "'")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// The original podcast/show notes (chapters, references), shown above the AI
+// summary. Collapsible since they can be long.
+function ShowNotesView({ description, readMode }: { description: string; readMode: boolean }) {
+  const [open, setOpen] = useState(false);
+  const text = useMemo(() => shownotesToText(description), [description]);
+  if (!text) return null;
+  return (
+    <Card className={cn("mb-4 p-4", readMode && "border-dashed bg-transparent shadow-none")}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between text-sm font-medium"
+      >
+        <span className="flex items-center gap-2">
+          <BookOpen className="h-4 w-4" /> Show notes
+        </span>
+        <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <p className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">
+          {text}
+        </p>
+      )}
+    </Card>
   );
 }
 
