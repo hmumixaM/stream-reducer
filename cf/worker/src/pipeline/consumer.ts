@@ -50,13 +50,20 @@ function staleCutoff(): string {
 
 // A 503 from the container DO means no free instance right now (all slots busy /
 // still provisioning) — transient, not a real job failure. Re-queue instead of
-// erroring so a capacity blip doesn't permanently fail items.
+// erroring so a capacity blip doesn't permanently fail items. The
+// blockConcurrencyWhile/DO-reset case is the same class: a cold container that
+// took too long to provision (image pull/boot > the DO startup window, common
+// right after a deploy or CONTAINER_GEN bump) gets reset — retrying once it's
+// warm succeeds, so treat it as transient too.
 function isTransientCapacity(msg: string): boolean {
   const m = msg.toLowerCase();
   return (
     m.includes("container 503") ||
     m.includes("no container instance available") ||
-    m.includes("currently provisioning")
+    m.includes("currently provisioning") ||
+    m.includes("blockconcurrencywhile") ||
+    m.includes("durable object was reset") ||
+    m.includes("durable object reset because its code was updated")
   );
 }
 
