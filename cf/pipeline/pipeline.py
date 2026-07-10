@@ -1112,10 +1112,21 @@ def _transcribe(tmp: str, audio_path: Path, stages: list[Stage], on_progress=Non
         segments: list[dict] = []
         offset = 0.0
         language = None
+        failed = 0
         with httpx.Client(timeout=300) as client:
             for index, chunk in enumerate(chunk_paths, start=1):
                 dur = probe_duration(chunk)
-                text, detected = llm.transcribe_chunk(client, str(chunk), usage)
+                # One flaky chunk (transient STT 4xx/timeout) shouldn't fail the
+                # whole item; skip it and keep going. The ratio guard below still
+                # fails the item if too much of the audio couldn't be transcribed.
+                try:
+                    text, detected = llm.transcribe_chunk(client, str(chunk), usage)
+                except Exception as exc:  # noqa: BLE001
+                    failed += 1
+                    logging.getLogger("pipeline").warning(
+                        "transcribe chunk %d/%d failed, skipping: %s", index, chunk_count, exc,
+                    )
+                    text, detected = "", None
                 language = language or detected
                 if text:
                     segments.append({"start": round(offset, 2), "end": round(offset + dur, 2),
@@ -1128,6 +1139,12 @@ def _transcribe(tmp: str, audio_path: Path, stages: list[Stage], on_progress=Non
                                      "pct": round(index / chunk_count * 100, 1)})
                     except Exception:  # noqa: BLE001
                         pass
+        # Fail only when too much of the audio is missing — a mostly-complete
+        # transcript is far more useful than erroring the whole item.
+        if not segments:
+            raise RuntimeError("transcription produced no text")
+        if chunk_count and failed / chunk_count > 0.5:
+            raise RuntimeError(f"transcription failed for {failed}/{chunk_count} chunks")
         st.request_count = usage.requests
         st.total_tokens = usage.total_tokens
         st.cost_usd = usage.cost_usd

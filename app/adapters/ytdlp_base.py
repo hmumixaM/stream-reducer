@@ -132,6 +132,37 @@ def _looks_ip_blocked(text: str) -> bool:
     return any(m in t for m in _IP_BLOCK_MARKERS)
 
 
+# Connection/egress failures that a DIFFERENT egress (next WARP instance, then
+# direct) might get past — the WARP SOCKS proxy being down mid-session is the
+# common one ("[Errno 111] Connection refused" during YouTube API extraction).
+_CONNECTION_MARKERS = (
+    "connection refused",
+    "errno 111",
+    "unable to download",
+    "timed out",
+    "timeout",
+    "connection reset",
+    "connection aborted",
+    "remote end closed",
+    "failed to establish",
+    "temporary failure",
+    "transporterror",
+)
+
+
+def _should_rotate_egress(exc: Exception) -> bool:
+    """True when a failure looks like a proxy/IP/egress problem worth retrying
+    through the next egress candidate (connection refused, timeouts, bot walls,
+    403/412/429, geo/risk control). Genuine content errors (private, deleted,
+    members-only) are NOT rotated so they fail fast."""
+    msg = str(exc).lower()
+    return (
+        any(m in msg for m in _CONNECTION_MARKERS)
+        or _looks_ip_blocked(msg)
+        or _is_risk_control(exc)
+    )
+
+
 class _CaptureLogger:
     """yt-dlp logger that keeps the last N messages in a ring buffer so a
     blocked/failed download surfaces the *real* reason (bot wall, 412/403,
@@ -281,8 +312,30 @@ class YtDlpAdapter(Adapter):
         return opts
 
     def _extract_info(self, url: str, download: bool = False, extra: dict | None = None) -> dict:
-        with YoutubeDL(self._ydl_opts(extra)) as ydl:
-            return ydl.extract_info(url, download=download)
+        # Metadata / native-caption / feed extraction egresses through the first
+        # proxy candidate; when the WARP SOCKS proxy is down it fails with
+        # "[Errno 111] Connection refused". Rotate through the remaining
+        # candidates (other WARP instances, then direct) on egress failures so a
+        # single flaky proxy doesn't fail the whole job. (download_audio has its
+        # own rotation for the media download itself.)
+        candidates = _proxy_candidates()
+        last_exc: Exception | None = None
+        for index, proxy in enumerate(candidates):
+            self._active_proxy = proxy
+            try:
+                with YoutubeDL(self._ydl_opts(extra)) as ydl:
+                    return ydl.extract_info(url, download=download)
+            except Exception as exc:  # noqa: BLE001 — rotate egress, then re-raise
+                last_exc = exc
+                if index + 1 < len(candidates) and _should_rotate_egress(exc):
+                    logger.warning(
+                        "extract_info via proxy=%s failed (%s); rotating egress",
+                        proxy or "direct", exc,
+                    )
+                    continue
+                raise
+        assert last_exc is not None
+        raise last_exc
 
     def extract_feed_entries(self, url: str, limit: int = 300) -> list[dict]:
         """Flat-extract a channel/playlist into feed entries (newest first) with
