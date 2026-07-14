@@ -98,15 +98,16 @@
         "queue": "stream-reduce-pipeline",
         "max_batch_size": 1,
         // Each job runs in its own container instance (job-<id>). Keep parallel
-        // jobs BELOW `containers[].max_instances` so there's headroom for the
-        // auxiliary single-instance containers that also share the pool —
-        // subscription feed enumeration (`feed`), the daily Bilibili cookie
-        // refresh (`bili-refresh`), metadata (`meta-*`), and `proxy-check`.
-        // Without headroom, one of those running alongside max jobs makes the
-        // next job 503 ("no Container instance available"). 8 jobs + 2 reserved
-        // = the 10 max_instances below. (503s are also self-healed: the
+        // jobs WELL BELOW `containers[].max_instances` so there's headroom for
+        // the auxiliary containers that also share the pool — subscription feed
+        // enumeration (`feed`), the daily Bilibili cookie refresh
+        // (`bili-refresh`), metadata (`meta-*`), and `proxy-check`. 8 jobs left
+        // too little headroom: a poll burst spawned enough `meta-*`/`feed`
+        // instances to push past max_instances and trip "Maximum number of
+        // running container instances exceeded". 6 jobs + ~4 reserved = the 10
+        // max_instances below. (Capacity errors are also self-healed now: the
         // consumer re-queues the item instead of failing it.)
-        "max_concurrency": 8,
+        "max_concurrency": 6,
         "max_retries": 3,
         "dead_letter_queue": "stream-reduce-pipeline-dlq"
       }

@@ -198,11 +198,19 @@ export async function addUrlToLibrary(
   if (!url) return null;
   const platform = opts.platform || detectPlatform(url);
   let metadata: ItemMetadata | null = null;
-  try {
-    const { fetchMetadata } = await import("../pipeline/container");
-    metadata = await fetchMetadata(env, url, platform);
-  } catch (err) {
-    console.warn("metadata prefetch failed", { url, err: String(err) });
+  // Only prefetch metadata for MANUAL adds. Subscription adds already carry the
+  // feed's metadata (title/description/thumbnail/duration via opts.meta), so the
+  // extra fetchMetadata CONTAINER call is redundant — and under a poll burst it
+  // spawns many meta-* container instances that compete with pipeline jobs for
+  // the pool, tripping "Maximum number of running container instances exceeded".
+  // The full pipeline run fetches complete metadata anyway.
+  if (!opts.meta) {
+    try {
+      const { fetchMetadata } = await import("../pipeline/container");
+      metadata = await fetchMetadata(env, url, platform);
+    } catch (err) {
+      console.warn("metadata prefetch failed", { url, err: String(err) });
+    }
   }
 
   const { item, created } = await upsertItem(env, {

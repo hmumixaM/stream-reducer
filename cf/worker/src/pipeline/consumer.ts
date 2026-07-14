@@ -61,6 +61,9 @@ function isTransientCapacity(msg: string): boolean {
     m.includes("container 503") ||
     m.includes("no container instance available") ||
     m.includes("currently provisioning") ||
+    // The whole container pool is momentarily full (jobs + aux instances >
+    // max_instances). The error literally says "Try again later" — re-queue.
+    m.includes("maximum number of running container instances") ||
     m.includes("blockconcurrencywhile") ||
     m.includes("durable object was reset") ||
     m.includes("durable object reset because its code was updated")
@@ -745,7 +748,19 @@ async function embedChunks(env: Env, itemId: number): Promise<void> {
     values: vectors[i],
     metadata: { item_id: itemId, source: r.source, field: r.field },
   }));
-  await env.VECTORIZE.upsert(toUpsert);
+  // Vectorize occasionally returns a transient 503/429; retry with backoff so a
+  // capacity blip doesn't fail the item after all the download/transcribe/
+  // summarize work is already done.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await env.VECTORIZE.upsert(toUpsert);
+      break;
+    } catch (err) {
+      const transient = /\b(503|429|timeout|temporarily|overloaded)\b/i.test(String(err));
+      if (attempt >= 3 || !transient) throw err;
+      await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+    }
+  }
 
   for (let i = 0; i < rows.length; i++) {
     await env.DB.prepare("UPDATE chunk SET embedding = ?, embedding_model = ? WHERE id = ?")
