@@ -44,6 +44,14 @@ const IN_PROGRESS = ["fetching", "transcribing", "summarizing"];
 // too long to finish within the invocation budget) so it can't loop forever.
 const MAX_RECLAIM = 3;
 
+// On ANY processing error (download/transcribe/summarize/embed, a flaky
+// container, a network blip), re-queue the task so it retries — reprocessing
+// spawns a fresh container instance, so a task that hit a bad/overloaded
+// container gets another shot on a healthy one. Give up (mark 'error') only
+// after this many attempts so a genuinely broken item can't loop forever.
+// (Transient container-capacity errors re-queue WITHOUT consuming an attempt.)
+const MAX_RETRIES = 5;
+
 function staleCutoff(): string {
   return new Date(Date.now() - STALE_IN_PROGRESS_MS).toISOString();
 }
@@ -606,14 +614,33 @@ async function handlePipelineFailure(
   err: unknown,
 ): Promise<void> {
   const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+
+  // Container-pool / infra blips are not the item's fault: re-queue WITHOUT
+  // burning a retry attempt, so it keeps retrying until a slot frees.
   if (isTransientCapacity(msg)) {
     await requeueTransientPipelineItem(env, itemId);
-    console.warn("pipeline item deferred — no container slot, re-queued", itemId);
+    console.warn("pipeline item deferred — capacity, re-queued", itemId);
+    throw err;
+  }
+
+  // Any other error: retry the whole task by re-queuing it (reprocessing claims
+  // a fresh container instance, so a task that hit a bad container succeeds on
+  // the next healthy one), up to MAX_RETRIES. Only give up once exhausted.
+  const row = await first<{ retry_count: number }>(
+    env.DB.prepare("SELECT retry_count FROM item WHERE id = ?").bind(itemId),
+  );
+  const attempts = (row?.retry_count ?? 0) + 1;
+  if (attempts < MAX_RETRIES) {
+    await requeueForRetry(env, itemId, attempts);
+    // Rethrow so the queue redelivers this message promptly for the retry; a
+    // continuation was also enqueued before processing and the 15-min cron pump
+    // re-drains queued items, so the retry can't stall.
+    console.warn(`pipeline item ${itemId} failed (attempt ${attempts}/${MAX_RETRIES}) — re-queued: ${msg}`);
     throw err;
   }
 
   await markItemErrored(env, itemId, msg);
-  console.error(`pipeline item failed item=${itemId} ms=${Date.now() - runStart} msg=${msg}`);
+  console.error(`pipeline item failed permanently item=${itemId} attempts=${attempts} ms=${Date.now() - runStart} msg=${msg}`);
 }
 
 async function requeueTransientPipelineItem(env: Env, itemId: number): Promise<void> {
@@ -623,6 +650,18 @@ async function requeueTransientPipelineItem(env: Env, itemId: number): Promise<v
      WHERE id = ?`,
   )
     .bind(itemId)
+    .run();
+}
+
+// Re-queue a task for another attempt, recording the incremented attempt count
+// so the failure handler can eventually give up.
+async function requeueForRetry(env: Env, itemId: number, retryCount: number): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE item SET status = 'queued', error = NULL, retry_count = ?,
+       progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+     WHERE id = ?`,
+  )
+    .bind(retryCount, itemId)
     .run();
 }
 
