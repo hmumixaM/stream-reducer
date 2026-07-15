@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { RefreshCw, Trash2, Power } from "lucide-react";
 import { api, type Subscription } from "@/lib/api";
-import { Button, Card, Input, Spinner } from "@/components/ui";
+import { Button, Card, Input, Select, Spinner } from "@/components/ui";
 import { PlatformBadge } from "@/components/badges";
 import { timeAgo } from "@/lib/utils";
 
@@ -34,18 +34,31 @@ export function Subscriptions() {
   const [feed, setFeed] = useState("");
   const [interval, setIntervalMin] = useState("60");
   const [windowDays, setWindowDays] = useState("90");
+  const [folderId, setFolderId] = useState<string>("");
 
+  const groups = useQuery({ queryKey: ["groups"], queryFn: () => api.listGroups() });
   const subs = useQuery({ queryKey: ["subs"], queryFn: api.listSubscriptions });
   const add = useMutation({
     mutationFn: () =>
-      api.addSubscription(feed.trim(), Number(interval) || 60, Number(windowDays) || 90),
+      api.addSubscription(
+        feed.trim(),
+        Number(interval) || 60,
+        Number(windowDays) || 90,
+        folderId ? Number(folderId) : null,
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["subs"] });
       setFeed("");
+      setFolderId("");
     },
   });
   const toggle = useMutation({
     mutationFn: (id: number) => api.toggleSubscription(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["subs"] }),
+  });
+  const updateFolder = useMutation({
+    mutationFn: ({ id, gid }: { id: number; gid: number | null }) =>
+      api.updateSubscription(id, { folder_id: gid }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["subs"] }),
   });
   const poll = useMutation({ mutationFn: (id: number) => api.pollSubscription(id) });
@@ -97,6 +110,17 @@ export function Subscriptions() {
               title="Only ingest videos published within this many days (default 90 = last 3 months)"
             />
           </div>
+          <div className="w-44">
+            <label className="mb-1 block text-xs text-muted-foreground">Folder</label>
+            <Select value={folderId} onChange={(e) => setFolderId(e.target.value)}>
+              <option value="">No folder (Unfiled)</option>
+              {(groups.data ?? []).map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.title || "Folder"}
+                </option>
+              ))}
+            </Select>
+          </div>
           <Button type="submit" disabled={add.isPending || !feed.trim()}>
             {add.isPending ? <Spinner /> : "Subscribe"}
           </Button>
@@ -130,6 +154,26 @@ export function Subscriptions() {
                       : "never checked"}
                   </span>
                   <PollStatus sub={s} />
+                  <label className="flex items-center gap-1">
+                    <span>folder</span>
+                    <Select
+                      value={s.folder_id != null ? String(s.folder_id) : ""}
+                      onChange={(e) =>
+                        updateFolder.mutate({
+                          id: s.id,
+                          gid: e.target.value ? Number(e.target.value) : null,
+                        })
+                      }
+                      className="h-7 w-auto min-w-[120px] py-0 text-xs"
+                    >
+                      <option value="">Unfiled</option>
+                      {(groups.data ?? []).map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.title || "Folder"}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
                 </div>
                 {s.last_status === "error" && s.last_error && (
                   <p className="mt-1 text-xs text-red-400" title={s.last_error}>

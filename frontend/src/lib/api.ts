@@ -270,6 +270,7 @@ export interface Subscription {
   last_entry_count?: number;
   last_new_count?: number;
   consecutive_failures?: number;
+  folder_id?: number | null;
   created_at: string;
 }
 
@@ -667,8 +668,12 @@ export const api = {
       ? mirrorJson<ItemDetail>(`/data/items/${id}.json`)
       : req<ItemDetail>(`/api/items/${id}`),
   // Add URLs to the signed-in user's library (dedup + enqueue server-side).
-  addItems: (urls: string[]) =>
-    req<Item[]>("/api/items/library", { method: "POST", body: JSON.stringify({ urls }) }),
+  // Optionally file them into a folder; null/undefined leaves them unfiled.
+  addItems: (urls: string[], folderId?: number | null) =>
+    req<Item[]>("/api/items/library", {
+      method: "POST",
+      body: JSON.stringify({ urls, folder_id: folderId ?? undefined }),
+    }),
   retryItem: (id: number) => req<Item>(`/api/items/${id}/retry`, { method: "POST" }),
   regenerateItem: (id: number) =>
     req<Item>(`/api/items/${id}/regenerate`, { method: "POST" }),
@@ -718,10 +723,23 @@ export const api = {
   listQueue: () => req<QueueItem[]>("/api/queue"),
 
   listSubscriptions: () => req<Subscription[]>("/api/subscriptions"),
-  addSubscription: (feed_url: string, interval_minutes?: number, window_days?: number) =>
+  addSubscription: (
+    feed_url: string,
+    interval_minutes?: number,
+    window_days?: number,
+    folder_id?: number | null,
+  ) =>
     req<Subscription>("/api/subscriptions", {
       method: "POST",
-      body: JSON.stringify({ feed_url, interval_minutes, window_days }),
+      body: JSON.stringify({ feed_url, interval_minutes, window_days, folder_id: folder_id ?? undefined }),
+    }),
+  updateSubscription: (
+    id: number,
+    patch: { folder_id?: number | null; title?: string; interval_minutes?: number },
+  ) =>
+    req<Subscription>(`/api/subscriptions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
     }),
   toggleSubscription: (id: number) =>
     req<Subscription>(`/api/subscriptions/${id}/toggle`, { method: "POST" }),

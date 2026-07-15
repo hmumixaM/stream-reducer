@@ -22,6 +22,14 @@ const SORT_COLUMNS: Record<string, string> = {
   priority: "item.priority_score",
 };
 
+// In the personal library, "added" means when the user saved the item
+// (per-user ui.added_at), and "position" is the manual drag order within a folder.
+const LIBRARY_SORT_COLUMNS: Record<string, string> = {
+  ...SORT_COLUMNS,
+  added: "ui.added_at",
+  position: "ui.group_position",
+};
+
 // --- Browse the GLOBAL catalog (every item anyone has ingested) ----------
 itemsRoutes.get("/", async (c) => {
   const u = c.req.query();
@@ -116,7 +124,7 @@ itemsRoutes.get("/library", requireAuth, async (c) => {
     where.push("item.title LIKE ?");
     binds.push(`%${u.q}%`);
   }
-  const sortCol = SORT_COLUMNS[u.sort ?? "added"] ?? "item.created_at";
+  const sortCol = LIBRARY_SORT_COLUMNS[u.sort ?? "added"] ?? "ui.added_at";
   const order = u.order === "asc" ? "ASC" : "DESC";
   const limit = Math.min(Number(u.limit ?? 200), 500);
   const offset = Number(u.offset ?? 0);

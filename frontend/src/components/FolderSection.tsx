@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { useInfiniteQuery, useQuery, type UseInfiniteQueryResult } from "@tanstack/react-query";
-import { ChevronRight, Folder, Inbox } from "lucide-react";
+import { useInfiniteQuery, type UseInfiniteQueryResult } from "@tanstack/react-query";
+import { ChevronRight, Folder } from "lucide-react";
 import { api, type Group, type Item } from "@/lib/api";
 import { Button } from "@/components/ui";
 import { ItemCard, type ItemCardActions } from "@/components/ItemCard";
@@ -75,10 +75,12 @@ function CollapsibleSection({
 export function FolderSection({
   group,
   archived,
+  sort,
   actions,
 }: {
   group: Group;
   archived: boolean;
+  sort: string;
   actions: ItemCardActions;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -100,7 +102,7 @@ export function FolderSection({
       onToggle={() => setExpanded((v) => !v)}
     >
       {expanded && (
-        <FolderItems groupId={group.id} archived={archived} actions={actions} />
+        <FolderItems groupId={group.id} archived={archived} sort={sort} actions={actions} />
       )}
     </CollapsibleSection>
   );
@@ -109,75 +111,21 @@ export function FolderSection({
 function FolderItems({
   groupId,
   archived,
+  sort,
   actions,
 }: {
   groupId: number;
   archived: boolean;
+  sort: string;
   actions: ItemCardActions;
 }) {
   const items = useInfiniteQuery({
-    queryKey: ["items", { group_id: groupId, archived }],
+    queryKey: ["items", { group_id: groupId, archived, sort }],
     queryFn: ({ pageParam }) =>
       api.listItems({
         group_id: groupId,
         archived,
-        sort: "position",
-        order: "asc",
-        limit: PAGE_SIZE,
-        offset: pageParam,
-      }),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.length === PAGE_SIZE ? allPages.length * PAGE_SIZE : undefined,
-    refetchInterval: 8000,
-  });
-  return <ItemGrid items={items} actions={actions} emptyLabel="No items here." />;
-}
-
-/** The "Unfiled" pseudo-folder: ungrouped items, lazy + paginated. Dropping a
- * card here detaches it from its current folder. */
-export function UnfiledSection({
-  archived,
-  actions,
-}: {
-  archived: boolean;
-  actions: ItemCardActions;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const count = useQuery({
-    queryKey: ["ungrouped-count", { archived }],
-    queryFn: () => api.listItems({ ungrouped: true, archived, limit: 500 }),
-    select: (rows) => rows.length,
-    refetchInterval: 8000,
-  });
-  return (
-    <CollapsibleSection
-      icon={<Inbox className="h-4 w-4 shrink-0 text-muted-foreground" />}
-      title="Unfiled"
-      count={count.data ?? 0}
-      onDropItem={(id) => actions.onMove(id, null)}
-      expanded={expanded}
-      onToggle={() => setExpanded((v) => !v)}
-    >
-      {expanded && <UnfiledItems archived={archived} actions={actions} />}
-    </CollapsibleSection>
-  );
-}
-
-function UnfiledItems({
-  archived,
-  actions,
-}: {
-  archived: boolean;
-  actions: ItemCardActions;
-}) {
-  const items = useInfiniteQuery({
-    queryKey: ["items", { ungrouped: true, archived }],
-    queryFn: ({ pageParam }) =>
-      api.listItems({
-        ungrouped: true,
-        archived,
-        sort: "added",
+        sort,
         order: "desc",
         limit: PAGE_SIZE,
         offset: pageParam,
@@ -187,7 +135,7 @@ function UnfiledItems({
       lastPage.length === PAGE_SIZE ? allPages.length * PAGE_SIZE : undefined,
     refetchInterval: 8000,
   });
-  return <ItemGrid items={items} actions={actions} emptyLabel="Nothing unfiled." />;
+  return <ItemGrid items={items} actions={actions} emptyLabel="No items here." />;
 }
 
 function ItemGrid({

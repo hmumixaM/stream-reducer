@@ -21,7 +21,7 @@ import {
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/auth";
 import { MIRROR } from "@/lib/mirror";
-import { Button, Card, Spinner } from "@/components/ui";
+import { Button, Card, Select, Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { LogIn } from "lucide-react";
 
@@ -47,10 +47,17 @@ const PUBLIC_NAV = new Set(["/browse"]);
 
 function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [text, setText] = useState("");
+  const [folderId, setFolderId] = useState<string>("");
   const qc = useQueryClient();
   const urls = text.split(/[\s,]+/).map((u) => u.trim()).filter(Boolean);
+  const groups = useQuery({
+    queryKey: ["groups"],
+    queryFn: () => api.listGroups(),
+    enabled: open,
+  });
   const mutation = useMutation({
-    mutationFn: (list: string[]) => api.addItems(list),
+    mutationFn: (list: string[]) =>
+      api.addItems(list, folderId ? Number(folderId) : null),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["items"] });
       qc.invalidateQueries({ queryKey: ["queue"] });
@@ -86,6 +93,19 @@ function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
             onChange={(e) => setText(e.target.value)}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">
+              Add to folder
+            </span>
+            <Select value={folderId} onChange={(e) => setFolderId(e.target.value)}>
+              <option value="">No folder (Unfiled)</option>
+              {(groups.data ?? []).map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.title || "Folder"}
+                </option>
+              ))}
+            </Select>
+          </label>
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">
               {urls.length} URL{urls.length === 1 ? "" : "s"}
