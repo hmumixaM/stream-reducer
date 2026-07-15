@@ -556,13 +556,21 @@ def _generate_json_section(
     return defaults.copy()
 
 
-def _build_walkthrough_index(item: ItemView, walkthrough: str, lang: str, section_system: str, st: Stage, deadline: float | None = None) -> str:
+def _build_walkthrough_index(item: ItemView, walkthrough: str, lang: str, section_system: str, st: Stage, deadline: float | None = None, on_progress=None) -> str:
     parts = _chunk_text(walkthrough, SUMMARY_INDEX_CHUNK_CHARS)
     if not parts:
         return walkthrough
     index_parts: list[str] = []
     defaults = {"topics": [], "quotes": [], "entities": []}
     for i, part in enumerate(parts, start=1):
+        # Emit BEFORE each part's LLM call: for long content this loop makes
+        # several sequential calls, and without a heartbeat between them the
+        # Worker's idle watchdog (no progress for 4min) would abort the stream.
+        if on_progress:
+            try:
+                on_progress({"stage": "summarize", "detail": f"index {i}/{len(parts)}"})
+            except Exception:  # noqa: BLE001
+                pass
         prompt = WALKTHROUGH_INDEX_TEMPLATE.format(
             context=_build_context(item),
             index=i,
@@ -629,7 +637,7 @@ def _generate_structured_sections(
         compact_source = source
         if len(source) > SUMMARY_SECTION_SOURCE_CHARS:
             _emit("index")
-            compact_source = _build_walkthrough_index(item, source, lang, section_system, st, deadline)
+            compact_source = _build_walkthrough_index(item, source, lang, section_system, st, deadline, on_progress)
         quote_source = source if len(source) <= SUMMARY_SECTION_SOURCE_CHARS else compact_source
         context = _build_context(item)
 
