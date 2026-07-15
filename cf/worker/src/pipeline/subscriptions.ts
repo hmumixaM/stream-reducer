@@ -181,6 +181,7 @@ async function enqueueSubscriptionBatch(
         title: entry.title,
         external_id: entry.guid,
         platform,
+        folderId: sub.folder_id ?? null,
         subscriptionId: sub.id,
         feedUrl: sub.feed_url,
         meta: {

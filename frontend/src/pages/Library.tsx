@@ -6,11 +6,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { FolderPlus } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type Item } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Input, Select } from "@/components/ui";
 import { ItemCard, type ItemCardActions } from "@/components/ItemCard";
-import { FolderSection, UnfiledSection } from "@/components/FolderSection";
+import { FolderSection } from "@/components/FolderSection";
 
 const PLATFORMS = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
 const PAGE_SIZE = 60;
@@ -64,6 +64,25 @@ export function Library() {
     enabled: folderFirst,
     refetchInterval: 8000,
   });
+  // Folder-less items shown directly (as a flat grid) below the folders, sorted
+  // by the dropdown. Only fetched in the folder-first view.
+  const looseItems = useInfiniteQuery({
+    queryKey: ["items", { ungrouped: true, archived: archivedView, sort }],
+    queryFn: ({ pageParam }) =>
+      api.listItems({
+        ungrouped: true,
+        archived: archivedView,
+        sort,
+        order: "desc",
+        limit: PAGE_SIZE,
+        offset: pageParam,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === PAGE_SIZE ? allPages.length * PAGE_SIZE : undefined,
+    enabled: folderFirst,
+    refetchInterval: 8000,
+  });
   // Full folder list (unfiltered) powers the per-card "move to folder" menu.
   const groups = useQuery({
     queryKey: ["groups"],
@@ -104,6 +123,7 @@ export function Library() {
 
   const visibleItems = items.data?.pages.flat() ?? [];
   const sectionFolders = sectionGroups.data ?? [];
+  const looseRows = looseItems.data?.pages.flat() ?? [];
 
   const handleNewFolder = () => {
     const title = window.prompt("New folder name")?.trim();
@@ -117,7 +137,7 @@ export function Library() {
           <h1 className="text-2xl font-semibold">Library</h1>
           <p className="text-sm text-muted-foreground">
             {folderFirst
-              ? `${sectionFolders.length} folder${sectionFolders.length === 1 ? "" : "s"}`
+              ? `${sectionFolders.length} folder${sectionFolders.length === 1 ? "" : "s"} · ${looseRows.length}${looseItems.hasNextPage ? "+" : ""} loose`
               : `${visibleItems.length}${items.hasNextPage ? "+" : ""} ${
                   archivedView ? "archived" : "summaries"
                 }`}
@@ -179,16 +199,31 @@ export function Library() {
       </div>
 
       {folderFirst ? (
-        <div className="space-y-2">
-          {sectionFolders.map((g) => (
-            <FolderSection
-              key={g.id}
-              group={g}
-              archived={archivedView}
-              actions={actions}
-            />
-          ))}
-          <UnfiledSection archived={archivedView} actions={actions} />
+        <div className="space-y-4">
+          {sectionFolders.length > 0 && (
+            <div className="space-y-2">
+              {sectionFolders.map((g) => (
+                <FolderSection
+                  key={g.id}
+                  group={g}
+                  archived={archivedView}
+                  sort={sort}
+                  actions={actions}
+                />
+              ))}
+            </div>
+          )}
+          <LooseGrid
+            rows={looseRows}
+            isLoading={looseItems.isLoading}
+            hasNextPage={!!looseItems.hasNextPage}
+            isFetchingNextPage={looseItems.isFetchingNextPage}
+            fetchNextPage={() => looseItems.fetchNextPage()}
+            onDropDetach={(id) => move.mutate({ id, gid: null })}
+            hasFolders={sectionFolders.length > 0}
+            archivedView={archivedView}
+            actions={actions}
+          />
         </div>
       ) : items.isLoading ? (
         <p className="text-muted-foreground">Loading...</p>
@@ -219,6 +254,88 @@ export function Library() {
               ? "No summaries yet."
               : 'No summaries yet. Click "Add content" to get started.'}
         </Card>
+      )}
+    </div>
+  );
+}
+
+/** Folder-less items rendered directly as a flat grid. Doubles as a drop
+ * target: dropping a card here detaches it from its current folder. */
+function LooseGrid({
+  rows,
+  isLoading,
+  hasNextPage,
+  isFetchingNextPage,
+  fetchNextPage,
+  onDropDetach,
+  hasFolders,
+  archivedView,
+  actions,
+}: {
+  rows: Item[];
+  isLoading: boolean;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  fetchNextPage: () => void;
+  onDropDetach: (id: number) => void;
+  hasFolders: boolean;
+  archivedView: boolean;
+  actions: ItemCardActions;
+}) {
+  const [dragOver, setDragOver] = useState(false);
+
+  if (isLoading) {
+    return <p className="text-muted-foreground">Loading...</p>;
+  }
+  if (rows.length === 0) {
+    // Everything is filed: stay quiet when folders exist, otherwise show the
+    // empty-library card.
+    if (hasFolders) return null;
+    return (
+      <Card className="p-10 text-center text-muted-foreground">
+        {MIRROR
+          ? archivedView
+            ? "Nothing archived."
+            : "No summaries yet."
+          : 'No summaries yet. Click "Add content" to get started.'}
+      </Card>
+    );
+  }
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (!dragOver) setDragOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        const id = Number(e.dataTransfer.getData("text/plain"));
+        if (id) onDropDetach(id);
+      }}
+      className={`rounded-lg transition-colors ${
+        dragOver ? "bg-accent/50 ring-1 ring-primary" : ""
+      }`}
+    >
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {rows.map((item) => (
+          <ItemCard key={item.id} item={item} {...actions} />
+        ))}
+      </div>
+      {hasNextPage && (
+        <div className="mt-6 flex justify-center">
+          <Button
+            variant="outline"
+            onClick={fetchNextPage}
+            disabled={isFetchingNextPage}
+          >
+            {isFetchingNextPage ? "Loading…" : "Load more"}
+          </Button>
+        </div>
       )}
     </div>
   );

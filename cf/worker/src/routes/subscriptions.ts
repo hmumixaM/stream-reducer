@@ -36,6 +36,18 @@ function serialize(s: SubscriptionRow) {
   return { ...s, enabled: !!s.enabled };
 }
 
+// Folders are per-user; a subscription may only target a folder the caller owns.
+async function folderBelongsToUser(
+  c: Parameters<typeof requireAuth>[0],
+  folderId: number,
+  userId: number,
+): Promise<boolean> {
+  const row = await first<{ id: number }>(
+    c.env.DB.prepare("SELECT id FROM itemgroup WHERE id = ? AND user_id = ?").bind(folderId, userId),
+  );
+  return row != null;
+}
+
 // Subscribing/unsubscribing changes the subscriber-demand signal for every item
 // linked to that feed/channel, so recompute their priority scores.
 async function recomputeFeedPriorities(c: Parameters<typeof requireAuth>[0], feedUrl: string) {
@@ -60,9 +72,14 @@ subscriptionRoutes.post("/", async (c) => {
     title?: string;
     interval_minutes?: number;
     window_days?: number;
+    folder_id?: number | null;
   }>(c);
   const raw = (body.feed_url || "").trim();
   if (!raw) return c.json({ error: "feed_url required" }, 400);
+  const folderId = body.folder_id ?? null;
+  if (folderId != null && !(await folderBelongsToUser(c, folderId, userId))) {
+    return c.json({ error: "folder not found" }, 400);
+  }
   // Built-in: convert channel pages / @handles into their pollable RSS feed.
   const feed = await resolveFeedUrl(raw);
 
@@ -76,10 +93,10 @@ subscriptionRoutes.post("/", async (c) => {
   // by default), so subscribing doesn't backfill the entire archive.
   const minPublished = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
   const res = await c.env.DB.prepare(
-    `INSERT INTO subscription (user_id, platform, feed_url, title, interval_minutes, window_days, min_published_at, enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+    `INSERT INTO subscription (user_id, platform, feed_url, title, interval_minutes, window_days, min_published_at, folder_id, enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
   )
-    .bind(userId, detectPlatform(feed), feed, body.title ?? null, body.interval_minutes ?? 60, windowDays, minPublished)
+    .bind(userId, detectPlatform(feed), feed, body.title ?? null, body.interval_minutes ?? 60, windowDays, minPublished, folderId)
     .run();
   const row = await first<SubscriptionRow>(
     c.env.DB.prepare("SELECT * FROM subscription WHERE id = ?").bind(res.meta.last_row_id),
@@ -87,6 +104,50 @@ subscriptionRoutes.post("/", async (c) => {
   await recomputeFeedPriorities(c, feed);
   // Poll immediately so the user sees their last-3-months backfill start.
   if (row) await c.env.PIPELINE.send({ kind: "poll", subscription_id: row.id });
+  return c.json(serialize(row!));
+});
+
+// Edit a subscription: currently its target folder, plus optional metadata.
+// folder_id: number files future episodes into that folder; null unfiles them.
+subscriptionRoutes.patch("/:id", async (c) => {
+  const userId = c.get("user").id;
+  const id = Number(c.req.param("id"));
+  const body = await readJson<{
+    folder_id?: number | null;
+    title?: string;
+    interval_minutes?: number;
+  }>(c);
+  const sub = await first<SubscriptionRow>(
+    c.env.DB.prepare("SELECT * FROM subscription WHERE id = ? AND user_id = ?").bind(id, userId),
+  );
+  if (!sub) return c.json({ error: "subscription not found" }, 404);
+
+  const sets: string[] = [];
+  const binds: unknown[] = [];
+  if ("folder_id" in body) {
+    const folderId = body.folder_id ?? null;
+    if (folderId != null && !(await folderBelongsToUser(c, folderId, userId))) {
+      return c.json({ error: "folder not found" }, 400);
+    }
+    sets.push("folder_id = ?");
+    binds.push(folderId);
+  }
+  if (body.title !== undefined) {
+    sets.push("title = ?");
+    binds.push(body.title || null);
+  }
+  if (body.interval_minutes !== undefined) {
+    sets.push("interval_minutes = ?");
+    binds.push(body.interval_minutes);
+  }
+  if (sets.length) {
+    await c.env.DB.prepare(
+      `UPDATE subscription SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`,
+    ).bind(...binds, id, userId).run();
+  }
+  const row = await first<SubscriptionRow>(
+    c.env.DB.prepare("SELECT * FROM subscription WHERE id = ? AND user_id = ?").bind(id, userId),
+  );
   return c.json(serialize(row!));
 });
 

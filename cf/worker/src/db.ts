@@ -75,6 +75,7 @@ export interface SubscriptionRow {
   last_entry_count: number;
   last_new_count: number;
   consecutive_failures: number;
+  folder_id: number | null;
   created_at: string;
 }
 
