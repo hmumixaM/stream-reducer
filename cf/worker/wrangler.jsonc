@@ -123,7 +123,13 @@
       // Build from the repo root so the Dockerfile can COPY the shared `app/`
       // package (adapters) alongside cf/pipeline/*.py.
       "image_build_context": "../../",
-      "instance_type": "standard-2",
+      // The pipeline is I/O-bound (download + STT + LLM are network waits) and
+      // peak memory is modest (audio base64 capped at MEDIA_MAX_BYTES=25MB, plus
+      // transcript/embeddings + 2 small WARP proxies). Memory is billed on the
+      // provisioned instance size x runtime, so "basic" (1 GiB) instead of the
+      // former standard-2 (6 GiB) cuts memory-second cost ~83%. Any rare OOM on
+      // an extreme item just re-queues (auto-retry).
+      "instance_type": "basic",
       // Total container slots. Kept ABOVE the queue `max_concurrency` (8) so the
       // auxiliary single-instance containers (feed / bili-refresh / meta /
       // proxy-check) have ~2 reserved slots and never starve pipeline jobs into
