@@ -182,8 +182,9 @@ export function Subscriptions() {
                 )}
                 {s.last_status === "empty" && !s.last_seen_guid && (
                   <p className="mt-1 text-xs text-amber-400">
-                    feed returned 0 entries — for bilibili this usually means an expired/blocked
-                    BILIBILI_COOKIE (risk control).
+                    {s.platform === "bilibili"
+                      ? "feed returned 0 entries — for bilibili this usually means an expired/blocked BILIBILI_COOKIE (risk control)."
+                      : "feed returned 0 entries — nothing published inside this subscription's window, or the feed URL isn't a real feed."}
                   </p>
                 )}
               </div>

@@ -1,6 +1,7 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import type { Env } from "../env";
 import { getBilibiliCookie } from "../lib/biliAuth";
+import { errorMessage, isTransientCapacity } from "./transient";
 
 // Container DO instances run the image they were CREATED with and are reused by
 // id across deploys, so a long-lived instance can keep running a stale image
@@ -16,12 +17,18 @@ export function containerKey(env: Env, base: string): string {
 export class PipelineContainer extends Container<Env> {
   // The Python service inside the image listens here (see cf/pipeline/server.py).
   defaultPort = 8080;
-  // Spin down quickly after a job so per-item instances don't linger against
-  // the container max_instances cap. With queue max_concurrency == max_instances
-  // (1 container per concurrent job), a long idle window would let a just-
-  // finished instance overlap the next job and trip "no Container instance
-  // available" 503s — so keep this short.
-  sleepAfter = "5s";
+  // Keep a just-finished instance warm briefly so that when the SAME item is
+  // redelivered for a retry (watchdog/stream-break/transient), it lands back on
+  // its still-running instance (key = `job-<id>`) instead of paying a full cold
+  // boot of the heavy image. The previous 5s was too short to survive the queue
+  // redelivery window, so every retry cold-started — and on the ¼-vCPU `basic`
+  // instance those slow boots blow the Durable Object startup budget
+  // (blockConcurrencyWhile) and get reset/SIGTERM'd, feeding a churn loop.
+  // Kept modest (not minutes) because per-item keys mean a lingering finished
+  // instance can't be reused by a DIFFERENT item — it only holds a slot against
+  // the max_instances cap, so too-long a window would trip "no Container
+  // instance available" 503s.
+  sleepAfter = "30s";
 
   // Secrets/config the container needs are injected as container env vars.
   override envVars = {
@@ -336,6 +343,47 @@ interface FeedEntryOut {
   published: string | null;
 }
 
+// Backoff between retries of a short aux container call. Generous on purpose: a
+// blockConcurrencyWhile reset means a cold container blew the DO startup window,
+// so the retry needs enough time for provisioning/image pull to actually finish.
+const AUX_BACKOFF_MS = [5000, 15000];
+
+// Short, idempotent container calls (feed enumeration, metadata) share the
+// container pool with pipeline jobs, so they routinely catch infra blips: every
+// slot busy (503) or a cold start reset by blockConcurrencyWhile. Both clear on
+// their own and a retry lands on a warm/free instance, so absorb them here.
+// Without this, one cold-start reset surfaced all the way up and marked an entire
+// subscription 'error' (last_status='error', consecutive_failures++) even though
+// nothing about the feed was actually broken.
+async function auxContainerCall(
+  env: Env,
+  instanceKey: string,
+  path: string,
+  payload: unknown,
+  label: string,
+): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const instance = getContainer(env.PIPELINE_CONTAINER, containerKey(env, instanceKey));
+      // Build a fresh Request per attempt: a Request body can only be read once.
+      const res = await instance.fetch(
+        new Request(`http://pipeline${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        }),
+      );
+      if (res.ok) return res;
+      throw new Error(`${label} container ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    } catch (err) {
+      const msg = errorMessage(err);
+      if (attempt > AUX_BACKOFF_MS.length || !isTransientCapacity(msg)) throw err;
+      console.warn(`${label} container blip (attempt ${attempt}) — retrying: ${msg}`);
+      await new Promise((resolve) => setTimeout(resolve, AUX_BACKOFF_MS[attempt - 1]));
+    }
+  }
+}
+
 // Enumerate a channel/playlist's recent uploads via the container's yt-dlp.
 // Used by subscription polling to go beyond the ~15 entries a channel's RSS
 // feed exposes (the Worker can't run yt-dlp itself).
@@ -344,15 +392,7 @@ export async function fetchFeedEntries(
   source_url: string,
   limit = 300,
 ): Promise<FeedEntryOut[]> {
-  const instance = getContainer(env.PIPELINE_CONTAINER, containerKey(env, "feed"));
-  const res = await instance.fetch(
-    new Request("http://pipeline/feed_entries", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ source_url, limit }),
-    }),
-  );
-  if (!res.ok) throw new Error(`feed_entries container ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const res = await auxContainerCall(env, "feed", "/feed_entries", { source_url, limit }, "feed_entries");
   const data = (await res.json()) as { entries?: FeedEntryOut[] };
   return data.entries ?? [];
 }
@@ -364,14 +404,12 @@ export async function fetchMetadata(
   platform: string,
 ): Promise<PipelineResult["metadata"]> {
   const bilibili_cookie = platform === "bilibili" ? await getBilibiliCookie(env) : undefined;
-  const instance = getContainer(env.PIPELINE_CONTAINER, containerKey(env, `meta-${platform}`));
-  const res = await instance.fetch(
-    new Request("http://pipeline/metadata", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ source_url, platform, bilibili_cookie }),
-    }),
+  const res = await auxContainerCall(
+    env,
+    `meta-${platform}`,
+    "/metadata",
+    { source_url, platform, bilibili_cookie },
+    "metadata",
   );
-  if (!res.ok) throw new Error(`metadata container ${res.status}`);
   return (await res.json()) as PipelineResult["metadata"];
 }

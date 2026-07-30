@@ -102,12 +102,33 @@ export async function resolveFeedUrl(input: string): Promise<string> {
     const byChannel = url.pathname.match(/^\/channel\/(UC[0-9A-Za-z_-]{22})/);
     if (byChannel) return youtubeFeed(byChannel[1]);
 
-    if (/^\/(@[^/?#]+|c\/[^/?#]+|user\/[^/?#]+)/.test(url.pathname)) {
+    if (isYoutubeChannelPath(url.pathname)) {
       const channelId = await fetchYoutubeChannelId(input);
       if (channelId) return youtubeFeed(channelId);
     }
   }
   return input;
+}
+
+// Reserved first-path segments on youtube.com that are NOT channel custom URLs,
+// so a bare `/{segment}` path isn't mistaken for a legacy vanity channel URL.
+const YT_RESERVED_PATHS = new Set([
+  "watch", "feeds", "results", "playlist", "shorts", "embed", "channel", "c",
+  "user", "hashtag", "live", "clip", "gaming", "premium", "account", "feed",
+  "about", "tv", "music", "oembed", "redirect", "upload", "signin", "logout",
+  "creators", "ads", "howyoutubeworks", "sitemap", "robots.txt", "favicon.ico",
+]);
+
+// Does this youtube.com path point at a channel whose id must be fetched from
+// the page? Covers /@handle, /c/Name, /user/Name AND bare legacy vanity URLs
+// (youtube.com/TheDiaryOfACEO) — a single path segment (optionally with a
+// channel-tab suffix) that isn't one of YouTube's reserved routes.
+function isYoutubeChannelPath(pathname: string): boolean {
+  if (/^\/(@[^/?#]+|c\/[^/?#]+|user\/[^/?#]+)/.test(pathname)) return true;
+  const m = pathname.match(
+    /^\/([^/?#@]+)(?:\/(?:videos|streams|shorts|featured|community|playlists|about))?\/?$/,
+  );
+  return m ? !YT_RESERVED_PATHS.has(m[1].toLowerCase()) : false;
 }
 
 // Resolve an Apple Podcasts show id to its RSS feed via the iTunes Lookup API.
@@ -231,9 +252,17 @@ async function fetchYoutubeChannelId(pageUrl: string): Promise<string | null> {
       },
     });
     const html = await res.text();
+    // A channel page embeds MANY channel ids — recommended/featured channels
+    // (gridChannelRenderer) often appear BEFORE the page's own id, so grabbing
+    // the first "channelId" picks the wrong channel (e.g. "… Clips"). Prefer the
+    // canonical markers that always denote THIS page's channel: rel="canonical",
+    // og:url, and channelMetadataRenderer.externalId. Only fall back to a bare
+    // "channelId" if none are present.
     const m =
-      html.match(/"(?:channelId|externalId)":"(UC[0-9A-Za-z_-]{22})"/) ||
-      html.match(/\/channel\/(UC[0-9A-Za-z_-]{22})/);
+      html.match(/rel="canonical"\s+href="https:\/\/www\.youtube\.com\/channel\/(UC[0-9A-Za-z_-]{22})"/) ||
+      html.match(/property="og:url"\s+content="https:\/\/www\.youtube\.com\/channel\/(UC[0-9A-Za-z_-]{22})"/) ||
+      html.match(/"externalId":"(UC[0-9A-Za-z_-]{22})"/) ||
+      html.match(/"channelId":"(UC[0-9A-Za-z_-]{22})"/);
     return m ? m[1] : null;
   } catch {
     return null;

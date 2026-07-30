@@ -4,6 +4,7 @@ import { isoNow } from "../lib/crypto";
 import { addUrlToLibrary } from "../lib/ingest";
 import { detectPlatform } from "../lib/url";
 import { fetchFeed, resolveFeedUrl, type FeedEntry } from "../lib/feed";
+import { errorMessage, isTransientCapacity } from "./transient";
 
 const MAX_NEW_PER_POLL = 10;
 // Subscriptions skip videos shorter than this (avoids flooding a library with
@@ -98,7 +99,18 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
 async function selfHealSubscriptionFeed(env: Env, sub: SubscriptionRow): Promise<SubscriptionRow> {
   let healHost = "";
   try { healHost = new URL(sub.feed_url).hostname.toLowerCase(); } catch { /* not a URL */ }
-  if (!healHost.endsWith("podcasts.apple.com") && !healHost.endsWith("itunes.apple.com")) return sub;
+  // Re-run resolution for sources whose stored feed_url may be an unpollable
+  // PAGE url rather than a canonical feed: Apple show pages, and YouTube channel
+  // pages (incl. bare legacy vanity URLs like youtube.com/TheDiaryOfACEO that
+  // older code failed to resolve — they polled 0 entries forever). resolveFeedUrl
+  // is a cheap no-op for already-canonical feeds (feeds/videos.xml passes through
+  // without a network fetch), so this only does work when healing is needed.
+  const canHeal =
+    healHost.endsWith("podcasts.apple.com") ||
+    healHost.endsWith("itunes.apple.com") ||
+    healHost.endsWith("youtube.com") ||
+    healHost.endsWith("youtube-nocookie.com");
+  if (!canHeal) return sub;
 
   const resolved = await resolveFeedUrl(sub.feed_url);
   if (resolved === sub.feed_url) return sub;
@@ -124,6 +136,19 @@ async function fetchSubscriptionFeed(
   try {
     return await fetchFeed(env, feedUrl);
   } catch (err) {
+    // A container-pool blip (all slots busy, or a cold start reset by
+    // blockConcurrencyWhile) says nothing about the feed's health, so don't brand
+    // the subscription broken over it — that produced a bogus "last poll failed"
+    // with consecutive_failures climbing on perfectly good channels. The aux
+    // container call already retried; if it's STILL blipping, leave the poll
+    // unrecorded so this subscription stays due and the next cron tick (15 min)
+    // picks it up, mirroring how the queue consumer re-queues without burning a
+    // retry. Bounded by the cron cadence, so it can't hot-loop.
+    const msg = errorMessage(err);
+    if (isTransientCapacity(msg)) {
+      console.warn(`subscription ${subId} poll deferred — container capacity: ${msg}`);
+      return null;
+    }
     await recordPollError(env, subId, err);
     return null;
   }
