@@ -163,10 +163,11 @@
     "LLM_BASE_URL": "https://xgoose-gemini-proxy-1.max-678.workers.dev/v1",
     "LLM_MODEL": "gemini-3.5-flash",
     // Backup summarize model on the SAME proxy. When set, a summarize LLM call
-    // that times out or errors on LLM_MODEL is retried once against this model
-    // (so a flaky/overloaded primary doesn't produce an empty summary). Empty =
-    // disabled (no behavior change). e.g. "gemini-3-pro" or "gemini-2.5-flash".
-    "LLM_MODEL_FALLBACK": "",
+    // that times out, errors, or returns empty/diagnostic content is retried once
+    // against this stable model. This must stay enabled: the primary proxy has
+    // historically returned HTTP 200 with "Upstream Gemini returned an empty
+    // response", which was previously persisted as 171 episode bodies.
+    "LLM_MODEL_FALLBACK": "gemini-2.5-flash",
     "LLM_MODEL_INFOGRAPHIC": "gemini-3-pro-image-preview",
     "STT_MODEL": "openai/whisper-large-v3-turbo",
     "EMBEDDING_DIM": "1024",
@@ -177,7 +178,7 @@
     "ADMIN_EMAILS": "huyangmax@gmail.com",
     // Bump to force all container jobs onto fresh instances (new image) after a
     // deploy — avoids long-lived DO instances running a stale container image.
-    "CONTAINER_GEN": "15"
+    "CONTAINER_GEN": "16"
   }
 
   // Secrets (set via `wrangler secret put`):
