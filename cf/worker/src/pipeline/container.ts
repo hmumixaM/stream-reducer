@@ -211,13 +211,19 @@ export async function runPipelineStreaming(
 ): Promise<PipelineResult> {
   const resolvedJob = await withBilibiliCookie(env, job);
   const reader = await openPipelineStream(env, resolvedJob);
-  const state: PipelineStreamState = { result: null, errorMsg: null };
+  const state: PipelineStreamState = {
+    result: null,
+    errorMsg: null,
+    lastStage: null,
+    lastDetail: null,
+  };
   const idleMs = Number(env.PIPELINE_IDLE_MS ?? "240000");
 
   await readNdjsonLines(
     reader,
     idleMs,
     createStreamEventHandler(resolvedJob, state, onProgress, onPartial),
+    () => pipelineIdleContext(state),
   );
 
   if (state.errorMsg) throw new Error(state.errorMsg);
@@ -228,6 +234,8 @@ export async function runPipelineStreaming(
 interface PipelineStreamState {
   result: PipelineResult | null;
   errorMsg: string | null;
+  lastStage: string | null;
+  lastDetail: string | null;
 }
 
 async function withBilibiliCookie(env: Env, job: PipelineJob): Promise<PipelineJob> {
@@ -271,6 +279,8 @@ function createStreamEventHandler(
     } catch {
       return;
     }
+    if (typeof evt.stage === "string" && evt.stage) state.lastStage = evt.stage;
+    if (typeof evt.detail === "string" && evt.detail) state.lastDetail = evt.detail;
     if (evt.event === "result") state.result = evt.result ?? null;
     else if (evt.event === "error") {
       state.errorMsg = evt.message ?? "pipeline error";
@@ -291,10 +301,11 @@ async function readNdjsonLines(
   reader: ReadableStreamDefaultReader<string>,
   idleMs: number,
   handleLine: (line: string) => Promise<void>,
+  idleContext: () => string,
 ): Promise<void> {
   let pending = "";
   for (;;) {
-    const { value, done } = await readWithIdleTimeout(reader, idleMs);
+    const { value, done } = await readWithIdleTimeout(reader, idleMs, idleContext);
     if (done) break;
     const split = splitNdjsonChunk(pending, value);
     pending = split.pending;
@@ -306,6 +317,7 @@ async function readNdjsonLines(
 async function readWithIdleTimeout(
   reader: ReadableStreamDefaultReader<string>,
   idleMs: number,
+  idleContext: () => string,
 ): Promise<ReadableStreamReadResult<string>> {
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   const idle = new Promise<"idle">((resolve) => {
@@ -321,8 +333,14 @@ async function readWithIdleTimeout(
     // ignore cancellation failures; the stall error below is the useful signal.
   }
   throw new Error(
-    `pipeline stalled — no progress for ${Math.round(idleMs / 60000)}min (likely an LLM summarize stall)`,
+    `pipeline stalled — no progress for ${Math.round(idleMs / 60000)}min${idleContext()}`,
   );
+}
+
+function pipelineIdleContext(state: PipelineStreamState): string {
+  const stage = state.lastStage ? ` during ${state.lastStage}` : "";
+  const detail = state.lastDetail ? ` (${state.lastDetail})` : "";
+  return `${stage}${detail}`;
 }
 
 function splitNdjsonChunk(previousPending: string, chunk: string): { lines: string[]; pending: string } {

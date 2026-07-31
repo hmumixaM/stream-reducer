@@ -40,6 +40,42 @@ def _gemini_model_fallback() -> str:
     return os.environ.get("GEMINI_MODEL_FALLBACK", "").strip()
 
 
+_EMPTY_RESPONSE_MARKERS = (
+    "upstream gemini returned an empty response",
+    "gemini returns no response",
+    "gemini returned no response",
+)
+
+
+def _validated_chat_content(data: object, model: str) -> str:
+    """Return usable assistant text or raise a retryable protocol error.
+
+    The Gemini proxy has historically answered HTTP 200 with either an empty
+    ``content`` field or a short diagnostic paragraph beginning "Upstream
+    Gemini returned an empty response". Treating that as a successful summary
+    persisted 171 garbage episode bodies. A protocol-shaped error lets
+    ``generate_text`` try the configured fallback model and, if both fail,
+    makes the item retry rather than marking it done with the diagnostic text.
+    """
+    try:
+        content = data["choices"][0]["message"].get("content") or ""  # type: ignore[index]
+    except (KeyError, IndexError, TypeError, AttributeError) as exc:
+        raise httpx.RemoteProtocolError(
+            f"LLM response from {model} has no assistant content",
+        ) from exc
+    if not isinstance(content, str):
+        raise httpx.RemoteProtocolError(f"LLM response from {model} has non-text content")
+
+    normalized = " ".join(content.lower().split())
+    if not normalized:
+        raise httpx.RemoteProtocolError(f"LLM response from {model} is empty")
+    if len(normalized) < 1000 and any(marker in normalized for marker in _EMPTY_RESPONSE_MARKERS):
+        raise httpx.RemoteProtocolError(
+            f"LLM response from {model} is an upstream empty-response diagnostic",
+        )
+    return content
+
+
 def _chat_once(model: str, messages: list[dict], temperature: float, max_tokens: int | None, key: str) -> LlmResult:
     payload: dict = {"model": model, "messages": messages, "temperature": temperature}
     if max_tokens is not None:
@@ -75,7 +111,7 @@ def _chat_once(model: str, messages: list[dict], temperature: float, max_tokens:
     if "err" in box:
         raise box["err"]
     data = box["data"]
-    content = data["choices"][0]["message"].get("content") or ""
+    content = _validated_chat_content(data, model)
     usage = data.get("usage") or {}
     return LlmResult(
         text=content,
@@ -101,9 +137,9 @@ def generate_text(
     messages.append({"role": "user", "content": prompt})
 
     # Try the primary model, then (once) the configured backup model if the
-    # primary times out or errors — so a flaky/overloaded primary doesn't force
-    # the section to fall back to an empty summary. Non-HTTP errors (e.g. a
-    # malformed response) propagate immediately (no point retrying the same).
+    # primary times out, errors, or returns unusable content — so a
+    # flaky/overloaded primary doesn't force the section to fall back to an
+    # empty summary.
     primary = model or _gemini_model()
     attempts = [primary]
     fallback = _gemini_model_fallback()

@@ -398,7 +398,7 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
     }
     await persistCompletedPipeline(env, itemId, result);
   } catch (err) {
-    await handlePipelineFailure(env, itemId, runStart, err);
+    await handlePipelineFailure(env, itemId, runStart, err, resummarize);
   }
 }
 
@@ -535,10 +535,29 @@ async function persistExcludedResult(env: Env, itemId: number, result: PipelineR
 
 async function persistCompletedPipeline(env: Env, itemId: number, result: PipelineResult): Promise<void> {
   if (result.error) throw new Error(result.error);
+  const summaryError = invalidSummaryReason(result);
+  if (summaryError) throw new Error(summaryError);
 
   await persistResultWithDiagnostics(env, itemId, result);
   await embedChunks(env, itemId);
   await markItemDone(env, itemId);
+}
+
+const EMPTY_SUMMARY_MARKERS = [
+  "upstream gemini returned an empty response",
+  "gemini returns no response",
+  "gemini returned no response",
+];
+
+function invalidSummaryReason(result: PipelineResult): string | null {
+  if (!result.summary) return "pipeline returned no summary";
+  const markdown = result.summary.markdown.trim();
+  if (!markdown) return "pipeline returned an empty summary";
+  const normalized = markdown.toLowerCase();
+  if (EMPTY_SUMMARY_MARKERS.some((marker) => normalized.includes(marker))) {
+    return "pipeline returned an upstream empty-response diagnostic instead of a summary";
+  }
+  return null;
 }
 
 async function persistResultWithDiagnostics(env: Env, itemId: number, result: PipelineResult): Promise<void> {
@@ -591,13 +610,20 @@ async function handlePipelineFailure(
   itemId: number,
   runStart: number,
   err: unknown,
+  resummarize: boolean,
 ): Promise<void> {
   const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  const transcriptAvailable = Boolean(
+    await first<{ id: number }>(
+      env.DB.prepare("SELECT id FROM transcript WHERE item_id = ?").bind(itemId),
+    ),
+  );
 
   // Container-pool / infra blips are not the item's fault: re-queue WITHOUT
   // burning a retry attempt, so it keeps retrying until a slot frees.
   if (isTransientCapacity(msg)) {
-    await requeueTransientPipelineItem(env, itemId);
+    await requeueTransientPipelineItem(env, itemId, transcriptAvailable);
+    await enqueueResummarizeAfterProcessFailure(env, itemId, resummarize, transcriptAvailable);
     console.warn("pipeline item deferred — capacity, re-queued", itemId);
     throw err;
   }
@@ -610,10 +636,12 @@ async function handlePipelineFailure(
   );
   const attempts = (row?.retry_count ?? 0) + 1;
   if (attempts < MAX_RETRIES) {
-    await requeueForRetry(env, itemId, attempts);
+    await requeueForRetry(env, itemId, attempts, transcriptAvailable);
+    await enqueueResummarizeAfterProcessFailure(env, itemId, resummarize, transcriptAvailable);
     // Rethrow so the queue redelivers this message promptly for the retry; a
-    // continuation was also enqueued before processing and the 15-min cron pump
-    // re-drains queued items, so the retry can't stall.
+    // continuation was also enqueued before processing. If the transcript was
+    // already streamed to D1, an explicit resummarize message was enqueued above
+    // so this retry does NOT pay for download + STT again.
     console.warn(`pipeline item ${itemId} failed (attempt ${attempts}/${MAX_RETRIES}) — re-queued: ${msg}`);
     throw err;
   }
@@ -622,26 +650,50 @@ async function handlePipelineFailure(
   console.error(`pipeline item failed permanently item=${itemId} attempts=${attempts} ms=${Date.now() - runStart} msg=${msg}`);
 }
 
-async function requeueTransientPipelineItem(env: Env, itemId: number): Promise<void> {
+async function requeueTransientPipelineItem(
+  env: Env,
+  itemId: number,
+  transcriptAvailable: boolean,
+): Promise<void> {
   await env.DB.prepare(
-    `UPDATE item SET status = 'queued', error = NULL,
+    `UPDATE item SET status = ?, error = NULL,
        progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
      WHERE id = ?`,
   )
-    .bind(itemId)
+    .bind(transcriptAvailable ? "summarizing" : "queued", itemId)
     .run();
 }
 
 // Re-queue a task for another attempt, recording the incremented attempt count
 // so the failure handler can eventually give up.
-async function requeueForRetry(env: Env, itemId: number, retryCount: number): Promise<void> {
+async function requeueForRetry(
+  env: Env,
+  itemId: number,
+  retryCount: number,
+  transcriptAvailable: boolean,
+): Promise<void> {
   await env.DB.prepare(
-    `UPDATE item SET status = 'queued', error = NULL, retry_count = ?,
+    `UPDATE item SET status = ?, error = NULL, retry_count = ?,
        progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
      WHERE id = ?`,
   )
-    .bind(retryCount, itemId)
+    .bind(transcriptAvailable ? "summarizing" : "queued", retryCount, itemId)
     .run();
+}
+
+async function enqueueResummarizeAfterProcessFailure(
+  env: Env,
+  itemId: number,
+  resummarize: boolean,
+  transcriptAvailable: boolean,
+): Promise<void> {
+  // A retried `resummarize` queue message already has the right kind. A failed
+  // full `process` message does not: once its partial transcript is in D1,
+  // enqueue the cheap continuation explicitly and let the original redelivery
+  // move on to other queued work.
+  if (transcriptAvailable && !resummarize) {
+    await env.PIPELINE.send({ kind: "resummarize", item_id: itemId });
+  }
 }
 
 async function markItemErrored(env: Env, itemId: number, msg: string): Promise<void> {
