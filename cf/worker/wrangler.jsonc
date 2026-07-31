@@ -123,13 +123,14 @@
       // Build from the repo root so the Dockerfile can COPY the shared `app/`
       // package (adapters) alongside cf/pipeline/*.py.
       "image_build_context": "../../",
-      // The pipeline is I/O-bound (download + STT + LLM are network waits) and
-      // peak memory is modest (audio base64 capped at MEDIA_MAX_BYTES=25MB, plus
-      // transcript/embeddings + 2 small WARP proxies). Memory is billed on the
-      // provisioned instance size x runtime, so "basic" (1 GiB) instead of the
-      // former standard-2 (6 GiB) cuts memory-second cost ~83%. Any rare OOM on
-      // an extreme item just re-queues (auto-retry).
-      "instance_type": "basic",
+      // Most stages are I/O-bound, but ffmpeg must decode/transcode multi-hour
+      // podcast audio. On "basic" (1/4 vCPU, 1 GiB), a 3.6-hour episode spent
+      // ~30 minutes preparing chunks and outlived the Worker invocation. Use the
+      // 1-vCPU tier for about 4x the throughput. Though standard-2 provisions
+      // 6 GiB, one successful ~8-minute run costs far fewer memory-seconds than
+      // repeatedly restarting a ~30-minute basic run (these items had 6–8
+      // failed attempts each).
+      "instance_type": "standard-2",
       // Total container slots. Kept ABOVE the queue `max_concurrency` (8) so the
       // auxiliary single-instance containers (feed / bili-refresh / meta /
       // proxy-check) have ~2 reserved slots and never starve pipeline jobs into
@@ -178,7 +179,7 @@
     "ADMIN_EMAILS": "huyangmax@gmail.com",
     // Bump to force all container jobs onto fresh instances (new image) after a
     // deploy — avoids long-lived DO instances running a stale container image.
-    "CONTAINER_GEN": "16"
+    "CONTAINER_GEN": "17"
   }
 
   // Secrets (set via `wrangler secret put`):
