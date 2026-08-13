@@ -3,12 +3,26 @@ import { getContainer } from "@cloudflare/containers";
 import { containerKey } from "../pipeline/container";
 import type { AppContext } from "../auth";
 import { requireAdmin } from "../auth";
-import { all, first, type ItemRow } from "../db";
+import {
+  all,
+  first,
+  type ChannelFollowRow,
+  type ChannelRow,
+  type ItemRow,
+} from "../db";
 import { toItemRead } from "../lib/serialize";
 import { cacheThumbnail } from "../lib/ingest";
 import { refreshBilibiliCookie } from "../lib/biliRefresh";
 import { loadBiliAuth } from "../lib/biliAuth";
 import { readJson } from "../lib/request";
+import {
+  groupSelectedResolvedFollows,
+  mergeFollowsIntoChannel,
+  mergeFollowState,
+  resolveChannelIdentity,
+  upsertChannel,
+  type ResolvedChannelFollow,
+} from "../lib/channels";
 
 // Admin-only: user management + global processing-queue oversight.
 export const adminRoutes = new Hono<AppContext>();
@@ -283,6 +297,264 @@ adminRoutes.post("/cache-thumbnails", async (c) => {
     }
   }
   return c.json({ candidates: rows.length, cached: dryRun ? 0 : cached });
+});
+
+function boundedBatchSize(raw: string | undefined, fallback: number, max: number): number {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0
+    ? Math.min(parsed, max)
+    : fallback;
+}
+
+function nonNegativeCursor(raw: string | undefined): number {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+interface FolderConflict {
+  user_id: number;
+  channel_key: string;
+  subscription_ids: number[];
+  folder_ids: number[];
+}
+
+// Convert legacy URL-keyed subscriptions into channel follows. Batches are
+// cursor-bounded; duplicate merging is deterministic and safe to retry.
+adminRoutes.post("/migrate-channels", async (c) => {
+  const dryRun = c.req.query("dry_run") === "true";
+  const limit = boundedBatchSize(c.req.query("limit"), 100, 500);
+  const afterId = nonNegativeCursor(c.req.query("after_id"));
+  const selected = await all<ChannelFollowRow>(
+    c.env.DB.prepare(
+      `SELECT * FROM subscription
+        WHERE channel_id IS NULL AND id > ?
+        ORDER BY id
+        LIMIT ?`,
+    ).bind(afterId, limit),
+  );
+
+  if (!selected.length) {
+    return c.json({
+      dry_run: dryRun,
+      scanned: 0,
+      channels_created: 0,
+      follows_linked: 0,
+      duplicates_merged: 0,
+      items_linked: 0,
+      folder_conflicts: [],
+      unresolved: [],
+      next_after_id: afterId,
+    });
+  }
+
+  // Expand each selected user's unresolved rows before grouping. A stable
+  // identity may have aliases on opposite sides of the cursor boundary; those
+  // rows must be merged as one migration unit.
+  const userIds = [...new Set(selected.map((follow) => follow.user_id))];
+  const userPlaceholders = userIds.map(() => "?").join(",");
+  const unresolvedCandidates = await all<ChannelFollowRow>(
+    c.env.DB.prepare(
+      `SELECT * FROM subscription
+        WHERE channel_id IS NULL
+          AND user_id IN (${userPlaceholders})
+        ORDER BY id`,
+    ).bind(...userIds),
+  );
+  const selectedIds = new Set(selected.map((follow) => follow.id));
+  const unresolved: { subscription_id: number; feed_url: string; error: string }[] = [];
+  const resolved: ResolvedChannelFollow[] = [];
+  for (const follow of unresolvedCandidates) {
+    try {
+      resolved.push({
+        follow,
+        identity: await resolveChannelIdentity(follow.feed_url),
+      });
+    } catch (error) {
+      if (selectedIds.has(follow.id)) {
+        unresolved.push({
+          subscription_id: follow.id,
+          feed_url: follow.feed_url,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  const groups = groupSelectedResolvedFollows(selectedIds, resolved);
+
+  let channelsCreated = 0;
+  let followsLinked = 0;
+  let duplicatesMerged = 0;
+  let itemsLinked = 0;
+  const folderConflicts: FolderConflict[] = [];
+  const hypotheticallyCreated = new Set<string>();
+  const hypotheticalItemLinks = new Set<string>();
+
+  for (const group of groups.values()) {
+    const { identity } = group[0];
+    const userId = group[0].follow.user_id;
+    const channelKey = `${identity.platform}\u0000${identity.channelKey}`;
+    const candidates = group.map((entry) => entry.follow);
+    let channel = await first<ChannelRow>(
+      c.env.DB.prepare(
+        "SELECT * FROM channel WHERE platform = ? AND channel_key = ?",
+      ).bind(identity.platform, identity.channelKey),
+    );
+    if (!channel && !hypotheticallyCreated.has(channelKey)) {
+      channelsCreated++;
+      hypotheticallyCreated.add(channelKey);
+    }
+    if (!dryRun) channel = await upsertChannel(c.env, identity);
+
+    if (channel) {
+      const existing = await first<ChannelFollowRow>(
+        c.env.DB.prepare(
+          "SELECT * FROM subscription WHERE user_id = ? AND channel_id = ?",
+        ).bind(userId, channel.id),
+      );
+      if (existing && !candidates.some((follow) => follow.id === existing.id)) {
+        candidates.push(existing);
+      }
+    }
+
+    const merged = mergeFollowState(candidates);
+    duplicatesMerged += merged.duplicateIds.length;
+    followsLinked++;
+    const folderIds = [...new Set(
+      candidates.flatMap((follow) => follow.folder_id == null ? [] : [follow.folder_id]),
+    )].sort((a, b) => a - b);
+    if (merged.folderConflict) {
+      folderConflicts.push({
+        user_id: userId,
+        channel_key: identity.channelKey,
+        subscription_ids: candidates.map((follow) => follow.id).sort((a, b) => a - b),
+        folder_ids: folderIds,
+      });
+    }
+
+    const feedUrls = [...new Set(group.map((entry) => entry.follow.feed_url))];
+    const placeholders = feedUrls.map(() => "?").join(",");
+    const itemRows = await all<{ item_id: number }>(
+      c.env.DB.prepare(
+        `SELECT DISTINCT item_id
+           FROM item_feed
+          WHERE feed_url IN (${placeholders})
+            ${channel ? "AND item_id NOT IN (SELECT item_id FROM channel_item WHERE channel_id = ?)" : ""}`,
+      ).bind(...feedUrls, ...(channel ? [channel.id] : [])),
+    );
+    for (const item of itemRows) {
+      const linkKey = `${channelKey}\u0000${item.item_id}`;
+      if (!hypotheticalItemLinks.has(linkKey)) {
+        hypotheticalItemLinks.add(linkKey);
+        itemsLinked++;
+      }
+    }
+
+    if (!dryRun) {
+      if (!channel) throw new Error("failed to create migration channel");
+      await mergeFollowsIntoChannel(c.env, channel, candidates);
+    }
+  }
+
+  return c.json({
+    dry_run: dryRun,
+    scanned: selected.length,
+    channels_created: channelsCreated,
+    follows_linked: followsLinked,
+    duplicates_merged: duplicatesMerged,
+    items_linked: itemsLinked,
+    folder_conflicts: folderConflicts,
+    unresolved,
+    next_after_id: selected.at(-1)?.id ?? afterId,
+  });
+});
+
+// Backfill channel-item associations from legacy item_feed links after follows
+// have channel IDs. The cursor advances by item, so a batch never splits one
+// item's multiple feed relationships.
+adminRoutes.post("/backfill-channel-items", async (c) => {
+  const dryRun = c.req.query("dry_run") === "true";
+  const limit = boundedBatchSize(c.req.query("limit"), 500, 1000);
+  const afterItemId = nonNegativeCursor(c.req.query("after_item_id"));
+  const itemIds = await all<{ item_id: number }>(
+    c.env.DB.prepare(
+      `SELECT DISTINCT item_id
+         FROM item_feed
+        WHERE item_id > ?
+        ORDER BY item_id
+        LIMIT ?`,
+    ).bind(afterItemId, limit),
+  );
+  if (!itemIds.length) {
+    return c.json({
+      dry_run: dryRun,
+      scanned: 0,
+      items_linked: 0,
+      unresolved: [],
+      next_after_item_id: afterItemId,
+    });
+  }
+  const ids = itemIds.map((row) => row.item_id);
+  const placeholders = ids.map(() => "?").join(",");
+  const links = await all<{ item_id: number; feed_url: string }>(
+    c.env.DB.prepare(
+      `SELECT item_id, feed_url
+         FROM item_feed
+        WHERE item_id IN (${placeholders})
+        ORDER BY item_id, feed_url`,
+    ).bind(...ids),
+  );
+  const mappingCache = new Map<string, number[]>();
+  const candidateLinks = new Set<string>();
+  const unresolved: { item_id: number; feed_url: string }[] = [];
+  let itemsLinked = 0;
+
+  for (const link of links) {
+    let channelIds = mappingCache.get(link.feed_url);
+    if (!channelIds) {
+      const mapped = await all<{ id: number }>(
+        c.env.DB.prepare(
+          `SELECT id FROM channel WHERE feed_url = ?
+           UNION
+           SELECT ch.id
+             FROM subscription s
+             JOIN channel ch ON ch.id = s.channel_id
+            WHERE s.feed_url = ?`,
+        ).bind(link.feed_url, link.feed_url),
+      );
+      channelIds = mapped.map((row) => row.id);
+      mappingCache.set(link.feed_url, channelIds);
+    }
+    if (!channelIds.length) {
+      unresolved.push(link);
+      continue;
+    }
+    for (const channelId of channelIds) {
+      const candidateKey = `${channelId}\u0000${link.item_id}`;
+      if (candidateLinks.has(candidateKey)) continue;
+      candidateLinks.add(candidateKey);
+      const exists = await first<{ channel_id: number }>(
+        c.env.DB.prepare(
+          "SELECT channel_id FROM channel_item WHERE channel_id = ? AND item_id = ?",
+        ).bind(channelId, link.item_id),
+      );
+      if (exists) continue;
+      itemsLinked++;
+      if (!dryRun) {
+        await c.env.DB.prepare(
+          "INSERT OR IGNORE INTO channel_item (channel_id, item_id) VALUES (?, ?)",
+        ).bind(channelId, link.item_id).run();
+      }
+    }
+  }
+
+  return c.json({
+    dry_run: dryRun,
+    scanned: links.length,
+    items_linked: itemsLinked,
+    unresolved,
+    next_after_item_id: ids.at(-1) ?? afterItemId,
+  });
 });
 
 // Remove an item from the global catalog entirely (drops it for all users).

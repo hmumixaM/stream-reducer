@@ -22,6 +22,10 @@ const TRACKING_PARAMS = new Set([
 
 const BV_RE = /BV[0-9A-Za-z]{8,}/;
 
+function isHostOrSubdomain(hostname: string, domain: string): boolean {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
 export function detectPlatform(url: string): Platform {
   let host = "";
   try {
@@ -29,12 +33,19 @@ export function detectPlatform(url: string): Platform {
   } catch {
     return "rss";
   }
-  if (["youtube.com", "youtu.be", "youtube-nocookie.com"].some((h) => host.includes(h)))
+  if (
+    ["youtube.com", "youtu.be", "youtube-nocookie.com"].some((domain) =>
+      isHostOrSubdomain(host, domain),
+    )
+  )
     return "youtube";
-  if (host.includes("bilibili.com") || host === "b23.tv") return "bilibili";
-  if (host.includes("podcasts.apple.com") || host.includes("podcast.apple.com"))
+  if (isHostOrSubdomain(host, "bilibili.com") || host === "b23.tv") return "bilibili";
+  if (
+    isHostOrSubdomain(host, "podcasts.apple.com") ||
+    isHostOrSubdomain(host, "podcast.apple.com")
+  )
     return "apple_podcast";
-  if (host.includes("xiaoyuzhoufm.com")) return "xiaoyuzhou";
+  if (isHostOrSubdomain(host, "xiaoyuzhoufm.com")) return "xiaoyuzhou";
   return "rss";
 }
 

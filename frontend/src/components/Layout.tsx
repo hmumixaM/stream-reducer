@@ -32,7 +32,7 @@ const NAV = [
   { to: "/graph", label: "Graph", icon: Network },
   { to: "/annotations", label: "Highlights", icon: Highlighter },
   { to: "/queue", label: "Queue", icon: ListChecks },
-  { to: "/subscriptions", label: "Subscriptions", icon: Rss },
+  { to: "/subscriptions", label: "Channels", icon: Rss },
   { to: "/stats", label: "Stats", icon: BarChart3 },
   // Admin-only entries (settings exposes provider endpoint/keys).
   { to: "/admin", label: "Admin", icon: Shield, admin: true },

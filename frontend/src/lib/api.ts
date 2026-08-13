@@ -256,6 +256,7 @@ export interface Group {
 
 export interface Subscription {
   id: number;
+  channel_id?: number | null;
   platform: Platform;
   feed_url: string;
   title?: string | null;
@@ -263,6 +264,7 @@ export interface Subscription {
   window_days: number;
   min_published_at?: string | null;
   enabled: boolean;
+  follow_latest?: boolean;
   last_checked_at?: string | null;
   last_seen_guid?: string | null;
   last_status?: "ok" | "empty" | "error" | null;
@@ -272,6 +274,70 @@ export interface Subscription {
   consecutive_failures?: number;
   folder_id?: number | null;
   created_at: string;
+}
+
+export interface ChannelItemBrief {
+  id: number;
+  title?: string | null;
+  headline?: string | null;
+  thumbnail?: string | null;
+  published_at?: string | null;
+  status: ItemStatus;
+}
+
+export interface ChannelFollowRead {
+  id: number;
+  channel_id: number | null;
+  title?: string | null;
+  platform: Platform;
+  feed_url: string;
+  follow_latest: boolean;
+  folder_id: number | null;
+  interval_minutes: number;
+  window_days: number;
+  min_published_at: string | null;
+  last_checked_at: string | null;
+  last_seen_guid: string | null;
+  last_status: "ok" | "empty" | "error" | null;
+  last_error: string | null;
+  last_entry_count: number;
+  last_new_count: number;
+  consecutive_failures: number;
+  created_at: string;
+}
+
+export interface ChannelRead {
+  id: number;
+  platform: Platform;
+  channel_key: string;
+  feed_url: string;
+  source_url?: string | null;
+  title?: string | null;
+  image_url?: string | null;
+  follower_count: number;
+  item_count: number;
+  latest_published_at?: string | null;
+  latest_items: ChannelItemBrief[];
+  follow: ChannelFollowRead | null;
+}
+
+export interface ChannelItemRead extends Item {
+  in_library: boolean;
+}
+
+export interface ListChannelsParams {
+  q?: string;
+  platform?: Platform;
+  following?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ChannelFollowInput {
+  follow_latest: boolean;
+  folder_id?: number | null;
+  window_days?: number;
+  interval_minutes?: number;
 }
 
 export interface SubscriptionComment {
@@ -626,6 +692,17 @@ function itemQuery(params?: ListItemsParams): string {
   return qs ? `?${qs}` : "";
 }
 
+function channelQuery(params?: ListChannelsParams): string {
+  const sp = new URLSearchParams();
+  if (params?.q) sp.set("q", params.q);
+  if (params?.platform) sp.set("platform", params.platform);
+  if (params?.following !== undefined) sp.set("following", String(params.following));
+  if (params?.limit !== undefined) sp.set("limit", String(params.limit));
+  if (params?.offset !== undefined) sp.set("offset", String(params.offset));
+  const qs = sp.toString();
+  return qs ? `?${qs}` : "";
+}
+
 export const api = {
   // --- auth ---
   requestMagicLink: (email: string) =>
@@ -722,6 +799,37 @@ export const api = {
 
   listQueue: () => req<QueueItem[]>("/api/queue"),
 
+  listChannels: (params?: ListChannelsParams) =>
+    req<ChannelRead[]>(`/api/channels${channelQuery(params)}`),
+  getChannel: (id: number) => req<ChannelRead>(`/api/channels/${id}`),
+  resolveChannel: (url: string) =>
+    req<ChannelRead>("/api/channels/resolve", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  followChannel: (id: number, payload: ChannelFollowInput) =>
+    req<ChannelFollowRead>(`/api/channels/${id}/follow`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  updateChannelFollow: (id: number, payload: Partial<ChannelFollowInput>) =>
+    req<ChannelFollowRead>(`/api/channels/${id}/follow`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  unfollowChannel: (id: number) =>
+    req<{ ok: boolean }>(`/api/channels/${id}/follow`, { method: "DELETE" }),
+  listChannelItems: (id: number, params?: { limit?: number; offset?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.limit !== undefined) sp.set("limit", String(params.limit));
+    if (params?.offset !== undefined) sp.set("offset", String(params.offset));
+    const qs = sp.toString();
+    return req<ChannelItemRead[]>(`/api/channels/${id}/items${qs ? `?${qs}` : ""}`);
+  },
+  pollChannel: (id: number) =>
+    req<{ ok: boolean }>(`/api/channels/${id}/poll`, { method: "POST" }),
+
+  // Legacy subscription endpoints stay available during the channel migration.
   listSubscriptions: () => req<Subscription[]>("/api/subscriptions"),
   addSubscription: (
     feed_url: string,

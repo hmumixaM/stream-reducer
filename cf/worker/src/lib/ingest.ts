@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { first, upsertItem, type ItemRow } from "../db";
+import { linkChannelItem, resolveChannelIdentity, upsertChannel } from "./channels";
 import { detectPlatform, normalizeUrl } from "./url";
 import { priorityScore } from "./priority";
 import { parseBilibiliUrl, fetchBilibiliEntries } from "./bilibili";
@@ -140,14 +141,19 @@ export async function recomputePriority(env: Env, itemId: number): Promise<void>
   );
   const interest_count = interestRow?.n ?? 0;
 
-  // Subscribed people: distinct users subscribed to a feed/channel this item
-  // belongs to (via the global item_feed association, independent of who has it
-  // saved). This credits popular channels even for manually-added videos.
+  // Count each follower once across both relationship models. channel_item is
+  // authoritative after migration; item_feed preserves the same demand while
+  // follows and historical items are being migrated in bounded batches.
   const subRow = await first<{ n: number }>(
     env.DB.prepare(
       `SELECT COUNT(DISTINCT user_id) AS n FROM subscription
-        WHERE feed_url IN (SELECT feed_url FROM item_feed WHERE item_id = ?)`,
-    ).bind(itemId),
+        WHERE channel_id IN (
+                SELECT channel_id FROM channel_item WHERE item_id = ?
+              )
+           OR feed_url IN (
+                SELECT feed_url FROM item_feed WHERE item_id = ?
+              )`,
+    ).bind(itemId, itemId),
   );
   const subscriber_demand = subRow?.n ?? 0;
 
@@ -174,6 +180,21 @@ interface AddResult {
   newlySaved: boolean;
 }
 
+export interface AddOptions {
+  title?: string | null;
+  external_id?: string | null;
+  platform?: string;
+  folderId?: number | null;
+  subscriptionId?: number | null;
+  // Feed/channel URL this item was ingested from (e.g. a subscription poll).
+  feedUrl?: string | null;
+  // Shared channel associated with a subscription poll.
+  channelId?: number | null;
+  // Feed-provided metadata (e.g. podcast RSS): authoritative for items whose
+  // audio URL can't be scraped for rich metadata. Applied last so it wins.
+  meta?: ItemMetadata;
+}
+
 // Core dedup primitive: ensure the global item exists, attach it to the user's
 // library (waiting if still processing, done if already complete), bump demand,
 // and enqueue processing only when the item isn't already done/in-flight.
@@ -181,18 +202,7 @@ export async function addUrlToLibrary(
   env: Env,
   userId: number,
   rawUrl: string,
-  opts: {
-    title?: string | null;
-    external_id?: string | null;
-    platform?: string;
-    folderId?: number | null;
-    subscriptionId?: number | null;
-    // Feed/channel URL this item was ingested from (e.g. a subscription poll).
-    feedUrl?: string | null;
-    // Feed-provided metadata (e.g. podcast RSS): authoritative for items whose
-    // audio URL can't be scraped for rich metadata. Applied last so it wins.
-    meta?: ItemMetadata;
-  } = {},
+  opts: AddOptions = {},
 ): Promise<AddResult | null> {
   const url = normalizeUrl(rawUrl);
   if (!url) return null;
@@ -220,6 +230,26 @@ export async function addUrlToLibrary(
     external_id: opts.external_id ?? opts.meta?.external_id ?? metadata?.external_id,
   });
 
+  let channelId = opts.channelId ?? null;
+  const metadataChannelId = metadata?.channel_id ?? null;
+  const metadataChannelUrl =
+    platform === "youtube"
+      ? youtubeChannelFeed(metadataChannelId)
+      : platform === "bilibili" && metadataChannelId && /^\d+$/.test(metadataChannelId)
+        ? `https://space.bilibili.com/${metadataChannelId}`
+        : null;
+  if (channelId == null && metadataChannelUrl) {
+    const identity = await resolveChannelIdentity(metadataChannelUrl);
+    const channel = await upsertChannel(env, identity, {
+      title: metadata?.author,
+      imageUrl: metadata?.thumbnail,
+    });
+    channelId = channel.id;
+  }
+  if (channelId != null) await linkChannelItem(env, channelId, item.id);
+  await linkItemFeed(env, item.id, metadataChannelUrl);
+  await linkItemFeed(env, item.id, opts.feedUrl);
+
   // Known membership/paid-gated content: keep the terminal global record (so
   // dedup recognizes it and it's never reprocessed) but never (re)add it to a
   // library — member-only videos shouldn't appear there.
@@ -238,13 +268,6 @@ export async function addUrlToLibrary(
     const cached = await cacheThumbnail(env, item.id, opts.meta.thumbnail);
     await persistItemMetadata(env, item.id, cached ? { ...opts.meta, thumbnail: cached } : opts.meta);
   }
-
-  // Link this item to its channel feed (derived from metadata) and the feed it
-  // was ingested from, so subscriber demand reflects the whole channel audience.
-  if (platform === "youtube") {
-    await linkItemFeed(env, item.id, youtubeChannelFeed(metadata?.channel_id));
-  }
-  await linkItemFeed(env, item.id, opts.feedUrl);
 
   const personalStatus = item.status === "done" ? "done" : "waiting";
   const existingUi = await first<{ id: number }>(

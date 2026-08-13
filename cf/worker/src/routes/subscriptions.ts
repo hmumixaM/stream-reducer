@@ -3,11 +3,16 @@ import type { AppContext } from "../auth";
 import { requireAuth } from "../auth";
 import { all, first, type ItemRow, type SubscriptionRow } from "../db";
 import { toItemRead } from "../lib/serialize";
-import { detectPlatform } from "../lib/url";
 import { isoNow } from "../lib/crypto";
 import { recomputePriority } from "../lib/ingest";
-import { resolveFeedUrl } from "../lib/feed";
 import { readJson } from "../lib/request";
+import {
+  findUserFollow,
+  findUnmigratedUserFollowsByIdentity,
+  mergeFollowsIntoChannel,
+  resolveChannelIdentity,
+  upsertChannel,
+} from "../lib/channels";
 
 export const subscriptionRoutes = new Hono<AppContext>();
 subscriptionRoutes.use("*", requireAuth);
@@ -32,8 +37,27 @@ type SubscriptionAnnotationRow =
       created_at: string;
     };
 
-function serialize(s: SubscriptionRow) {
-  return { ...s, enabled: !!s.enabled };
+type LegacySubscriptionRow = SubscriptionRow & {
+  channel_platform?: string | null;
+  channel_feed_url?: string | null;
+  channel_title?: string | null;
+};
+
+function serialize(s: LegacySubscriptionRow) {
+  const {
+    channel_platform,
+    channel_feed_url,
+    channel_title,
+    ...follow
+  } = s;
+  return {
+    ...follow,
+    platform: channel_platform ?? s.platform,
+    feed_url: channel_feed_url ?? s.feed_url,
+    title: s.title ?? channel_title ?? null,
+    enabled: Boolean(s.enabled),
+    follow_latest: Boolean(s.enabled),
+  };
 }
 
 // Folders are per-user; a subscription may only target a folder the caller owns.
@@ -59,8 +83,15 @@ async function recomputeFeedPriorities(c: Parameters<typeof requireAuth>[0], fee
 
 subscriptionRoutes.get("/", async (c) => {
   const userId = c.get("user").id;
-  const rows = await all<SubscriptionRow>(
-    c.env.DB.prepare("SELECT * FROM subscription WHERE user_id = ? ORDER BY created_at DESC").bind(userId),
+  const rows = await all<LegacySubscriptionRow>(
+    c.env.DB.prepare(
+      `SELECT s.*, ch.platform AS channel_platform,
+              ch.feed_url AS channel_feed_url, ch.title AS channel_title
+         FROM subscription s
+         LEFT JOIN channel ch ON ch.id = s.channel_id
+        WHERE s.user_id = ?
+        ORDER BY s.created_at DESC`,
+    ).bind(userId),
   );
   return c.json(rows.map(serialize));
 });
@@ -80,28 +111,58 @@ subscriptionRoutes.post("/", async (c) => {
   if (folderId != null && !(await folderBelongsToUser(c, folderId, userId))) {
     return c.json({ error: "folder not found" }, 400);
   }
-  // Built-in: convert channel pages / @handles into their pollable RSS feed.
-  const feed = await resolveFeedUrl(raw);
+  let identity;
+  try {
+    identity = await resolveChannelIdentity(raw);
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : "could not resolve channel" },
+      400,
+    );
+  }
+  const channel = await upsertChannel(c.env, identity);
 
-  const existing = await first<SubscriptionRow>(
-    c.env.DB.prepare("SELECT * FROM subscription WHERE user_id = ? AND feed_url = ?").bind(userId, feed),
-  );
-  if (existing) return c.json(serialize(existing));
+  const linked = await findUserFollow(c.env, userId, channel.id);
+  const aliases = await findUnmigratedUserFollowsByIdentity(c.env, userId, identity);
+  const candidates = [
+    ...(linked ? [linked] : []),
+    ...aliases.filter((alias) => alias.id !== linked?.id),
+  ];
+  if (candidates.length) {
+    const existing = await mergeFollowsIntoChannel(c.env, channel, candidates);
+    return c.json(serialize({
+      ...existing,
+      channel_platform: channel.platform,
+      channel_feed_url: channel.feed_url,
+      channel_title: channel.title,
+    }));
+  }
 
   const windowDays = body.window_days ?? Number(c.env.SUBSCRIPTION_WINDOW_DAYS || "90");
   // New channels only pull in videos published within the window (last 3 months
   // by default), so subscribing doesn't backfill the entire archive.
   const minPublished = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
-  const res = await c.env.DB.prepare(
-    `INSERT INTO subscription (user_id, platform, feed_url, title, interval_minutes, window_days, min_published_at, folder_id, enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+  await c.env.DB.prepare(
+    `INSERT OR IGNORE INTO subscription
+       (user_id, channel_id, platform, feed_url, title, interval_minutes,
+        window_days, min_published_at, folder_id, enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
   )
-    .bind(userId, detectPlatform(feed), feed, body.title ?? null, body.interval_minutes ?? 60, windowDays, minPublished, folderId)
+    .bind(
+      userId,
+      channel.id,
+      channel.platform,
+      channel.feed_url,
+      body.title ?? null,
+      body.interval_minutes ?? 60,
+      windowDays,
+      minPublished,
+      folderId,
+    )
     .run();
-  const row = await first<SubscriptionRow>(
-    c.env.DB.prepare("SELECT * FROM subscription WHERE id = ?").bind(res.meta.last_row_id),
-  );
-  await recomputeFeedPriorities(c, feed);
+  const row = await findUserFollow(c.env, userId, channel.id);
+  if (!row) throw new Error("failed to create subscription");
+  await recomputeFeedPriorities(c, channel.feed_url);
   // Poll immediately so the user sees their last-3-months backfill start.
   if (row) await c.env.PIPELINE.send({ kind: "poll", subscription_id: row.id });
   return c.json(serialize(row!));
@@ -154,21 +215,33 @@ subscriptionRoutes.patch("/:id", async (c) => {
 subscriptionRoutes.post("/:id/toggle", async (c) => {
   const userId = c.get("user").id;
   const id = Number(c.req.param("id"));
+  const before = await first<{ enabled: number }>(
+    c.env.DB.prepare("SELECT enabled FROM subscription WHERE id = ? AND user_id = ?").bind(id, userId),
+  );
+  if (!before) return c.json({ error: "subscription not found" }, 404);
   await c.env.DB.prepare("UPDATE subscription SET enabled = 1 - enabled WHERE id = ? AND user_id = ?").bind(id, userId).run();
   const row = await first<SubscriptionRow>(
     c.env.DB.prepare("SELECT * FROM subscription WHERE id = ? AND user_id = ?").bind(id, userId),
   );
   if (!row) return c.json({ error: "subscription not found" }, 404);
+  if (!before.enabled && row.enabled) {
+    await c.env.PIPELINE.send({ kind: "poll", subscription_id: row.id });
+  }
   return c.json(serialize(row));
 });
 
 subscriptionRoutes.post("/:id/poll", async (c) => {
   const userId = c.get("user").id;
   const id = Number(c.req.param("id"));
-  const row = await first<{ id: number }>(
-    c.env.DB.prepare("SELECT id FROM subscription WHERE id = ? AND user_id = ?").bind(id, userId),
+  const row = await first<{ id: number; enabled: number }>(
+    c.env.DB.prepare(
+      "SELECT id, enabled FROM subscription WHERE id = ? AND user_id = ?",
+    ).bind(id, userId),
   );
   if (!row) return c.json({ error: "subscription not found" }, 404);
+  if (!row.enabled) {
+    return c.json({ error: "follow_latest must be enabled to poll" }, 400);
+  }
   await c.env.DB.prepare("UPDATE subscription SET last_checked_at = ? WHERE id = ?").bind(isoNow(), id).run();
   await c.env.PIPELINE.send({ kind: "poll", subscription_id: id });
   return c.json({ ok: true });
@@ -262,7 +335,12 @@ subscriptionRoutes.delete("/:id", async (c) => {
   const userId = c.get("user").id;
   const id = Number(c.req.param("id"));
   const row = await first<{ feed_url: string }>(
-    c.env.DB.prepare("SELECT feed_url FROM subscription WHERE id = ? AND user_id = ?").bind(id, userId),
+    c.env.DB.prepare(
+      `SELECT COALESCE(ch.feed_url, s.feed_url) AS feed_url
+         FROM subscription s
+         LEFT JOIN channel ch ON ch.id = s.channel_id
+        WHERE s.id = ? AND s.user_id = ?`,
+    ).bind(id, userId),
   );
   await c.env.DB.prepare("DELETE FROM subscription WHERE id = ? AND user_id = ?").bind(id, userId).run();
   if (row) await recomputeFeedPriorities(c, row.feed_url);

@@ -58,9 +58,23 @@ export interface UserItemRow {
   added_at: string;
 }
 
-export interface SubscriptionRow {
+export interface ChannelRow {
+  id: number;
+  platform: string;
+  channel_key: string;
+  key_kind: string;
+  feed_url: string;
+  source_url: string | null;
+  title: string | null;
+  image_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChannelFollowRow {
   id: number;
   user_id: number;
+  channel_id: number | null;
   platform: string;
   feed_url: string;
   title: string | null;
@@ -77,6 +91,20 @@ export interface SubscriptionRow {
   consecutive_failures: number;
   folder_id: number | null;
   created_at: string;
+}
+
+// Compatibility name for legacy/polling callers, some of which select channel
+// display columns alongside the subscription row during the additive rollout.
+export type SubscriptionRow = ChannelFollowRow & {
+  channel_feed_url?: string | null;
+  channel_title?: string | null;
+  channel_image_url?: string | null;
+};
+
+export interface ChannelItemRow {
+  channel_id: number;
+  item_id: number;
+  discovered_at: string;
 }
 
 // --- Thin query helpers ---------------------------------------------------

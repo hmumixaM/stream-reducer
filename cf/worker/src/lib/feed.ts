@@ -32,6 +32,10 @@ interface ParsedFeed {
   entries: FeedEntry[];
 }
 
+function isHostOrSubdomain(hostname: string, domain: string): boolean {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
 function tag(block: string, name: string): string | null {
   const m = new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`, "i").exec(block);
   if (!m) return null;
@@ -75,7 +79,10 @@ export async function resolveFeedUrl(input: string): Promise<string> {
   }
   const host = url.hostname.toLowerCase();
   // Apple Podcasts show page -> the show's RSS feed.
-  if (host.endsWith("podcasts.apple.com") || host.endsWith("itunes.apple.com")) {
+  if (
+    isHostOrSubdomain(host, "podcasts.apple.com") ||
+    isHostOrSubdomain(host, "itunes.apple.com")
+  ) {
     const idMatch = url.pathname.match(/\/id(\d+)/);
     // 1. iTunes Lookup API — clean + canonical, but Apple returns 403 to shared
     //    datacenter egress (incl. Cloudflare Workers), so it often fails here.
@@ -94,9 +101,12 @@ export async function resolveFeedUrl(input: string): Promise<string> {
 
   // Bilibili space / playlist pages are resolved at poll time (no static feed
   // URL); pass the canonical page URL through.
-  if (host.endsWith("space.bilibili.com")) return input;
+  if (isHostOrSubdomain(host, "space.bilibili.com")) return input;
 
-  if (host.includes("youtube.com") || host.includes("youtube-nocookie.com")) {
+  if (
+    isHostOrSubdomain(host, "youtube.com") ||
+    isHostOrSubdomain(host, "youtube-nocookie.com")
+  ) {
     if (url.pathname.startsWith("/feeds/videos.xml")) return input;
 
     const byChannel = url.pathname.match(/^\/channel\/(UC[0-9A-Za-z_-]{22})/);

@@ -30,6 +30,7 @@ const ItemDetail = named(() => import("@/pages/ItemDetail"), "ItemDetail");
 const Annotations = named(() => import("@/pages/Annotations"), "Annotations");
 const Queue = named(() => import("@/pages/Queue"), "Queue");
 const Subscriptions = named(() => import("@/pages/Subscriptions"), "Subscriptions");
+const ChannelDetail = named(() => import("@/pages/ChannelDetail"), "ChannelDetail");
 const Stats = named(() => import("@/pages/Stats"), "Stats");
 const Settings = named(() => import("@/pages/Settings"), "Settings");
 const Admin = named(() => import("@/pages/Admin"), "Admin");
@@ -143,6 +144,7 @@ const router = createBrowserRouter([
       { path: "annotations", element: <RequireAuth><Annotations /></RequireAuth> },
       { path: "queue", element: <RequireAuth><Queue /></RequireAuth> },
       { path: "subscriptions", element: <RequireAuth><Subscriptions /></RequireAuth> },
+      { path: "channels/:id", element: <RequireAuth><ChannelDetail /></RequireAuth> },
       { path: "stats", element: <RequireAuth><Stats /></RequireAuth> },
       // Admin-only.
       { path: "settings", element: <RequireAdmin><Settings /></RequireAdmin> },

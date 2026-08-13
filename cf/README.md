@@ -162,9 +162,17 @@ ingest pipeline calls will fail locally but the rest of the API works.
 | Individual library / browse-all / add | `src/routes/items.ts` (`/api/items` global, `/api/items/library` personal) |
 | Per-user comments + highlights | `src/routes/annotations.ts` (every row carries `user_id`) |
 | Per-user knowledge graph | `src/routes/graph.ts` (filters the global graph by the user's `user_item`) |
-| Subscriptions, last-3-months default | `src/routes/subscriptions.ts` (`window_days = 90`), `src/pipeline/subscriptions.ts` |
+| Shared channel catalog + per-user follows | `migrations/0010_channels.sql`, `src/lib/channels.ts`, `src/routes/channels.ts`; the legacy `subscription` row remains the per-user follow so folders, poll cursors, comments, and highlights keep their IDs |
+| Follow-latest polling, last-3-months default | `src/routes/subscriptions.ts` (`window_days = 90`), `src/pipeline/subscriptions.ts`; `enabled` is exposed by the channel API as `follow_latest` |
 | Metadata-first ingest | `src/pipeline/consumer.ts` (`fetchMetadata` before `runPipeline`) |
 | Prioritization (views + subscribers + requesters/interest) | `src/lib/priority.ts`, `src/lib/ingest.ts` (`recomputePriority`); subscriber demand uses the global `item_feed` link (`migrations/0002_item_feed.sql`) so manually-added videos still credit their channel's subscribers |
 | Dedup (one item, many libraries, waiting/done) | `src/lib/ingest.ts` + `user_item` join in `migrations/0001_init.sql`; the per-user `waiting` badge surfaces in Browse/Library (`components/ItemCard.tsx`, `pages/Browse.tsx`) |
 | Gemini summary endpoint | `vars.LLM_BASE_URL` + `GEMINI_API_KEY` (used in `cf/pipeline/llm.py`) |
 | OpenRouter STT (unchanged) | `cf/pipeline/llm.py` `transcribe_chunk` |
+
+Existing URL-keyed subscriptions are migrated after `0010_channels.sql` is
+deployed. Admins first call
+`POST /api/admin/migrate-channels?dry_run=true&limit=100&after_id=0`, then repeat
+without `dry_run` using the returned cursor. The companion
+`POST /api/admin/backfill-channel-items` route links historical `item_feed`
+records to the shared catalog. Both operations are bounded and idempotent.

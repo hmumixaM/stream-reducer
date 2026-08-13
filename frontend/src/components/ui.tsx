@@ -81,9 +81,38 @@ export function Select({
   );
 }
 
+export function Switch({
+  checked,
+  onCheckedChange,
+  disabled,
+  label,
+  className,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  disabled?: boolean;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <label className={cn("inline-flex cursor-pointer items-center gap-2 text-sm", className)}>
+      <input
+        type="checkbox"
+        className="peer sr-only"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onCheckedChange(event.target.checked)}
+      />
+      <span className="relative h-5 w-9 rounded-full bg-muted transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:bg-primary peer-checked:after:translate-x-4 peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-disabled:opacity-50" />
+      <span>{label}</span>
+    </label>
+  );
+}
+
 export function Spinner({ className }: { className?: string }) {
   return (
     <div
+      aria-hidden="true"
       className={cn(
         "h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent",
         className,

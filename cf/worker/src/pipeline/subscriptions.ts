@@ -1,5 +1,10 @@
 import type { Env } from "../env";
-import { first, type SubscriptionRow } from "../db";
+import { first, type ChannelFollowRow, type ChannelRow } from "../db";
+import {
+  isHostOrSubdomain,
+  resolveChannelIdentity,
+  upsertChannel,
+} from "../lib/channels";
 import { isoNow } from "../lib/crypto";
 import { addUrlToLibrary } from "../lib/ingest";
 import { detectPlatform } from "../lib/url";
@@ -12,6 +17,12 @@ const MAX_NEW_PER_POLL = 10;
 const DEFAULT_MIN_DURATION_S = 600;
 const YT_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
+type PollSubscriptionRow = ChannelFollowRow & {
+  channel_feed_url: ChannelRow["feed_url"] | null;
+  channel_title: ChannelRow["title"];
+  channel_image_url: ChannelRow["image_url"];
+};
 
 // Pick the best processing URL + platform for a feed entry (prefer a supported
 // video page over a raw audio enclosure for richer metadata / native captions).
@@ -69,13 +80,25 @@ async function recordPollError(env: Env, subId: number, err: unknown): Promise<v
 }
 
 export async function pollSubscription(env: Env, subId: number): Promise<number> {
-  const sub = await first<SubscriptionRow>(
-    env.DB.prepare("SELECT * FROM subscription WHERE id = ?").bind(subId),
+  const sub = await first<PollSubscriptionRow>(
+    env.DB.prepare(
+      `SELECT subscription.*,
+              channel.feed_url AS channel_feed_url,
+              channel.title AS channel_title,
+              channel.image_url AS channel_image_url
+         FROM subscription
+         LEFT JOIN channel ON channel.id = subscription.channel_id
+        WHERE subscription.id = ?`,
+    ).bind(subId),
   );
   if (!sub || !sub.enabled) return 0;
 
   const healedSub = await selfHealSubscriptionFeed(env, sub);
-  const feed = await fetchSubscriptionFeed(env, subId, healedSub.feed_url);
+  const feed = await fetchSubscriptionFeed(
+    env,
+    subId,
+    healedSub.channel_feed_url ?? healedSub.feed_url,
+  );
   if (!feed) return 0;
   if (!feed.entries.length) {
     await recordEmptyPoll(env, subId);
@@ -84,9 +107,21 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
 
   try {
     const pollBatch = await selectPollBatch(env, healedSub, feed.entries);
-    const enqueued = await enqueueSubscriptionBatch(env, healedSub, feed.title, pollBatch.entries);
-    await recordPollSuccess(env, subId, feed, pollBatch.nextSeenGuid, enqueued);
-    return enqueued;
+    const ingest = await enqueueSubscriptionBatch(
+      env,
+      healedSub,
+      feed.title,
+      pollBatch.entries,
+    );
+    await recordPollSuccess(
+      env,
+      healedSub,
+      feed,
+      ingest.failed ? ingest.nextSeenGuid : pollBatch.nextSeenGuid,
+      ingest.enqueued,
+    );
+    if (ingest.failed) await recordPollError(env, subId, ingest.error);
+    return ingest.enqueued;
   } catch (err) {
     // A post-fetch failure must never throw uncaught: that leaves the poll
     // unrecorded (last_checked_at stays NULL) so the cron re-enqueues it every
@@ -96,9 +131,13 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
   }
 }
 
-async function selfHealSubscriptionFeed(env: Env, sub: SubscriptionRow): Promise<SubscriptionRow> {
+async function selfHealSubscriptionFeed(
+  env: Env,
+  sub: PollSubscriptionRow,
+): Promise<PollSubscriptionRow> {
+  const currentFeedUrl = sub.channel_feed_url ?? sub.feed_url;
   let healHost = "";
-  try { healHost = new URL(sub.feed_url).hostname.toLowerCase(); } catch { /* not a URL */ }
+  try { healHost = new URL(currentFeedUrl).hostname.toLowerCase(); } catch { /* not a URL */ }
   // Re-run resolution for sources whose stored feed_url may be an unpollable
   // PAGE url rather than a canonical feed: Apple show pages, and YouTube channel
   // pages (incl. bare legacy vanity URLs like youtube.com/TheDiaryOfACEO that
@@ -106,14 +145,39 @@ async function selfHealSubscriptionFeed(env: Env, sub: SubscriptionRow): Promise
   // is a cheap no-op for already-canonical feeds (feeds/videos.xml passes through
   // without a network fetch), so this only does work when healing is needed.
   const canHeal =
-    healHost.endsWith("podcasts.apple.com") ||
-    healHost.endsWith("itunes.apple.com") ||
-    healHost.endsWith("youtube.com") ||
-    healHost.endsWith("youtube-nocookie.com");
+    isHostOrSubdomain(healHost, "podcasts.apple.com") ||
+    isHostOrSubdomain(healHost, "itunes.apple.com") ||
+    isHostOrSubdomain(healHost, "youtube.com") ||
+    isHostOrSubdomain(healHost, "youtube-nocookie.com");
   if (!canHeal) return sub;
 
-  const resolved = await resolveFeedUrl(sub.feed_url);
-  if (resolved === sub.feed_url) return sub;
+  const resolved = await resolveFeedUrl(currentFeedUrl);
+  if (resolved === currentFeedUrl) return sub;
+
+  if (sub.channel_id != null) {
+    const identity = await resolveChannelIdentity(resolved);
+    const channel = await upsertChannel(env, identity, {
+      title: sub.channel_title,
+      imageUrl: sub.channel_image_url,
+    });
+    try {
+      await env.DB.prepare("UPDATE subscription SET channel_id = ? WHERE id = ?")
+        .bind(channel.id, sub.id)
+        .run();
+    } catch (err) {
+      // A user may already follow the canonical channel. Keep this poll useful
+      // and link its discovered items to the canonical channel; the migration
+      // merge will reconcile the duplicate legacy follow.
+      console.warn(`subscription ${sub.id} channel persist skipped: ${String(err)}`);
+    }
+    return {
+      ...sub,
+      channel_id: channel.id,
+      channel_feed_url: channel.feed_url,
+      channel_title: channel.title,
+      channel_image_url: channel.image_url,
+    };
+  }
 
   try {
     await env.DB.prepare("UPDATE subscription SET feed_url = ?, platform = ? WHERE id = ?")
@@ -170,7 +234,11 @@ interface PollBatch {
   nextSeenGuid: string | null;
 }
 
-async function selectPollBatch(env: Env, sub: SubscriptionRow, entries: FeedEntry[]): Promise<PollBatch> {
+async function selectPollBatch(
+  env: Env,
+  sub: ChannelFollowRow,
+  entries: FeedEntry[],
+): Promise<PollBatch> {
   const minPublished = sub.min_published_at; // window cutoff (e.g. last 90 days)
   const lastSeenIndex = sub.last_seen_guid
     ? entries.findIndex((entry) => entry.guid === sub.last_seen_guid)
@@ -193,14 +261,24 @@ async function selectPollBatch(env: Env, sub: SubscriptionRow, entries: FeedEntr
 
 async function enqueueSubscriptionBatch(
   env: Env,
-  sub: SubscriptionRow,
+  sub: PollSubscriptionRow,
   feedTitle: string | null,
   entries: FeedEntry[],
-): Promise<number> {
+): Promise<{
+  enqueued: number;
+  nextSeenGuid: string | null;
+  failed: boolean;
+  error: unknown | null;
+}> {
+  const feedUrl = sub.channel_feed_url ?? sub.feed_url;
   let enqueued = 0;
+  let nextSeenGuid = sub.last_seen_guid;
   for (const entry of entries) {
     const { url, platform } = entryUrl(entry);
-    if (!url) continue;
+    if (!url) {
+      nextSeenGuid = entry.guid ?? nextSeenGuid;
+      continue;
+    }
     try {
       const addResult = await addUrlToLibrary(env, sub.user_id, url, {
         title: entry.title,
@@ -208,7 +286,8 @@ async function enqueueSubscriptionBatch(
         platform,
         folderId: sub.folder_id ?? null,
         subscriptionId: sub.id,
-        feedUrl: sub.feed_url,
+        feedUrl,
+        channelId: sub.channel_id,
         meta: {
           title: entry.title,
           description: entry.description ?? null,
@@ -219,18 +298,18 @@ async function enqueueSubscriptionBatch(
         },
       });
       if (addResult) enqueued++;
+      nextSeenGuid = entry.guid ?? nextSeenGuid;
     } catch (err) {
-      // One bad entry (e.g. a transient metadata/DB error) shouldn't abort the
-      // whole poll; skip it and keep going so the rest of the batch lands.
       console.error("subscription enqueue failed", sub.id, url, String(err));
+      return { enqueued, nextSeenGuid, failed: true, error: err };
     }
   }
-  return enqueued;
+  return { enqueued, nextSeenGuid, failed: false, error: null };
 }
 
 async function recordPollSuccess(
   env: Env,
-  subId: number,
+  sub: PollSubscriptionRow,
   feed: { title: string | null; entries: FeedEntry[] },
   nextSeenGuid: string | null,
   enqueued: number,
@@ -238,18 +317,38 @@ async function recordPollSuccess(
   await env.DB.prepare(
     `UPDATE subscription
         SET last_checked_at = ?, last_seen_guid = COALESCE(?, last_seen_guid),
-            title = COALESCE(title, ?), last_status = 'ok', last_error = NULL,
+            title = CASE WHEN channel_id IS NULL THEN COALESCE(title, ?) ELSE title END,
+            last_status = 'ok', last_error = NULL,
             last_entry_count = ?, last_new_count = ?, consecutive_failures = 0
       WHERE id = ?`,
   )
-    .bind(isoNow(), nextSeenGuid, feed.title, feed.entries.length, enqueued, subId)
+    .bind(isoNow(), nextSeenGuid, feed.title, feed.entries.length, enqueued, sub.id)
     .run();
+
+  if (sub.channel_id != null) {
+    const imageUrl = feed.entries.find((entry) => entry.thumbnail)?.thumbnail ?? null;
+    await env.DB.prepare(
+      `UPDATE channel
+          SET title = COALESCE(NULLIF(?, ''), title),
+              image_url = COALESCE(NULLIF(?, ''), image_url),
+              updated_at = ?
+        WHERE id = ?`,
+    )
+      .bind(feed.title, imageUrl, isoNow(), sub.channel_id)
+      .run();
+  }
 }
 
 // Cron entrypoint: enqueue polls for every subscription whose interval elapsed.
 export async function pollDueSubscriptions(env: Env): Promise<void> {
   const now = Date.now();
-  const subs = await env.DB.prepare("SELECT id, interval_minutes, last_checked_at FROM subscription WHERE enabled = 1").all<{ id: number; interval_minutes: number; last_checked_at: string | null }>();
+  const subs = await env.DB.prepare(
+    `SELECT subscription.id, subscription.interval_minutes, subscription.last_checked_at
+       FROM subscription
+       LEFT JOIN channel ON channel.id = subscription.channel_id
+      WHERE subscription.enabled = 1
+        AND COALESCE(channel.feed_url, subscription.feed_url) IS NOT NULL`,
+  ).all<{ id: number; interval_minutes: number; last_checked_at: string | null }>();
   for (const s of subs.results ?? []) {
     const last = s.last_checked_at ? new Date(s.last_checked_at).getTime() : 0;
     if (now - last >= s.interval_minutes * 60 * 1000) {
