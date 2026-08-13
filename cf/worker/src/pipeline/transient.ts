@@ -22,7 +22,9 @@ export function isTransientCapacity(msg: string): boolean {
     m.includes("maximum number of running container instances") ||
     m.includes("blockconcurrencywhile") ||
     m.includes("durable object was reset") ||
-    m.includes("durable object reset because its code was updated")
+    m.includes("durable object reset because its code was updated") ||
+    m.includes("container port connection closed unexpectedly") ||
+    m.includes("error proxying request to container")
   );
 }
 

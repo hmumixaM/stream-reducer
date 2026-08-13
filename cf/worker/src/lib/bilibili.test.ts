@@ -1,5 +1,23 @@
-import { describe, expect, it } from "vitest";
-import { isBilibiliListUrl, parseBilibiliUrl } from "./bilibili";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Env } from "../env";
+
+const mocks = vi.hoisted(() => ({
+  fetchFeedEntries: vi.fn(),
+}));
+
+vi.mock("../pipeline/container", () => ({
+  fetchFeedEntries: mocks.fetchFeedEntries,
+}));
+
+import {
+  fetchBilibiliEntries,
+  isBilibiliListUrl,
+  parseBilibiliUrl,
+} from "./bilibili";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("parseBilibiliUrl", () => {
   it("treats a bare /lists/<sid> as a season with a series fallback", () => {
@@ -54,5 +72,35 @@ describe("isBilibiliListUrl", () => {
   it("is false for a bare channel space or a single video", () => {
     expect(isBilibiliListUrl("https://space.bilibili.com/30201875")).toBe(false);
     expect(isBilibiliListUrl("https://www.bilibili.com/video/BV1jTedzREds")).toBe(false);
+  });
+});
+
+describe("fetchBilibiliEntries", () => {
+  it("enumerates uploader spaces through the WARP-backed container", async () => {
+    mocks.fetchFeedEntries.mockResolvedValue([
+      {
+        external_id: "BV1jTedzREds",
+        title: "Recent upload",
+        url: "https://www.bilibili.com/video/BV1jTedzREds",
+        duration_s: 700,
+        published: "2026-08-13T00:00:00.000Z",
+      },
+    ]);
+
+    const entries = await fetchBilibiliEntries({} as Env, {
+      kind: "space",
+      mid: "30201875",
+    });
+
+    expect(mocks.fetchFeedEntries).toHaveBeenCalledWith(
+      expect.anything(),
+      "https://space.bilibili.com/30201875/video",
+    );
+    expect(entries).toEqual([
+      expect.objectContaining({
+        guid: "BV1jTedzREds",
+        link: "https://www.bilibili.com/video/BV1jTedzREds",
+      }),
+    ]);
   });
 });

@@ -24,6 +24,12 @@ describe("isTransientCapacity", () => {
       isTransientCapacity("Failed to start container: Maximum number of running container instances exceeded."),
     ).toBe(true);
     expect(isTransientCapacity("durable object reset because its code was updated")).toBe(true);
+    expect(
+      isTransientCapacity(
+        "feed_entries container 500: Error proxying request to container: " +
+          "Container port connection closed unexpectedly.",
+      ),
+    ).toBe(true);
   });
 
   it("does NOT classify real feed/content failures as transient", () => {

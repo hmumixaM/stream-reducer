@@ -4,11 +4,17 @@
 //               isn't as aggressively risk-controlled as space/arc/search)
 //   - season  : a 合集 (collection) playlist
 //   - series  : a 系列 playlist
-// The season/space APIs require a logged-in cookie to pass risk control
-// (BILIBILI_COOKIE secret); series works without one.
+// Enumeration runs through the WARP-backed pipeline container because
+// Cloudflare Worker egress is consistently blocked by Bilibili risk control.
 import type { Env } from "../env";
-import { parseDuration, type FeedEntry } from "./feed";
-import { getBilibiliCookie } from "./biliAuth";
+import type { FeedEntry } from "./feed";
+
+interface ContainerFeedEntry {
+  external_id: string | null;
+  title: string | null;
+  duration_s: number | null;
+  published: string | null;
+}
 
 export interface BiliSource {
   kind: "space" | "season" | "series";
@@ -68,59 +74,19 @@ export function isBilibiliListUrl(input: string): boolean {
   return src !== null && src.kind !== "space";
 }
 
-const UA =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
-
-interface BiliDynamicArchive {
-  bvid?: string | number;
-  title?: string | null;
-  duration_text?: string | null;
-}
-
-interface BiliDynamicItem {
-  modules?: {
-    module_dynamic?: {
-      major?: {
-        archive?: BiliDynamicArchive;
-      };
-    };
-    module_author?: {
-      pub_ts?: string | number | null;
-    };
-  };
-}
-
-interface BiliDynamicResponse {
-  data?: {
-    items?: BiliDynamicItem[];
-  };
-}
-
-async function biliGet<T>(url: string, referer: string, cookie: string | undefined): Promise<T> {
-  const headers: Record<string, string> = { "user-agent": UA, referer };
-  if (cookie) headers["cookie"] = cookie;
-  const res = await fetch(url, { headers });
-  // Bilibili risk-controls the Worker's Cloudflare egress IP by serving an HTML
-  // challenge page instead of JSON; surface a clear reason rather than letting
-  // JSON.parse throw a cryptic "Unexpected token '<'".
-  const body = await res.text();
-  try {
-    return JSON.parse(body) as T;
-  } catch {
-    const hint = body.trimStart().startsWith("<") ? " — likely IP risk control" : "";
-    throw new Error(`Bilibili returned a non-JSON response (HTTP ${res.status})${hint}`);
-  }
-}
-
-function videoEntry(bvid: string, title: string, tsSeconds: number | null, duration?: string | number | null): FeedEntry {
-  return {
-    title,
-    link: `https://www.bilibili.com/video/${bvid}`,
-    guid: bvid,
-    published: tsSeconds ? new Date(tsSeconds * 1000).toISOString() : null,
-    audio: null,
-    duration_s: parseDuration(duration),
-  };
+function containerFeedEntries(
+  raw: ContainerFeedEntry[],
+): FeedEntry[] {
+  return raw
+    .filter((entry) => entry.external_id)
+    .map((entry): FeedEntry => ({
+      title: entry.title,
+      link: `https://www.bilibili.com/video/${entry.external_id}`,
+      guid: entry.external_id,
+      published: entry.published,
+      audio: null,
+      duration_s: entry.duration_s,
+    }));
 }
 
 // Enumerate a 合集 (season) or 系列 (series) list via the container's yt-dlp,
@@ -147,16 +113,7 @@ async function fetchBilibiliListEntries(env: Env, src: BiliSource): Promise<Feed
       lastError = err; // wrong list kind / transient — try the other
       continue;
     }
-    const entries = raw
-      .filter((entry) => entry.external_id)
-      .map((entry): FeedEntry => ({
-        title: entry.title,
-        link: `https://www.bilibili.com/video/${entry.external_id}`,
-        guid: entry.external_id,
-        published: entry.published,
-        audio: null,
-        duration_s: entry.duration_s,
-      }));
+    const entries = containerFeedEntries(raw);
     if (entries.length) return entries;
   }
   // No entries from any candidate. Surface the real extractor failure (so the
@@ -173,21 +130,11 @@ export async function fetchBilibiliEntries(env: Env, src: BiliSource): Promise<F
     return fetchBilibiliListEntries(env, src);
   }
 
-  const cookie = await getBilibiliCookie(env);
-  // space: the UP主's dynamic feed, filtered to video posts.
-  const url = `https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?offset=&host_mid=${src.mid}&timezone_offset=-480&features=itemOpusStyle`;
-  const response = await biliGet<BiliDynamicResponse>(url, `https://space.bilibili.com/${src.mid}/dynamic`, cookie);
-  return (response.data?.items ?? []).flatMap((item) => {
-    const archive = item.modules?.module_dynamic?.major?.archive;
-    if (!archive?.bvid) return [];
-
-    return [
-      videoEntry(
-        String(archive.bvid),
-        String(archive.title ?? ""),
-        Number(item.modules?.module_author?.pub_ts) || null,
-        archive.duration_text,
-      ),
-    ];
-  });
+  // The public dynamic API consistently risk-controls Cloudflare Worker egress
+  // (HTTP 412/HTML). Enumerate uploader videos through the WARP-backed
+  // container, matching the reliable list path and the actual download egress.
+  const { fetchFeedEntries } = await import("../pipeline/container");
+  return containerFeedEntries(
+    await fetchFeedEntries(env, `https://space.bilibili.com/${src.mid}/video`),
+  );
 }
