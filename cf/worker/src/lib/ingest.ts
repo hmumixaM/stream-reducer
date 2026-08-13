@@ -1,6 +1,7 @@
 import type { Env } from "../env";
 import { first, upsertItem, type ItemRow } from "../db";
-import { linkChannelItem, resolveChannelIdentity, upsertChannel } from "./channels";
+import { linkChannelItem } from "./channels";
+import { attachItemChannelBestEffort, linkItemFeed } from "./itemChannel";
 import { detectPlatform, normalizeUrl } from "./url";
 import { priorityScore } from "./priority";
 import { parseBilibiliUrl, fetchBilibiliEntries } from "./bilibili";
@@ -78,23 +79,6 @@ export async function cacheThumbnail(
     console.warn("thumbnail cache failed", { itemId, url, err: String(err) });
     return null;
   }
-}
-
-// Derive the canonical YouTube channel feed URL from a channel id. This matches
-// the feed_url shape stored for YouTube subscriptions (see routes/subscriptions),
-// so a manually-added video links to the same feed its subscribers follow.
-export function youtubeChannelFeed(channelId?: string | null): string | null {
-  return channelId ? `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}` : null;
-}
-
-// Link a global item to a feed/channel (idempotent). Powers subscriber demand.
-export async function linkItemFeed(env: Env, itemId: number, feedUrl?: string | null): Promise<void> {
-  if (!feedUrl) return;
-  await env.DB.prepare(
-    "INSERT INTO item_feed (item_id, feed_url) VALUES (?, ?) ON CONFLICT(item_id, feed_url) DO NOTHING",
-  )
-    .bind(itemId, feedUrl)
-    .run();
 }
 
 export async function persistItemMetadata(
@@ -230,24 +214,14 @@ export async function addUrlToLibrary(
     external_id: opts.external_id ?? opts.meta?.external_id ?? metadata?.external_id,
   });
 
-  let channelId = opts.channelId ?? null;
-  const metadataChannelId = metadata?.channel_id ?? null;
-  const metadataChannelUrl =
-    platform === "youtube"
-      ? youtubeChannelFeed(metadataChannelId)
-      : platform === "bilibili" && metadataChannelId && /^\d+$/.test(metadataChannelId)
-        ? `https://space.bilibili.com/${metadataChannelId}`
-        : null;
-  if (channelId == null && metadataChannelUrl) {
-    const identity = await resolveChannelIdentity(metadataChannelUrl);
-    const channel = await upsertChannel(env, identity, {
-      title: metadata?.author,
-      imageUrl: metadata?.thumbnail,
-    });
-    channelId = channel.id;
+  // A subscription poll already knows the channel; a manual add derives it from
+  // the platform + metadata + source URL (and, when that fails, the pipeline
+  // retries attribution once processing completes).
+  if (opts.channelId != null) {
+    await linkChannelItem(env, opts.channelId, item.id);
+  } else {
+    await attachItemChannelBestEffort(env, { id: item.id, platform, source_url: url }, metadata);
   }
-  if (channelId != null) await linkChannelItem(env, channelId, item.id);
-  await linkItemFeed(env, item.id, metadataChannelUrl);
   await linkItemFeed(env, item.id, opts.feedUrl);
 
   // Known membership/paid-gated content: keep the terminal global record (so

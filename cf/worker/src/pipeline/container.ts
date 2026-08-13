@@ -1,6 +1,7 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import type { Env } from "../env";
 import { getBilibiliCookie } from "../lib/biliAuth";
+import { feedShardKey } from "./shard";
 import { errorMessage, isTransientCapacity } from "./transient";
 
 // Container DO instances run the image they were CREATED with and are reused by
@@ -410,7 +411,13 @@ export async function fetchFeedEntries(
   source_url: string,
   limit = 300,
 ): Promise<FeedEntryOut[]> {
-  const res = await auxContainerCall(env, "feed", "/feed_entries", { source_url, limit }, "feed_entries");
+  const res = await auxContainerCall(
+    env,
+    feedShardKey(source_url),
+    "/feed_entries",
+    { source_url, limit },
+    "feed_entries",
+  );
   const data = (await res.json()) as { entries?: FeedEntryOut[] };
   return data.entries ?? [];
 }

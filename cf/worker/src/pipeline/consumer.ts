@@ -1,7 +1,8 @@
 import type { Env, PipelineMessage } from "../env";
 import { first, type ItemRow } from "../db";
 import { isoNow } from "../lib/crypto";
-import { persistItemMetadata, linkItemFeed, youtubeChannelFeed, cacheThumbnail } from "../lib/ingest";
+import { persistItemMetadata, cacheThumbnail, recomputePriority } from "../lib/ingest";
+import { attachItemChannelBestEffort } from "../lib/itemChannel";
 import { runPipeline, runPipelineStreaming, type JsonObject, type PipelineResult, type ProgressEvent } from "./container";
 import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
@@ -712,6 +713,34 @@ async function persistMetadata(env: Env, itemId: number, m: PipelineResult["meta
   await persistItemMetadata(env, itemId, cached ? { ...m, thumbnail: cached } : m);
 }
 
+// Attribute the finished item to its channel using the pipeline's own metadata.
+// This is also the self-heal for manual adds whose metadata prefetch failed:
+// whatever the add path could not resolve, the completed run resolves here.
+async function attachResultChannel(
+  env: Env,
+  itemId: number,
+  metadata: PipelineResult["metadata"],
+): Promise<void> {
+  // Only items that still lack a channel: a subscription poll already linked its
+  // own, and re-deriving would re-hit the network (podcast feed lookups) on every
+  // finished run for no gain.
+  const linked = await first<{ channel_id: number }>(
+    env.DB.prepare("SELECT channel_id FROM channel_item WHERE item_id = ? LIMIT 1").bind(itemId),
+  );
+  if (linked) return;
+  const item = await first<Pick<ItemRow, "platform" | "source_url">>(
+    env.DB.prepare("SELECT platform, source_url FROM item WHERE id = ?").bind(itemId),
+  );
+  if (!item) return;
+  const channelId = await attachItemChannelBestEffort(
+    env,
+    { id: itemId, platform: item.platform, source_url: item.source_url },
+    metadata,
+  );
+  // A new channel link changes subscriber demand, which drives queue priority.
+  if (channelId != null) await recomputePriority(env, itemId);
+}
+
 async function persistHeadlineFields(env: Env, itemId: number, structured: JsonObject): Promise<void> {
   const headline = cleanGeneratedText(structured.headline);
   const subhead = cleanGeneratedText(structured.subhead);
@@ -746,9 +775,7 @@ async function persistStageRuns(
 
 async function persistResult(env: Env, itemId: number, r: PipelineResult): Promise<void> {
   await persistMetadata(env, itemId, r.metadata);
-  // Link the item to its YouTube channel feed for subscriber-demand signals
-  // (derived from the pipeline result instead of a separate metadata fetch).
-  await linkItemFeed(env, itemId, youtubeChannelFeed(r.metadata.channel_id));
+  await attachResultChannel(env, itemId, r.metadata);
 
   // Media -> R2 (optional; container only returns audio when under the limit).
   let mediaKey: string | null = null;

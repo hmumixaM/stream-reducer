@@ -32,6 +32,17 @@ describe("isTransientCapacity", () => {
     ).toBe(true);
   });
 
+  it("classifies an overloaded instance dropping the connection as transient", () => {
+    // Verbatim from production: every poll shared one feed_entries container
+    // instance, so a cron fan-out overloaded it and 10 healthy channels were
+    // marked broken.
+    expect(
+      isTransientCapacity(
+        "Error: feed_entries container 500: Container suddenly disconnected, try again",
+      ),
+    ).toBe(true);
+  });
+
   it("does NOT classify real feed/content failures as transient", () => {
     // These must still mark the subscription broken so the reason stays visible.
     expect(
