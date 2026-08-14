@@ -6,8 +6,8 @@
 // still routing a given channel to the same (warm) instance every time.
 //
 // Shard count is bounded by the container pool: queue max_concurrency (6) +
-// FEED_SHARDS + the odd meta-* instance must stay under containers.max_instances
-// (10), so three is the ceiling here.
+// FEED_SHARDS + the aux singletons (bili-refresh / meta-* / proxy-check) must
+// stay under containers.max_instances (16), which three shards do with spare.
 export const FEED_SHARDS = 3;
 
 export function feedShardKey(source_url: string, shards = FEED_SHARDS): string {
