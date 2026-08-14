@@ -143,10 +143,13 @@ export async function resolveItemChannelIdentity(
   metadata: ChannelHint | null | undefined,
 ): Promise<ChannelIdentity | null> {
   if (platform === "xiaoyuzhou") {
+    // 小宇宙 serves 403 to datacenter egress, so the page read only works when
+    // the show id isn't already in the URL or in container-fetched metadata.
     const podcastId =
       sourceUrl.match(/\/podcast\/([0-9a-f]{24})/i)?.[1] ??
+      metadata?.channel_id?.trim() ??
       (await fetchXiaoyuzhouPodcastId(sourceUrl));
-    return podcastId && XIAOYUZHOU_ID_RE.test(podcastId)
+    return podcastId && XIAOYUZHOU_ID_RE.test(podcastId.toLowerCase())
       ? xiaoyuzhouIdentity(podcastId.toLowerCase(), sourceUrl)
       : null;
   }
@@ -168,7 +171,9 @@ export async function resolveItemChannelIdentityFromSource(
     const scraped = await fetchYoutubeVideoChannelId(sourceUrl);
     if (scraped) return resolveItemChannelIdentity(platform, sourceUrl, { channel_id: scraped });
   }
-  if (platform === "youtube" || platform === "bilibili") {
+  // Bilibili (risk control) and 小宇宙 (403 to datacenter IPs) both refuse the
+  // Worker's egress, so their channel identity comes from the container.
+  if (platform === "youtube" || platform === "bilibili" || platform === "xiaoyuzhou") {
     const { fetchMetadata } = await import("../pipeline/container");
     const metadata = await fetchMetadata(env, sourceUrl, platform);
     return resolveItemChannelIdentity(platform, sourceUrl, metadata);

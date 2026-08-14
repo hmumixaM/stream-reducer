@@ -164,6 +164,17 @@ describe("resolveItemChannelIdentity", () => {
     expect(mocks.resolveChannelIdentity).not.toHaveBeenCalled();
   });
 
+  it("takes the 小宇宙 show id from container metadata when the page is blocked", async () => {
+    const identity = await resolveItemChannelIdentity(
+      "xiaoyuzhou",
+      "https://www.xiaoyuzhoufm.com/episode/64b7b0e0c1a2b3d4e5f60718",
+      { channel_id: "5E5C52C9418A84A04625E6CC", author: "硅谷101" },
+    );
+
+    expect(identity?.channelKey).toBe("5e5c52c9418a84a04625e6cc");
+    expect(mocks.fetchXiaoyuzhouPodcastId).not.toHaveBeenCalled();
+  });
+
   it("reads the show id straight off a 小宇宙 show URL", async () => {
     const identity = await resolveItemChannelIdentity(
       "xiaoyuzhou",

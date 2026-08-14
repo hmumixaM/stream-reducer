@@ -115,11 +115,16 @@ class XiaoyuzhouAdapter(Adapter):
         # Prefer the full HTML show notes; fall back to the plain description.
         shownotes = _html_to_text(episode.get("shownotes") or "")
         description = shownotes or (episode.get("description") or "").strip() or None
+        podcast = episode.get("podcast") or {}
         return {
             "title": episode.get("title"),
             "audio_url": enclosure.get("url"),
             "duration_s": episode.get("duration"),
-            "author": (episode.get("podcast") or {}).get("title"),
+            "author": podcast.get("title"),
+            # The show this episode belongs to. 小宇宙 serves 403 to datacenter
+            # egress, so the Worker cannot read this itself and relies on the
+            # container to report it for channel attribution.
+            "channel_id": podcast.get("pid"),
             "published_at": published,
             "description": description,
             "view_count": episode.get("playCount"),
@@ -179,6 +184,7 @@ class XiaoyuzhouAdapter(Adapter):
             external_id=r.get("external_id"),
             view_count=r.get("view_count"),
             like_count=r.get("like_count"),
+            channel_id=r.get("channel_id"),
         )
 
     def download_audio(self, url: str, dest_dir: Path, on_progress=None) -> Path:
