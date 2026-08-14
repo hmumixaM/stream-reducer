@@ -192,3 +192,8 @@ metadata prefetch failed) are repaired with the routes in
   item's `source_url` for the rest. It needs the network (and the container's WARP
   egress for Bilibili), so it runs in small batches; `dry_run=true`, `limit` and
   `after_item_id` bound every call and re-running is idempotent.
+
+`GET /api/admin/llm-check` (`src/routes/adminLlm.ts`) answers the question a new
+Gemini release raises: it lists the models `LLM_BASE_URL` serves next to the ones
+`vars` currently pin, and `?model=gemini-3.7-flash` asks that model to reply, so a
+switch can be verified before it is deployed.
