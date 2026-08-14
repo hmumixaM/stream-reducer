@@ -159,6 +159,61 @@ async function dropDirtyFeedRow(env: Env, itemId: number, feedUrl: string): Prom
     .run();
 }
 
+type BackfillCandidate = Pick<ItemRow, "id" | "platform" | "source_url" | "author" | "thumbnail">;
+type BackfillStep = { outcome: BackfillOutcome } | { skip: BackfillSkip };
+
+async function backfillItem(
+  env: Env,
+  item: BackfillCandidate,
+  phase: Phase,
+  dryRun: boolean,
+): Promise<BackfillStep> {
+  const skip = (reason: string): BackfillStep => ({
+    skip: { item_id: item.id, platform: item.platform, source_url: item.source_url, reason },
+  });
+
+  let resolution: FeedRowResolution | null = null;
+  if (phase !== "b") {
+    const feedRows = await all<{ feed_url: string }>(
+      env.DB.prepare("SELECT feed_url FROM item_feed WHERE item_id = ? ORDER BY feed_url").bind(item.id),
+    );
+    for (const row of feedRows) {
+      resolution = channelUrlFromFeedRow(item.platform, row.feed_url);
+      if (resolution) break;
+    }
+  }
+
+  try {
+    const identity = resolution
+      ? await resolveChannelIdentity(resolution.channelUrl)
+      : phase === "a"
+        ? null
+        : await resolveItemChannelIdentityFromSource(env, item.platform, item.source_url);
+    if (!identity) {
+      return skip(
+        resolution ? "identity not derivable" : "no channel identity in feed rows or source",
+      );
+    }
+    const outcome: BackfillOutcome = {
+      item_id: item.id,
+      platform: item.platform,
+      phase: resolution ? "a" : "b",
+      channel_id: null,
+      channel_key: identity.channelKey,
+      repaired_feed_url: resolution?.repairs ?? null,
+    };
+    if (!dryRun) {
+      const metadata = { author: item.author, thumbnail: item.thumbnail };
+      outcome.channel_id = await attachChannelIdentity(env, item, identity, metadata);
+      if (resolution?.repairs) await dropDirtyFeedRow(env, item.id, resolution.repairs);
+      await recomputePriority(env, item.id);
+    }
+    return { outcome };
+  } catch (err) {
+    return skip(errorMessage(err));
+  }
+}
+
 // Repair item↔channel attribution for items that predate (or were skipped by)
 // the shared attach helper. Phase A is deterministic: it reads the channel
 // identity back out of the item's existing item_feed rows (no network for
@@ -171,8 +226,9 @@ channelLinkRoutes.post("/backfill-item-channels", async (c) => {
   const limit = Math.min(Math.max(Number(c.req.query("limit")) || 25, 1), 200);
   const afterItemId = Math.max(Number(c.req.query("after_item_id")) || 0, 0);
   const platform = c.req.query("platform");
+  const requestedConcurrency = Math.min(Math.max(Number(c.req.query("concurrency")) || 1, 1), 8);
 
-  const candidates = await all<Pick<ItemRow, "id" | "platform" | "source_url" | "author" | "thumbnail">>(
+  const candidates = await all<BackfillCandidate>(
     c.env.DB.prepare(
       `SELECT i.id, i.platform, i.source_url, i.author, i.thumbnail
          FROM item i
@@ -188,59 +244,27 @@ channelLinkRoutes.post("/backfill-item-channels", async (c) => {
   const skipped: BackfillSkip[] = [];
   let feedRowsRepaired = 0;
 
-  for (const item of candidates) {
-    const metadata = { author: item.author, thumbnail: item.thumbnail };
-    const feedRows = await all<{ feed_url: string }>(
-      c.env.DB.prepare("SELECT feed_url FROM item_feed WHERE item_id = ? ORDER BY feed_url").bind(
-        item.id,
-      ),
+  // Phase B spends almost all of its time waiting on one page fetch per item, so
+  // a batch resolves several at a time. Bilibili is capped low because it
+  // resolves through the container, whose instance pool is shared with the
+  // pipeline.
+  const concurrency = candidates.some((item) => item.platform === "bilibili")
+    ? Math.min(requestedConcurrency, 2)
+    : requestedConcurrency;
+
+  for (let offset = 0; offset < candidates.length; offset += concurrency) {
+    const steps = await Promise.all(
+      candidates
+        .slice(offset, offset + concurrency)
+        .map((item) => backfillItem(c.env, item, phase, dryRun)),
     );
-
-    let resolution: FeedRowResolution | null = null;
-    if (phase !== "b") {
-      for (const row of feedRows) {
-        resolution = channelUrlFromFeedRow(item.platform, row.feed_url);
-        if (resolution) break;
-      }
-    }
-
-    try {
-      const identity = resolution
-        ? await resolveChannelIdentity(resolution.channelUrl)
-        : phase === "a"
-          ? null
-          : await resolveItemChannelIdentityFromSource(c.env, item.platform, item.source_url);
-      if (!identity) {
-        skipped.push({
-          item_id: item.id,
-          platform: item.platform,
-          source_url: item.source_url,
-          reason: resolution ? "identity not derivable" : "no channel identity in feed rows or source",
-        });
+    for (const step of steps) {
+      if ("skip" in step) {
+        skipped.push(step.skip);
         continue;
       }
-      const outcome: BackfillOutcome = {
-        item_id: item.id,
-        platform: item.platform,
-        phase: resolution ? "a" : "b",
-        channel_id: null,
-        channel_key: identity.channelKey,
-        repaired_feed_url: resolution?.repairs ?? null,
-      };
-      if (!dryRun) {
-        outcome.channel_id = await attachChannelIdentity(c.env, item, identity, metadata);
-        if (resolution?.repairs) await dropDirtyFeedRow(c.env, item.id, resolution.repairs);
-        await recomputePriority(c.env, item.id);
-      }
-      if (resolution?.repairs) feedRowsRepaired++;
-      linked.push(outcome);
-    } catch (err) {
-      skipped.push({
-        item_id: item.id,
-        platform: item.platform,
-        source_url: item.source_url,
-        reason: errorMessage(err),
-      });
+      if (step.outcome.repaired_feed_url) feedRowsRepaired++;
+      linked.push(step.outcome);
     }
   }
 
