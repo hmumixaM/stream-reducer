@@ -100,6 +100,32 @@ def _is_members_only(text: str) -> bool:
     return any(marker.lower() in t for marker in _MEMBERS_ONLY_MARKERS)
 
 
+# Substrings that mean the source itself is gone: deleted, taken down, made
+# private, or never existed. Retrying cannot bring it back, so these end the
+# same way as paid content — excluded rather than five failed attempts.
+_GONE_MARKERS = (
+    "this video may be deleted",
+    "this video has been removed",
+    "this video is no longer available",
+    "video unavailable",
+    "this video is private",
+    "private video",
+    "removed by the uploader",
+    "account associated with this video has been terminated",
+    "http error 404",
+    "http error 410",
+    "啥都木有",
+    "稿件不存在",
+    "视频不存在",
+    "已失效",
+)
+
+
+def _is_gone(text: str) -> bool:
+    t = (text or "").lower()
+    return any(marker.lower() in t for marker in _GONE_MARKERS)
+
+
 @dataclass
 class ItemView:
     platform: str
@@ -927,9 +953,9 @@ def _apply_supplied_metadata(item: ItemView, supplied: dict) -> None:
 
 
 def _excluded_result(metadata: dict, stages: list[Stage], message: str) -> dict:
-    """Terminal result for content we deliberately don't download (e.g.
-    members-only / paid). The Worker flips the item to an 'excluded' status
-    (not an error, not retried)."""
+    """Terminal result for content we cannot download and never will (paid or
+    members-only, deleted, private). The Worker flips the item to an 'excluded'
+    status (not an error, not retried)."""
     return {
         "metadata": metadata or {},
         "transcript": None,
@@ -1074,9 +1100,10 @@ def run(job: dict, on_progress=None) -> dict:
                 emit({"partial": "transcript", "metadata": metadata, "transcript": transcript})
         except Exception as exc:  # noqa: BLE001
             # Membership/paid-gated videos (YouTube members-only, Bilibili
-            # 充电专属, …) can't be downloaded — exclude them so they aren't
-            # retried forever or surfaced as failures.
-            if _is_members_only(str(exc)):
+            # 充电专属, …) can't be downloaded, and a deleted or private source
+            # never will be — exclude both so they aren't retried forever or
+            # surfaced as failures.
+            if _is_members_only(str(exc)) or _is_gone(str(exc)):
                 return _excluded_result(metadata, stages, f"{type(exc).__name__}: {exc}")
             raise
     else:

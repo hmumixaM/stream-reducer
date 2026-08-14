@@ -96,11 +96,17 @@ export function normalizeUrl(rawUrl: string): string {
 // Only the video platforms (YouTube, Bilibili) are restricted; podcast/RSS/
 // 小宇宙 links are single episodes and pass through.
 export function nonItemUrlError(rawUrl: string): string | null {
+  const trimmed = rawUrl.trim();
   let parsed: URL;
   try {
-    parsed = new URL(rawUrl.trim());
+    parsed = new URL(trimmed);
   } catch {
-    return null; // not a URL: let downstream handling deal with it
+    // Text that is not a link at all. Accepting it used to create an "rss" item
+    // that only failed once the container tried to download it.
+    return `This isn't a link: "${excerpt(trimmed)}" — paste a full URL starting with https://.`;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return `Only http(s) links can be added: "${excerpt(trimmed)}".`;
   }
   const host = (parsed.hostname || "").toLowerCase();
   const path = parsed.pathname;
@@ -134,6 +140,10 @@ export function nonItemUrlError(rawUrl: string): string | null {
   }
 
   return null;
+}
+
+function excerpt(text: string): string {
+  return text.length > 40 ? `${text.slice(0, 40)}…` : text;
 }
 
 // Split a free-text blob of URLs (whitespace/comma separated) into a clean list.
