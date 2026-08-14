@@ -1,15 +1,23 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { ArrowLeft, Film, Pencil, Plus, Trash2 } from "lucide-react";
+import { Film, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type Item } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Input } from "@/components/ui";
+import {
+  EmptyState,
+  InfiniteScrollSentinel,
+  ItemGrid,
+  PageHeader,
+  SkeletonGrid,
+} from "@/components/shell";
+import { nextPageError } from "@/lib/useInfiniteScroll";
 import { PlatformBadge } from "@/components/badges";
 import { ItemCard, type ItemCardActions } from "@/components/ItemCard";
 
@@ -67,7 +75,7 @@ export function FolderView() {
     mutationFn: () => api.deleteGroup(folderId),
     onSuccess: () => {
       invalidate();
-      navigate("/");
+      navigate("/library");
     },
   });
 
@@ -93,61 +101,50 @@ export function FolderView() {
 
   return (
     <div>
-      <Link
-        to="/"
-        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-4 w-4" /> Library
-      </Link>
-
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">{folder?.title || "Folder"}</h1>
-          {folder?.source_url && <PlatformBadge platform={folder.platform} />}
-          <span className="text-sm text-muted-foreground">
-            {folder?.item_count ?? members.length} items
-          </span>
-        </div>
-        {!MIRROR && (
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
-              <Plus className="h-4 w-4" /> Add items
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleRename}>
-              <Pencil className="h-4 w-4" /> Rename
-            </Button>
-            <Button variant="danger" size="sm" onClick={handleDelete}>
-              <Trash2 className="h-4 w-4" /> Delete
-            </Button>
-          </div>
-        )}
-      </div>
+      <PageHeader
+        backTo={MIRROR ? "/" : "/library"}
+        backLabel={MIRROR ? "Library" : "Saved"}
+        title={folder?.title || "Folder"}
+        badges={folder?.source_url && <PlatformBadge platform={folder.platform} />}
+        subtitle={`${folder?.item_count ?? members.length} items`}
+        actions={
+          !MIRROR && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+                <Plus className="h-4 w-4" /> <span className="hidden sm:inline">Add items</span>
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleRename}>
+                <Pencil className="h-4 w-4" /> <span className="hidden sm:inline">Rename</span>
+              </Button>
+              <Button variant="danger" size="sm" onClick={handleDelete}>
+                <Trash2 className="h-4 w-4" /> <span className="hidden sm:inline">Delete</span>
+              </Button>
+            </>
+          )
+        }
+      />
 
       {items.isLoading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <SkeletonGrid count={8} />
       ) : members.length > 0 ? (
         <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <ItemGrid>
             {members.map((item) => (
               <ItemCard key={item.id} item={item} {...actions} />
             ))}
-          </div>
-          {items.hasNextPage && (
-            <div className="mt-6 flex justify-center">
-              <Button
-                variant="outline"
-                onClick={() => items.fetchNextPage()}
-                disabled={items.isFetchingNextPage}
-              >
-                {items.isFetchingNextPage ? "Loading…" : "Load more"}
-              </Button>
-            </div>
-          )}
+          </ItemGrid>
+          <InfiniteScrollSentinel
+            hasNextPage={!!items.hasNextPage}
+            isFetchingNextPage={items.isFetchingNextPage}
+            fetchNextPage={() => items.fetchNextPage()}
+            error={nextPageError(items)}
+          />
         </>
       ) : (
-        <Card className="p-10 text-center text-muted-foreground">
-          {MIRROR ? "This folder is empty." : 'This folder is empty. Click "Add items" to fill it.'}
-        </Card>
+        <EmptyState
+          title="This folder is empty"
+          description={MIRROR ? undefined : 'Use "Add items" to move saved episodes in here.'}
+        />
       )}
 
       {adding && (

@@ -4,35 +4,49 @@
 
 @layer base {
   :root {
-    --background: 0 0% 98%;
+    /* Cards are pure white, so the page sits slightly cooler/darker than them —
+       otherwise every card edge disappears into the background in light mode. */
+    --background: 240 20% 97%;
     --foreground: 240 10% 10%;
     --card: 0 0% 100%;
     --card-foreground: 240 10% 10%;
+    /* Panels nested INSIDE a card (poll health, note rows). Distinct from
+       --muted, which is also used for image placeholders and code blocks. */
+    --card-muted: 240 20% 97%;
     --muted: 240 5% 92%;
-    --muted-foreground: 240 5% 45%;
+    --muted-foreground: 240 5% 42%;
     --primary: 250 85% 60%;
     --primary-foreground: 0 0% 100%;
     --accent: 240 5% 94%;
     --accent-foreground: 240 10% 10%;
-    --border: 240 6% 88%;
-    --input: 240 6% 88%;
+    --border: 240 8% 87%;
+    --input: 240 8% 87%;
     --ring: 250 85% 60%;
+    /* Semantic status colors. Tuned per theme because the raw Tailwind palette
+       shades used before (text-red-400 etc.) fail contrast on a white page. */
+    --success: 152 60% 34%;
+    --warning: 32 85% 38%;
+    --danger: 0 72% 45%;
   }
 
   .dark {
     --background: 240 10% 4%;
     --foreground: 0 0% 95%;
-    --card: 240 10% 6%;
+    --card: 240 10% 8%;
     --card-foreground: 0 0% 95%;
-    --muted: 240 10% 12%;
+    --card-muted: 240 10% 11%;
+    --muted: 240 10% 13%;
     --muted-foreground: 240 5% 65%;
     --primary: 250 90% 70%;
     --primary-foreground: 0 0% 100%;
-    --accent: 240 10% 14%;
+    --accent: 240 10% 15%;
     --accent-foreground: 0 0% 95%;
-    --border: 240 10% 14%;
-    --input: 240 10% 14%;
+    --border: 240 8% 17%;
+    --input: 240 8% 17%;
     --ring: 250 90% 70%;
+    --success: 152 60% 62%;
+    --warning: 38 92% 62%;
+    --danger: 0 84% 68%;
   }
 
   * {
@@ -44,7 +58,10 @@
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-feature-settings: "cv02" 1, "cv03" 1, "cv04" 1, "cv11" 1;
+    letter-spacing: -0.011em;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 

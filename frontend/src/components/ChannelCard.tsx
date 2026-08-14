@@ -4,23 +4,23 @@ import { PlatformBadge } from "@/components/badges";
 import { Card } from "@/components/ui";
 import {
   ChannelFollowControls,
+  PollHealth,
 } from "@/components/ChannelFollowControls";
-import type {
-  ChannelFollowRead,
-  ChannelRead,
-  Group,
-} from "@/lib/api";
+import type { ChannelFollowRead, ChannelRead, Group } from "@/lib/api";
 import { formatCount, formatDate, timeAgo } from "@/lib/utils";
 
+/**
+ * Expanded channel card with a recent-items preview. Used where a single
+ * channel is the subject (the resolved URL preview); grids use the shorter
+ * `ChannelTile` and the following list uses `ChannelRow`.
+ */
 export function ChannelCard({
   channel,
   groups,
-  management = false,
   onFollowChanged,
 }: {
   channel: ChannelRead;
   groups: Group[];
-  management?: boolean;
   onFollowChanged?: (follow: ChannelFollowRead | null) => void;
 }) {
   const title = channel.title || channel.feed_url;
@@ -95,8 +95,10 @@ export function ChannelCard({
           </div>
         )}
 
-        {management && follow && (
-          <PollHealth follow={follow} />
+        {follow?.last_error && (
+          <div className="mt-4">
+            <PollHealth follow={follow} />
+          </div>
         )}
 
         <div className="mt-4 border-t border-border pt-4">
@@ -104,48 +106,10 @@ export function ChannelCard({
             channelId={channel.id}
             follow={follow}
             groups={groups}
-            showManagement={management}
             onFollowChanged={onFollowChanged}
           />
         </div>
       </div>
     </Card>
-  );
-}
-
-function PollHealth({ follow }: { follow: ChannelFollowRead }) {
-  const statusTone =
-    follow.last_status === "error"
-      ? "bg-red-500/15 text-red-400"
-      : follow.last_status === "empty"
-        ? "bg-amber-500/15 text-amber-400"
-        : "bg-emerald-500/15 text-emerald-400";
-  const statusLabel =
-    follow.last_status === "error"
-      ? `error${follow.consecutive_failures ? ` ×${follow.consecutive_failures}` : ""}`
-      : follow.last_status === "empty"
-        ? "no entries"
-        : follow.last_new_count
-          ? `+${follow.last_new_count} new`
-          : "ok";
-
-  return (
-    <div className="mt-4 rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-      <div className="flex flex-wrap items-center gap-2">
-        <span>
-          {follow.last_checked_at
-            ? `Checked ${timeAgo(follow.last_checked_at)}`
-            : "Never checked"}
-        </span>
-        {follow.last_status && (
-          <span className={`rounded-full px-2 py-0.5 font-medium ${statusTone}`}>
-            {statusLabel}
-          </span>
-        )}
-      </div>
-      {follow.last_error && (
-        <p className="mt-2 break-words text-red-400">Last poll failed: {follow.last_error}</p>
-      )}
-    </div>
   );
 }

@@ -3,6 +3,8 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutGrid,
+  Bookmark,
+  Clock,
   Compass,
   Search as SearchIcon,
   Network,
@@ -22,28 +24,47 @@ import { api } from "@/lib/api";
 import { useMe } from "@/lib/auth";
 import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Select, Spinner } from "@/components/ui";
+import { SkeletonGrid } from "@/components/shell";
 import { cn } from "@/lib/utils";
 import { LogIn } from "lucide-react";
 
-const NAV = [
-  { to: "/", label: "Library", icon: LayoutGrid, end: true },
-  { to: "/browse", label: "Browse", icon: Compass },
-  { to: "/search", label: "Search", icon: SearchIcon },
-  { to: "/graph", label: "Graph", icon: Network },
-  { to: "/annotations", label: "Highlights", icon: Highlighter },
-  { to: "/queue", label: "Queue", icon: ListChecks },
-  { to: "/subscriptions", label: "Channels", icon: Rss },
-  { to: "/stats", label: "Stats", icon: BarChart3 },
+const SECTIONS = ["main", "discover", "system"] as const;
+type Section = (typeof SECTIONS)[number];
+
+const SECTION_LABELS: Record<Section, string> = {
+  main: "Content",
+  discover: "Discover",
+  system: "System",
+};
+
+const NAV: {
+  to: string;
+  label: string;
+  icon: typeof LayoutGrid;
+  section: Section;
+  end?: boolean;
+  admin?: boolean;
+}[] = [
+  { to: "/", label: "Timeline", icon: Clock, section: "main", end: true },
+  { to: "/subscriptions", label: "Channels", icon: Rss, section: "main" },
+  { to: "/library", label: "Saved", icon: Bookmark, section: "main" },
+  { to: "/browse", label: "Browse", icon: Compass, section: "discover" },
+  { to: "/search", label: "Search", icon: SearchIcon, section: "discover" },
+  { to: "/graph", label: "Graph", icon: Network, section: "discover" },
+  { to: "/annotations", label: "Highlights", icon: Highlighter, section: "discover" },
+  { to: "/queue", label: "Queue", icon: ListChecks, section: "system" },
+  { to: "/stats", label: "Stats", icon: BarChart3, section: "system" },
   // Admin-only entries (settings exposes provider endpoint/keys).
-  { to: "/admin", label: "Admin", icon: Shield, admin: true },
-  { to: "/settings", label: "Settings", icon: SettingsIcon, admin: true },
+  { to: "/admin", label: "Admin", icon: Shield, section: "system", admin: true },
+  { to: "/settings", label: "Settings", icon: SettingsIcon, section: "system", admin: true },
 ];
 
-// The public mirror is read-only: browsing, search, and the unified graph are
-// reachable.
+// The public mirror is read-only and has no follows, so `/` stays the mirrored
+// library rather than a timeline; browsing, search, and the graph are reachable.
 const MIRROR_NAV = new Set(["/", "/search", "/graph"]);
 // Anonymous (no session) visitors can only browse the global catalog.
 const PUBLIC_NAV = new Set(["/browse"]);
+const MIRROR_LABELS: Record<string, string> = { "/": "Library" };
 
 function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [text, setText] = useState("");
@@ -116,7 +137,7 @@ function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
           </div>
         </form>
         {mutation.isError && (
-          <p className="mt-2 text-sm text-red-400">{String(mutation.error)}</p>
+          <p className="mt-2 text-sm text-danger">{String(mutation.error)}</p>
         )}
       </Card>
     </div>
@@ -176,30 +197,45 @@ export function Layout() {
           <Plus className="h-4 w-4" /> Add content
         </Button>
       )}
-      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            className={({ isActive }) =>
-              cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-              )
-            }
-          >
-            <item.icon className="h-4 w-4" />
-            {item.label}
-            {item.to === "/queue" && active > 0 && (
-              <span className="ml-auto rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
-                {active}
-              </span>
-            )}
-          </NavLink>
-        ))}
+      <nav className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+        {SECTIONS.map((section) => {
+          const entries = navItems.filter((item) => item.section === section);
+          if (entries.length === 0) return null;
+          return (
+            <div key={section} className="flex flex-col gap-1">
+              {/* Group labels only earn their space once a group has siblings. */}
+              {navItems.length > 3 && (
+                <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  {SECTION_LABELS[section]}
+                </p>
+              )}
+              {entries.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    cn(
+                      "relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                      "before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:transition-colors",
+                      isActive
+                        ? "bg-accent text-accent-foreground before:bg-primary"
+                        : "text-muted-foreground before:bg-transparent hover:bg-accent/60 hover:text-foreground",
+                    )
+                  }
+                >
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  {(MIRROR && MIRROR_LABELS[item.to]) || item.label}
+                  {item.to === "/queue" && active > 0 && (
+                    <span className="ml-auto rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
+                      {active}
+                    </span>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          );
+        })}
       </nav>
       <div className="mt-auto space-y-1 border-t border-border pt-2">
         {authed && (
@@ -229,7 +265,7 @@ export function Layout() {
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       {/* Mobile Top Bar */}
-      <header className="flex h-14 items-center justify-between border-b border-border bg-card/40 px-4 md:hidden">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-card/80 px-4 backdrop-blur md:hidden">
         <div className="flex items-center gap-2">
           <img src="/logo.png" alt="" className="h-7 w-7 rounded-md" />
           <span className="font-semibold tracking-tight">stream-reduce</span>
@@ -261,15 +297,9 @@ export function Layout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
-          <Suspense
-            fallback={
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Spinner /> Loading…
-              </div>
-            }
-          >
+      <main className="min-w-0 flex-1 overflow-auto">
+        <div className="mx-auto w-full max-w-7xl p-4 md:p-6">
+          <Suspense fallback={<SkeletonGrid count={6} />}>
             <Outlet />
           </Suspense>
         </div>

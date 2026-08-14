@@ -2,13 +2,24 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Film, Plus, Star } from "lucide-react";
-import { api, type Item } from "@/lib/api";
+import { api, type Item, type Platform } from "@/lib/api";
 import { useMe } from "@/lib/auth";
 import { Button, Card, Input, Select } from "@/components/ui";
-import { PlatformBadge, StatusBadge, WaitingBadge } from "@/components/badges";
+import {
+  ChipRow,
+  EmptyState,
+  FilterChip,
+  InfiniteScrollSentinel,
+  ItemGrid,
+  PageHeader,
+  SkeletonGrid,
+  SkeletonRows,
+} from "@/components/shell";
+import { nextPageError } from "@/lib/useInfiniteScroll";
+import { PLATFORM_LABELS, PlatformBadge, StatusBadge, WaitingBadge } from "@/components/badges";
 import { cn, formatCount } from "@/lib/utils";
 
-const PLATFORMS = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
+const PLATFORMS: Platform[] = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
 const PAGE_SIZE = 60;
 const BROWSE_VIEW_KEY = "sr_browse_view";
 const SORTS = [
@@ -70,39 +81,50 @@ export function Browse() {
 
   return (
     <div>
-      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Browse</h1>
-          <p className="text-sm text-muted-foreground">
-            Every episode anyone has added. Add one to your library to track it and
-            build your knowledge graph.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Chip label="Cards" active={view === "cards"} onClick={() => setView("cards")} />
-          <Chip label="Headlines" active={view === "headlines"} onClick={() => setView("headlines")} />
-          <Select value={sort} onChange={(e) => setSort(e.target.value)} className="w-auto min-w-[140px]">
-            {SORTS.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </Select>
-          <Input placeholder="Search titles..." value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
-        </div>
-      </div>
+      <PageHeader
+        title="Browse"
+        subtitle="Every episode anyone has added. Add one to your library to track it and build your knowledge graph."
+        actions={
+          <>
+            <FilterChip label="Cards" active={view === "cards"} onClick={() => setView("cards")} />
+            <FilterChip
+              label="Headlines"
+              active={view === "headlines"}
+              onClick={() => setView("headlines")}
+            />
+            <Select value={sort} onChange={(e) => setSort(e.target.value)} className="w-auto min-w-[140px]">
+              {SORTS.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </Select>
+            <Input
+              placeholder="Search titles..."
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="max-w-[220px]"
+            />
+          </>
+        }
+      />
 
-      <div className="mb-5 flex flex-wrap gap-2">
-        <Chip label="All" active={!platform} onClick={() => setPlatform("")} />
+      <ChipRow>
+        <FilterChip label="All" active={!platform} onClick={() => setPlatform("")} />
         {PLATFORMS.map((p) => (
-          <Chip key={p} label={p} active={platform === p} onClick={() => setPlatform(platform === p ? "" : p)} />
+          <FilterChip
+            key={p}
+            label={PLATFORM_LABELS[p]}
+            active={platform === p}
+            onClick={() => setPlatform(platform === p ? "" : p)}
+          />
         ))}
-      </div>
+      </ChipRow>
 
       {items.isLoading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        view === "cards" ? <SkeletonGrid count={8} /> : <SkeletonRows count={6} />
       ) : all.length ? (
         <>
           {view === "cards" ? (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <ItemGrid>
               {all.map((item) => (
                 <BrowseCard
                   key={item.id}
@@ -114,7 +136,7 @@ export function Browse() {
                   interestPending={interest.isPending && interest.variables === item.id}
                 />
               ))}
-            </div>
+            </ItemGrid>
           ) : (
             <div className="space-y-3">
               {all.map((item) => (
@@ -130,18 +152,20 @@ export function Browse() {
               ))}
             </div>
           )}
-          {items.hasNextPage && (
-            <div className="mt-6 flex justify-center">
-              <Button variant="outline" onClick={() => items.fetchNextPage()} disabled={items.isFetchingNextPage}>
-                {items.isFetchingNextPage ? "Loading…" : "Load more"}
-              </Button>
-            </div>
-          )}
+          <InfiniteScrollSentinel
+            hasNextPage={!!items.hasNextPage}
+            isFetchingNextPage={items.isFetchingNextPage}
+            fetchNextPage={() => items.fetchNextPage()}
+            error={nextPageError(items)}
+            variant={view === "cards" ? "grid" : "rows"}
+            totalLabel={`${all.length} episode${all.length === 1 ? "" : "s"}`}
+          />
         </>
       ) : (
-        <Card className="p-10 text-center text-muted-foreground">
-          Nothing here yet. Use "Add content" to ingest the first episode.
-        </Card>
+        <EmptyState
+          title="Nothing here yet"
+          description='Use "Add content" to ingest the first episode.'
+        />
       )}
     </div>
   );
@@ -163,7 +187,7 @@ function BrowseCard({
   interestPending: boolean;
 }) {
   return (
-    <Card className="group relative flex h-full flex-col overflow-hidden transition-colors hover:border-primary">
+    <Card interactive className="group relative flex h-full flex-col overflow-hidden">
       <Link to={`/items/${item.id}`} className="block">
         <div className="aspect-video w-full overflow-hidden bg-muted">
           {item.thumbnail ? (
@@ -228,7 +252,7 @@ function HeadlineRow({
   ].filter(Boolean);
 
   return (
-    <Card className="group overflow-hidden p-3 transition-colors hover:border-primary">
+    <Card interactive className="group overflow-hidden p-3">
       <div className="flex flex-col gap-3 sm:flex-row">
         <Link to={`/items/${item.id}`} className="block aspect-video w-full shrink-0 overflow-hidden rounded-md bg-muted sm:w-32">
           {item.thumbnail ? (
@@ -335,15 +359,3 @@ function formatDate(value?: string | null): string | null {
   });
 }
 
-function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-full border px-3 py-1 text-xs font-medium capitalize transition-colors ${
-        active ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:bg-accent"
-      }`}
-    >
-      {label.replace("_", " ")}
-    </button>
-  );
-}

@@ -10,7 +10,7 @@ const buttonVariants = cva(
         default: "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90",
         outline: "border border-border bg-transparent hover:bg-accent hover:text-accent-foreground",
         ghost: "hover:bg-accent hover:text-accent-foreground",
-        danger: "bg-red-600 text-white shadow-sm hover:bg-red-700",
+        danger: "bg-danger text-white shadow-sm hover:bg-danger/90",
       },
       size: {
         default: "h-9 px-4 py-2",
@@ -30,13 +30,24 @@ export function Button({ className, variant, size, ...props }: ButtonProps) {
   return <button className={cn(buttonVariants({ variant, size }), className)} {...props} />;
 }
 
-export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn("rounded-lg border border-border bg-card text-card-foreground shadow-card", className)}
-      {...props}
-    />
-  );
+const cardVariants = cva(
+  "rounded-lg border border-border bg-card text-card-foreground shadow-card",
+  {
+    variants: {
+      // `interactive` is for cards that are themselves a link or button target.
+      interactive: {
+        true: "transition-all hover:border-primary hover:shadow-card-hover",
+      },
+    },
+  },
+);
+
+interface CardProps
+  extends React.HTMLAttributes<HTMLDivElement>,
+    VariantProps<typeof cardVariants> {}
+
+export function Card({ className, interactive, ...props }: CardProps) {
+  return <div className={cn(cardVariants({ interactive }), className)} {...props} />;
 }
 
 export function Badge({

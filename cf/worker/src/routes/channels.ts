@@ -22,6 +22,7 @@ import {
 import { recomputePriority } from "../lib/ingest";
 import { readJson } from "../lib/request";
 import { toItemRead } from "../lib/serialize";
+import { CHANNEL_SORT_COLUMNS, sortColumn, sortOrder } from "../lib/sort";
 import { isoNow } from "../lib/crypto";
 
 export const channelRoutes = new Hono<AppContext>();
@@ -424,8 +425,15 @@ channelRoutes.get("/:id/items", async (c) => {
   if (!exists) return c.json({ error: "channel not found" }, 404);
   const limit = boundedInt(c.req.query("limit"), 30, 1, 100);
   const offset = boundedInt(c.req.query("offset"), 0, 0, 1_000_000);
+  const sortCol = sortColumn(CHANNEL_SORT_COLUMNS, c.req.query("sort"), "published");
+  const order = sortOrder(c.req.query("order"));
+  const saved = c.req.query("saved");
+  const where = ["ci.channel_id = ?", "i.status != 'excluded'"];
+  if (saved === "true") where.push("ui.id IS NOT NULL");
+  if (saved === "false") where.push("ui.id IS NULL");
   const rows = await all<
     ItemRow & {
+      discovered_at: string | null;
       ui_id: number | null;
       folder_id: number | null;
       group_position: number | null;
@@ -436,14 +444,16 @@ channelRoutes.get("/:id/items", async (c) => {
     }
   >(
     c.env.DB.prepare(
-      `SELECT i.*, ui.id AS ui_id, ui.folder_id, ui.group_position,
-              ui.is_favorite, ui.is_archived, ui.personal_status,
-              ui.subscription_id
+      // `i.id DESC` is the stable tiebreaker: without it, ties on the sort
+      // column can repeat or skip rows across pages.
+      `SELECT i.*, ci.discovered_at AS discovered_at, ui.id AS ui_id,
+              ui.folder_id, ui.group_position, ui.is_favorite, ui.is_archived,
+              ui.personal_status, ui.subscription_id
          FROM channel_item ci
          JOIN item i ON i.id = ci.item_id
          LEFT JOIN user_item ui ON ui.item_id = i.id AND ui.user_id = ?
-        WHERE ci.channel_id = ? AND i.status != 'excluded'
-        ORDER BY i.published_at DESC, ci.discovered_at DESC, i.id DESC
+        WHERE ${where.join(" AND ")}
+        ORDER BY ${sortCol} ${order}, i.id DESC
         LIMIT ? OFFSET ?`,
     ).bind(userId, channelId, limit, offset),
   );
@@ -463,6 +473,7 @@ channelRoutes.get("/:id/items", async (c) => {
             },
       ),
       in_library: row.ui_id !== null,
+      discovered_at: row.discovered_at,
     })),
   );
 });

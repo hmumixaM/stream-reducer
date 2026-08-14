@@ -4,6 +4,12 @@ import { useMutation } from "@tanstack/react-query";
 import { ExternalLink, Search as SearchIcon } from "lucide-react";
 import { api, type SearchHit } from "@/lib/api";
 import { Badge, Button, Card, Input, Select, Spinner } from "@/components/ui";
+import {
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  TextColumn,
+} from "@/components/shell";
 import { PlatformBadge } from "@/components/badges";
 
 function fmtTimestamp(seconds?: number | null): string {
@@ -71,14 +77,11 @@ export function Search() {
   const hits = search.data ?? [];
 
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Search</h1>
-        <p className="text-sm text-muted-foreground">
-          Semantic search across every transcript and summary. Finds passages by
-          meaning, not keywords, and links back to the exact moment in the source.
-        </p>
-      </div>
+    <TextColumn>
+      <PageHeader
+        title="Search"
+        subtitle="Semantic search across every transcript and summary. Finds passages by meaning, not keywords, and links back to the exact moment in the source."
+      />
 
       <form onSubmit={submit} className="mb-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
         <Input
@@ -107,18 +110,22 @@ export function Search() {
       </form>
 
       {search.isError && (
-        <Card className="p-6 text-center text-sm text-red-400">
-          {String(search.error)}
-        </Card>
+        <ErrorState
+          message={search.error.message}
+          onRetry={() => text.trim() && search.mutate(text.trim())}
+        />
       )}
 
       {search.isSuccess && hits.length === 0 && (
-        <Card className="p-10 text-center text-muted-foreground">
-          No matches.{" "}
-          {scope === "library"
-            ? "This only searches your library — switch to “All content” to search everything."
-            : "Try a different phrasing."}
-        </Card>
+        <EmptyState
+          icon={<SearchIcon className="h-5 w-5" />}
+          title="No matches"
+          description={
+            scope === "library"
+              ? "This only searches your library — switch to “All content” to search everything."
+              : "Try a different phrasing."
+          }
+        />
       )}
 
       <div className="space-y-3">
@@ -126,6 +133,6 @@ export function Search() {
           <HitCard key={hit.chunk_id} hit={hit} />
         ))}
       </div>
-    </div>
+    </TextColumn>
   );
 }

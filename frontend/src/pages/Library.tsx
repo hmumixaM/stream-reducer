@@ -5,24 +5,28 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { FolderPlus } from "lucide-react";
-import { api, type Item } from "@/lib/api";
+import { Bookmark, FolderPlus } from "lucide-react";
+import { api, type Item, type Platform } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
-import { Button, Card, Input, Select } from "@/components/ui";
+import { Button, Input, Select } from "@/components/ui";
+import {
+  ChipRow,
+  EmptyState,
+  FilterChip,
+  InfiniteScrollSentinel,
+  ItemGrid,
+  PageHeader,
+  SkeletonGrid,
+} from "@/components/shell";
+import { nextPageError } from "@/lib/useInfiniteScroll";
+import { PLATFORM_LABELS } from "@/components/badges";
 import { ItemCard, type ItemCardActions } from "@/components/ItemCard";
 import { FolderSection } from "@/components/FolderSection";
+import { ITEM_SORTS } from "@/lib/sorts";
 
-const PLATFORMS = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
+const PLATFORMS: Platform[] = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
 const PAGE_SIZE = 60;
 type View = "all" | "favorites" | "archived";
-
-const SORTS: { value: string; label: string }[] = [
-  { value: "added", label: "Recently added" },
-  { value: "published", label: "Publish date" },
-  { value: "views", label: "Most views" },
-  { value: "likes", label: "Most likes" },
-  { value: "duration", label: "Longest" },
-];
 
 export function Library() {
   const [q, setQ] = useState("");
@@ -132,46 +136,49 @@ export function Library() {
 
   return (
     <div>
-      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Library</h1>
-          <p className="text-sm text-muted-foreground">
-            {folderFirst
-              ? `${sectionFolders.length} folder${sectionFolders.length === 1 ? "" : "s"} · ${looseRows.length}${looseItems.hasNextPage ? "+" : ""} loose`
-              : `${visibleItems.length}${items.hasNextPage ? "+" : ""} ${
-                  archivedView ? "archived" : "summaries"
-                }`}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {!MIRROR && (
-            <Button variant="outline" size="sm" onClick={handleNewFolder}>
-              <FolderPlus className="h-4 w-4" /> <span className="hidden sm:inline">New folder</span>
-            </Button>
-          )}
-          <Select
-            value={sort}
-            onChange={(e) => setSort(e.target.value)}
-            className="w-auto min-w-[120px]"
-            title="Sort by"
-          >
-            {SORTS.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </Select>
-          <Input
-            placeholder="Search titles..."
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            className="max-w-xs"
-          />
-        </div>
-      </div>
+      <PageHeader
+        title={MIRROR ? "Library" : "Saved"}
+        subtitle={
+          folderFirst
+            ? `${sectionFolders.length} folder${sectionFolders.length === 1 ? "" : "s"}${
+                archivedView ? " of archived items" : ""
+              }, plus everything you have not filed.`
+            : archivedView
+              ? "Items you archived. They stay searchable and keep their summaries."
+              : "Everything you saved, with your folders, favorites, and notes."
+        }
+        actions={
+          <>
+            {!MIRROR && (
+              <Button variant="outline" size="sm" onClick={handleNewFolder}>
+                <FolderPlus className="h-4 w-4" />
+                <span className="hidden sm:inline">New folder</span>
+              </Button>
+            )}
+            <Select
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              className="w-auto min-w-[130px]"
+              title="Sort by"
+            >
+              {ITEM_SORTS.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </Select>
+            <Input
+              placeholder="Search titles..."
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="max-w-[220px]"
+            />
+          </>
+        }
+      />
 
       {!MIRROR && (
-        <div className="mb-4 flex flex-wrap gap-2">
+        <ChipRow>
           <FilterChip label="All" active={view === "all"} onClick={() => setView("all")} />
           <FilterChip
             label="★ Favorites"
@@ -183,20 +190,20 @@ export function Library() {
             active={view === "archived"}
             onClick={() => setView("archived")}
           />
-        </div>
+        </ChipRow>
       )}
 
-      <div className="mb-5 flex flex-wrap gap-2">
+      <ChipRow>
         <FilterChip label="All" active={!platform} onClick={() => setPlatform("")} />
         {PLATFORMS.map((p) => (
           <FilterChip
             key={p}
-            label={p}
+            label={PLATFORM_LABELS[p]}
             active={platform === p}
             onClick={() => setPlatform(platform === p ? "" : p)}
           />
         ))}
-      </div>
+      </ChipRow>
 
       {folderFirst ? (
         <div className="space-y-4">
@@ -219,6 +226,7 @@ export function Library() {
             hasNextPage={!!looseItems.hasNextPage}
             isFetchingNextPage={looseItems.isFetchingNextPage}
             fetchNextPage={() => looseItems.fetchNextPage()}
+            pageError={nextPageError(looseItems)}
             onDropDetach={(id) => move.mutate({ id, gid: null })}
             hasFolders={sectionFolders.length > 0}
             archivedView={archivedView}
@@ -226,34 +234,34 @@ export function Library() {
           />
         </div>
       ) : items.isLoading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <SkeletonGrid count={8} />
       ) : visibleItems.length > 0 ? (
         <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <ItemGrid>
             {visibleItems.map((item) => (
               <ItemCard key={item.id} item={item} {...actions} />
             ))}
-          </div>
-          {items.hasNextPage && (
-            <div className="mt-6 flex justify-center">
-              <Button
-                variant="outline"
-                onClick={() => items.fetchNextPage()}
-                disabled={items.isFetchingNextPage}
-              >
-                {items.isFetchingNextPage ? "Loading…" : "Load more"}
-              </Button>
-            </div>
-          )}
+          </ItemGrid>
+          <InfiniteScrollSentinel
+            hasNextPage={!!items.hasNextPage}
+            isFetchingNextPage={items.isFetchingNextPage}
+            fetchNextPage={() => items.fetchNextPage()}
+            error={nextPageError(items)}
+            totalLabel={`${visibleItems.length} item${visibleItems.length === 1 ? "" : "s"}`}
+          />
         </>
       ) : (
-        <Card className="p-10 text-center text-muted-foreground">
-          {filtering
-            ? "No matching items."
-            : MIRROR
-              ? "No summaries yet."
-              : 'No summaries yet. Click "Add content" to get started.'}
-        </Card>
+        <EmptyState
+          icon={<Bookmark className="h-5 w-5" />}
+          title={filtering ? "No matching items" : archivedView ? "Nothing archived" : "Nothing saved yet"}
+          description={
+            filtering
+              ? "Try a different search term or platform."
+              : MIRROR
+                ? "This mirror has no summaries yet."
+                : 'Use "Add content" in the sidebar, or add something from your timeline.'
+          }
+        />
       )}
     </div>
   );
@@ -267,6 +275,7 @@ function LooseGrid({
   hasNextPage,
   isFetchingNextPage,
   fetchNextPage,
+  pageError,
   onDropDetach,
   hasFolders,
   archivedView,
@@ -277,6 +286,7 @@ function LooseGrid({
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   fetchNextPage: () => void;
+  pageError: Error | null;
   onDropDetach: (id: number) => void;
   hasFolders: boolean;
   archivedView: boolean;
@@ -285,20 +295,22 @@ function LooseGrid({
   const [dragOver, setDragOver] = useState(false);
 
   if (isLoading) {
-    return <p className="text-muted-foreground">Loading...</p>;
+    return <SkeletonGrid count={4} />;
   }
   if (rows.length === 0) {
     // Everything is filed: stay quiet when folders exist, otherwise show the
     // empty-library card.
     if (hasFolders) return null;
     return (
-      <Card className="p-10 text-center text-muted-foreground">
-        {MIRROR
-          ? archivedView
-            ? "Nothing archived."
-            : "No summaries yet."
-          : 'No summaries yet. Click "Add content" to get started.'}
-      </Card>
+      <EmptyState
+        icon={<Bookmark className="h-5 w-5" />}
+        title={archivedView ? "Nothing archived" : "Nothing saved yet"}
+        description={
+          MIRROR
+            ? "This mirror has no summaries yet."
+            : 'Use "Add content" in the sidebar, or add something from your timeline.'
+        }
+      />
     );
   }
   return (
@@ -321,45 +333,17 @@ function LooseGrid({
         dragOver ? "bg-accent/50 ring-1 ring-primary" : ""
       }`}
     >
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <ItemGrid>
         {rows.map((item) => (
           <ItemCard key={item.id} item={item} {...actions} />
         ))}
-      </div>
-      {hasNextPage && (
-        <div className="mt-6 flex justify-center">
-          <Button
-            variant="outline"
-            onClick={fetchNextPage}
-            disabled={isFetchingNextPage}
-          >
-            {isFetchingNextPage ? "Loading…" : "Load more"}
-          </Button>
-        </div>
-      )}
+      </ItemGrid>
+      <InfiniteScrollSentinel
+        hasNextPage={hasNextPage}
+        isFetchingNextPage={isFetchingNextPage}
+        fetchNextPage={fetchNextPage}
+        error={pageError}
+      />
     </div>
-  );
-}
-
-function FilterChip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-full border px-3 py-1 text-xs font-medium capitalize transition-colors ${
-        active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border text-muted-foreground hover:bg-accent"
-      }`}
-    >
-      {label.replace("_", " ")}
-    </button>
   );
 }

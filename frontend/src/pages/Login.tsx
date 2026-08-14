@@ -44,7 +44,7 @@ export function Login() {
               </p>
             </div>
             {linkError && (
-              <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-400">
+              <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
                 That link was invalid or expired. Request a new one below.
               </p>
             )}
@@ -61,7 +61,7 @@ export function Login() {
               {mutation.isPending ? <Spinner /> : "Send magic link"}
             </Button>
             {mutation.isError && (
-              <p className="text-sm text-red-400">{String(mutation.error)}</p>
+              <p className="text-sm text-danger">{mutation.error.message}</p>
             )}
           </form>
         )}

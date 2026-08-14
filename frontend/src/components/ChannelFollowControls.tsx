@@ -4,13 +4,22 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { RefreshCw, Trash2 } from "lucide-react";
+import {
+  Check,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Zap,
+} from "lucide-react";
 import {
   api,
   type ChannelFollowRead,
   type Group,
 } from "@/lib/api";
 import { Button, Input, Select, Spinner, Switch } from "@/components/ui";
+import { Menu, MenuRow } from "@/components/shell";
+import { timeAgo } from "@/lib/utils";
 
 export function invalidateChannelQueries(queryClient: QueryClient, channelId: number) {
   queryClient.invalidateQueries({ queryKey: ["channels", "catalog"] });
@@ -18,19 +27,32 @@ export function invalidateChannelQueries(queryClient: QueryClient, channelId: nu
   queryClient.invalidateQueries({ queryKey: ["channel", channelId] });
   queryClient.invalidateQueries({ queryKey: ["channel", channelId, "items"] });
   queryClient.invalidateQueries({ queryKey: ["subs"] });
+  queryClient.invalidateQueries({ queryKey: ["timeline"] });
 }
 
+/**
+ * Follow state for one channel: the follow/unfollow buttons plus an optional
+ * settings panel. The panel is *controlled* — the compact tile never opens it,
+ * while `ChannelRow` and the detail page expand it on demand — so a grid of
+ * channels is no longer padded out by three always-visible form fields.
+ */
 export function ChannelFollowControls({
   channelId,
   follow,
   groups,
-  showManagement = false,
+  settingsOpen = false,
+  showToggle = true,
+  compact = false,
   onFollowChanged,
 }: {
   channelId: number;
   follow: ChannelFollowRead | null;
   groups: Group[];
-  showManagement?: boolean;
+  settingsOpen?: boolean;
+  /** False when the toggle is rendered elsewhere and this instance is settings-only. */
+  showToggle?: boolean;
+  /** Tile mode: a single primary action plus an overflow menu, no inline forms. */
+  compact?: boolean;
   onFollowChanged?: (follow: ChannelFollowRead | null) => void;
 }) {
   const queryClient = useQueryClient();
@@ -89,40 +111,63 @@ export function ChannelFollowControls({
     followChannel.error ?? update.error ?? unfollow.error ?? poll.error;
   const pending =
     followChannel.isPending || update.isPending || unfollow.isPending || poll.isPending;
+  const confirmUnfollow = () => {
+    if (window.confirm("Unfollow this channel? Existing library items will be kept.")) {
+      unfollow.mutate();
+    }
+  };
 
   if (!follow) {
     return (
       <div className="space-y-3" onClick={(event) => event.stopPropagation()}>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
-            variant="outline"
+            variant={compact ? "default" : "outline"}
             disabled={pending}
             aria-busy={followChannel.isPending}
             onClick={() => followChannel.mutate(false)}
           >
-            {followChannel.isPending ? (
-              <>
-                <Spinner /> Following…
-              </>
-            ) : (
-              "Follow"
-            )}
+            {followChannel.isPending ? <Spinner /> : <Plus className="h-4 w-4" />}
+            Follow
           </Button>
-          <Button
-            size="sm"
-            disabled={pending}
-            aria-expanded={showLatestSetup}
-            aria-controls={latestSettingsId}
-            onClick={() => setShowLatestSetup((open) => !open)}
-          >
-            Follow latest
-          </Button>
+          {compact ? (
+            <Menu
+              label="More follow options"
+              trigger={({ toggle }) => (
+                <Button size="icon" variant="outline" title="More options" onClick={toggle}>
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              )}
+            >
+              {({ close }) => (
+                <MenuRow
+                  onClick={() => {
+                    followChannel.mutate(true);
+                    close();
+                  }}
+                >
+                  <Zap className="h-4 w-4 text-primary" />
+                  Follow latest…
+                </MenuRow>
+              )}
+            </Menu>
+          ) : (
+            <Button
+              size="sm"
+              disabled={pending}
+              aria-expanded={showLatestSetup}
+              aria-controls={latestSettingsId}
+              onClick={() => setShowLatestSetup((open) => !open)}
+            >
+              Follow latest
+            </Button>
+          )}
         </div>
-        {showLatestSetup && (
+        {!compact && showLatestSetup && (
           <form
             id={latestSettingsId}
-            className="rounded-md border border-border bg-background/50 p-3"
+            className="rounded-md border border-border bg-card-muted p-3"
             onSubmit={(event) => {
               event.preventDefault();
               followChannel.mutate(true);
@@ -160,21 +205,72 @@ export function ChannelFollowControls({
     );
   }
 
+  if (compact) {
+    return (
+      <div
+        className="flex flex-wrap items-center gap-2"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <Button size="sm" variant="outline" disabled className="pointer-events-none">
+          <Check className="h-4 w-4" /> Following
+        </Button>
+        <Menu
+          label="Follow options"
+          trigger={({ toggle }) => (
+            <Button size="icon" variant="outline" title="Follow options" onClick={toggle}>
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          )}
+        >
+          {({ close }) => (
+            <>
+              <MenuRow
+                onClick={() => {
+                  update.mutate({ follow_latest: !follow.follow_latest });
+                  close();
+                }}
+              >
+                <Zap
+                  className={follow.follow_latest ? "h-4 w-4 text-primary" : "h-4 w-4 text-muted-foreground"}
+                />
+                {follow.follow_latest ? "Stop auto-updates" : "Follow latest…"}
+              </MenuRow>
+              <MenuRow
+                onClick={() => {
+                  close();
+                  confirmUnfollow();
+                }}
+              >
+                <Trash2 className="h-4 w-4 text-danger" />
+                Unfollow
+              </MenuRow>
+            </>
+          )}
+        </Menu>
+        {mutationError && <MutationError error={mutationError} />}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3" onClick={(event) => event.stopPropagation()}>
-      <div className="flex flex-wrap items-center gap-3">
-        <Switch
-          checked={follow.follow_latest}
-          disabled={pending}
-          label="Follow latest"
-          onCheckedChange={(checked) => update.mutate({ follow_latest: checked })}
-        />
-        {!follow.follow_latest && (
-          <span className="text-xs text-muted-foreground">Following without automatic updates</span>
-        )}
-      </div>
+      {showToggle && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Switch
+            checked={follow.follow_latest}
+            disabled={pending}
+            label="Follow latest"
+            onCheckedChange={(checked) => update.mutate({ follow_latest: checked })}
+          />
+          {!follow.follow_latest && (
+            <span className="text-xs text-muted-foreground">
+              Following without automatic updates
+            </span>
+          )}
+        </div>
+      )}
 
-      {showManagement && (
+      {settingsOpen && (
         <>
           <form
             className="space-y-3"
@@ -232,22 +328,59 @@ export function ChannelFollowControls({
               {poll.isPending ? <Spinner /> : <RefreshCw className="h-4 w-4" />}
               Poll now
             </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              disabled={pending}
-              onClick={() => {
-                if (window.confirm("Unfollow this channel? Existing library items will be kept.")) {
-                  unfollow.mutate();
-                }
-              }}
-            >
+            <Button size="sm" variant="danger" disabled={pending} onClick={confirmUnfollow}>
               <Trash2 className="h-4 w-4" /> Unfollow
             </Button>
           </div>
         </>
       )}
       {mutationError && <MutationError error={mutationError} />}
+    </div>
+  );
+}
+
+/** Compact status pill summarising the last poll of a follow. */
+export function FollowStatusChip({ follow }: { follow: ChannelFollowRead }) {
+  if (!follow.follow_latest) {
+    return (
+      <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+        paused
+      </span>
+    );
+  }
+  const tone =
+    follow.last_status === "error"
+      ? "bg-danger/15 text-danger"
+      : follow.last_status === "empty"
+        ? "bg-warning/15 text-warning"
+        : "bg-success/15 text-success";
+  const label =
+    follow.last_status === "error"
+      ? `error${follow.consecutive_failures ? ` ×${follow.consecutive_failures}` : ""}`
+      : follow.last_status === "empty"
+        ? "no entries"
+        : follow.last_new_count
+          ? `+${follow.last_new_count} new`
+          : "ok";
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>{label}</span>
+  );
+}
+
+export function PollHealth({ follow }: { follow: ChannelFollowRead }) {
+  return (
+    <div className="rounded-md bg-card-muted p-3 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-2">
+        <span>
+          {follow.last_checked_at
+            ? `Checked ${timeAgo(follow.last_checked_at)}`
+            : "Never checked"}
+        </span>
+        {follow.last_status && <FollowStatusChip follow={follow} />}
+      </div>
+      {follow.last_error && (
+        <p className="mt-2 break-words text-danger">Last poll failed: {follow.last_error}</p>
+      )}
     </div>
   );
 }
@@ -327,7 +460,7 @@ function FollowSettings({
 
 function MutationError({ error }: { error: Error }) {
   return (
-    <p className="text-sm text-red-400" role="alert" aria-live="polite">
+    <p className="text-sm text-danger" role="alert" aria-live="polite">
       {error.message}
     </p>
   );

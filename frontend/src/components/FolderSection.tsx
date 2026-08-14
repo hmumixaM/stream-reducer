@@ -1,9 +1,14 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { useInfiniteQuery, type UseInfiniteQueryResult } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { ChevronRight, Folder } from "lucide-react";
-import { api, type Group, type Item } from "@/lib/api";
-import { Button } from "@/components/ui";
+import { api, type Group } from "@/lib/api";
+import {
+  InfiniteScrollSentinel,
+  ItemGrid,
+  LoadingLine,
+} from "@/components/shell";
+import { nextPageError } from "@/lib/useInfiniteScroll";
 import { ItemCard, type ItemCardActions } from "@/components/ItemCard";
 
 const PAGE_SIZE = 60;
@@ -46,7 +51,7 @@ function CollapsibleSection({
         const id = Number(e.dataTransfer.getData("text/plain"));
         if (id) onDropItem(id);
       }}
-      className={`rounded-lg border transition-colors ${
+      className={`rounded-lg border bg-card shadow-card transition-colors ${
         dragOver ? "border-primary bg-accent/50" : "border-border"
       }`}
     >
@@ -102,7 +107,12 @@ export function FolderSection({
       onToggle={() => setExpanded((v) => !v)}
     >
       {expanded && (
-        <FolderItems groupId={group.id} archived={archived} sort={sort} actions={actions} />
+        <FolderItems
+          groupId={group.id}
+          archived={archived}
+          sort={sort}
+          actions={actions}
+        />
       )}
     </CollapsibleSection>
   );
@@ -135,44 +145,25 @@ function FolderItems({
       lastPage.length === PAGE_SIZE ? allPages.length * PAGE_SIZE : undefined,
     refetchInterval: 8000,
   });
-  return <ItemGrid items={items} actions={actions} emptyLabel="No items here." />;
-}
-
-function ItemGrid({
-  items,
-  actions,
-  emptyLabel,
-}: {
-  items: UseInfiniteQueryResult<{ pages: Item[][] }>;
-  actions: ItemCardActions;
-  emptyLabel: string;
-}) {
   const rows = items.data?.pages.flat() ?? [];
-  if (items.isLoading) {
-    return <p className="py-4 text-sm text-muted-foreground">Loading…</p>;
-  }
+
+  if (items.isLoading) return <LoadingLine />;
   if (rows.length === 0) {
-    return <p className="py-4 text-sm text-muted-foreground">{emptyLabel}</p>;
+    return <p className="py-4 text-sm text-muted-foreground">No items here.</p>;
   }
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <ItemGrid>
         {rows.map((item) => (
           <ItemCard key={item.id} item={item} {...actions} />
         ))}
-      </div>
-      {items.hasNextPage && (
-        <div className="mt-4 flex justify-center">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => items.fetchNextPage()}
-            disabled={items.isFetchingNextPage}
-          >
-            {items.isFetchingNextPage ? "Loading…" : "Load more"}
-          </Button>
-        </div>
-      )}
+      </ItemGrid>
+      <InfiniteScrollSentinel
+        hasNextPage={!!items.hasNextPage}
+        isFetchingNextPage={items.isFetchingNextPage}
+        fetchNextPage={() => items.fetchNextPage()}
+        error={nextPageError(items)}
+      />
     </>
   );
 }

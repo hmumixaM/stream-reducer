@@ -3,6 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, XCircle, Save, RotateCcw } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Card, Select, Spinner } from "@/components/ui";
+import {
+  ErrorState,
+  LoadingState,
+  PageHeader,
+  TextColumn,
+} from "@/components/shell";
 
 export function Settings() {
   const qc = useQueryClient();
@@ -30,7 +36,12 @@ export function Settings() {
     onSuccess: (data) => qc.setQueryData(["settings"], data),
   });
 
-  if (!settings.data) return <p className="text-muted-foreground">Loading...</p>;
+  if (settings.isError) {
+    return (
+      <ErrorState message={settings.error.message} onRetry={() => settings.refetch()} />
+    );
+  }
+  if (!settings.data) return <LoadingState />;
   const s = settings.data;
 
   const dirty =
@@ -39,13 +50,17 @@ export function Settings() {
     sttModel !== s.stt_model;
 
   return (
-    <div>
-      <h1 className="mb-1 text-2xl font-semibold">Settings</h1>
-      <p className="mb-6 text-sm text-muted-foreground">
-        Pick the transcription and summary models below; changes apply to the
-        next job (no restart needed). Everything else comes from{" "}
-        <span className="font-mono">.env</span>.
-      </p>
+    <TextColumn>
+      <PageHeader
+        title="Settings"
+        subtitle={
+          <>
+            Pick the transcription and summary models below; changes apply to the next
+            job (no restart needed). Everything else comes from{" "}
+            <span className="font-mono">.env</span>.
+          </>
+        }
+      />
 
       <div className="space-y-6">
         <Card className="p-5">
@@ -98,13 +113,11 @@ export function Settings() {
           >
             <RotateCcw className="h-4 w-4" /> Reset
           </Button>
-          {save.isSuccess && !dirty && (
-            <span className="text-sm text-emerald-400">Saved</span>
-          )}
-          {save.isError && <span className="text-sm text-red-400">Save failed</span>}
+          {save.isSuccess && !dirty && <span className="text-sm text-success">Saved</span>}
+          {save.isError && <span className="text-sm text-danger">Save failed</span>}
         </div>
       </div>
-    </div>
+    </TextColumn>
   );
 }
 
@@ -130,7 +143,7 @@ function ModelField({
       <div className="mb-1 flex items-center justify-between text-sm">
         <span className="text-muted-foreground">{label}</span>
         {overridden && (
-          <span className="text-xs text-amber-400">override (default: {def})</span>
+          <span className="text-xs text-warning">override (default: {def})</span>
         )}
       </div>
       <Select
@@ -160,11 +173,11 @@ function Row({ label, value }: { label: string; value: ReactNode }) {
 
 function KeyState({ ok }: { ok: boolean }) {
   return ok ? (
-    <span className="inline-flex items-center gap-1 text-emerald-400">
+    <span className="inline-flex items-center gap-1 text-success">
       <CheckCircle2 className="h-4 w-4" /> set
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1 text-red-400">
+    <span className="inline-flex items-center gap-1 text-danger">
       <XCircle className="h-4 w-4" /> missing
     </span>
   );

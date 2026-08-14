@@ -6,29 +6,18 @@ import { toItemRead } from "../lib/serialize";
 import { addUrlToLibrary, expandPlaylistUrls, recomputePriority } from "../lib/ingest";
 import { splitUrls, nonItemUrlError } from "../lib/url";
 import { readJson } from "../lib/request";
+import {
+  LIBRARY_SORT_COLUMNS,
+  SORT_COLUMNS,
+  sortColumn,
+  sortOrder,
+} from "../lib/sort";
 
 export const itemsRoutes = new Hono<AppContext>();
 
 // Read-only catalog endpoints (browse list, item detail, related) are public so
 // anyone can explore the content without an account. Per-user state (library,
 // favorites, comments, highlights) requires auth and is applied per-route.
-
-const SORT_COLUMNS: Record<string, string> = {
-  added: "item.created_at",
-  published: "item.published_at",
-  views: "item.view_count",
-  likes: "item.like_count",
-  duration: "item.duration_s",
-  priority: "item.priority_score",
-};
-
-// In the personal library, "added" means when the user saved the item
-// (per-user ui.added_at), and "position" is the manual drag order within a folder.
-const LIBRARY_SORT_COLUMNS: Record<string, string> = {
-  ...SORT_COLUMNS,
-  added: "ui.added_at",
-  position: "ui.group_position",
-};
 
 // --- Browse the GLOBAL catalog (every item anyone has ingested) ----------
 itemsRoutes.get("/", async (c) => {
@@ -50,8 +39,8 @@ itemsRoutes.get("/", async (c) => {
     where.push("item.title LIKE ?");
     binds.push(`%${u.q}%`);
   }
-  const sortCol = SORT_COLUMNS[u.sort ?? "added"] ?? "item.created_at";
-  const order = u.order === "asc" ? "ASC" : "DESC";
+  const sortCol = sortColumn(SORT_COLUMNS, u.sort, "added");
+  const order = sortOrder(u.order);
   const limit = Math.min(Number(u.limit ?? 100), 500);
   const offset = Number(u.offset ?? 0);
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -124,8 +113,8 @@ itemsRoutes.get("/library", requireAuth, async (c) => {
     where.push("item.title LIKE ?");
     binds.push(`%${u.q}%`);
   }
-  const sortCol = LIBRARY_SORT_COLUMNS[u.sort ?? "added"] ?? "ui.added_at";
-  const order = u.order === "asc" ? "ASC" : "DESC";
+  const sortCol = sortColumn(LIBRARY_SORT_COLUMNS, u.sort, "added");
+  const order = sortOrder(u.order);
   const limit = Math.min(Number(u.limit ?? 200), 500);
   const offset = Number(u.offset ?? 0);
 

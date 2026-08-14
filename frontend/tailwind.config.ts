@@ -18,6 +18,7 @@ export default {
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
+          muted: "hsl(var(--card-muted))",
         },
         primary: {
           DEFAULT: "hsl(var(--primary))",
@@ -27,11 +28,19 @@ export default {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
         },
+        // `<alpha-value>` keeps `/15` opacity modifiers working for badge tints.
+        success: "hsl(var(--success) / <alpha-value>)",
+        warning: "hsl(var(--warning) / <alpha-value>)",
+        danger: "hsl(var(--danger) / <alpha-value>)",
       },
       borderRadius: {
-        lg: "0.75rem",
+        xl: "1.125rem",
+        lg: "0.875rem",
         md: "0.5rem",
         sm: "0.375rem",
+      },
+      fontSize: {
+        display: ["1.75rem", { lineHeight: "2.125rem", letterSpacing: "-0.02em" }],
       },
       boxShadow: {
         card: "0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 1px 4px -1px rgba(0, 0, 0, 0.03)",
@@ -50,11 +59,16 @@ export default {
           from: { transform: "translateX(0)" },
           to: { transform: "translateX(-100%)" },
         },
+        "pulse-soft": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.45" },
+        },
       },
       animation: {
         "fade-in": "fade-in 0.2s ease-out",
         "slide-in-left": "slide-in-left 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
         "slide-out-left": "slide-out-left 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+        "pulse-soft": "pulse-soft 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite",
       },
     },
   },

@@ -23,10 +23,20 @@ import {
 } from "lucide-react";
 import { api, type Platform } from "@/lib/api";
 import { Button, Card, Spinner } from "@/components/ui";
+import { ErrorState, LoadingState, PageHeader } from "@/components/shell";
 import { PlatformBadge } from "@/components/badges";
 import { formatCost, formatCount, formatLength, formatMs } from "@/lib/utils";
 
 const COLORS = ["#818cf8", "#f87171", "#34d399", "#fbbf24", "#f472b6", "#60a5fa"];
+
+// Recharts renders outside Tailwind, so themed values have to be passed inline.
+const AXIS_COLOR = "hsl(var(--muted-foreground))";
+const TOOLTIP_STYLE = {
+  background: "hsl(var(--card))",
+  border: "1px solid hsl(var(--border))",
+  borderRadius: "0.5rem",
+  color: "hsl(var(--card-foreground))",
+} as const;
 
 export function Stats() {
   const qc = useQueryClient();
@@ -40,7 +50,10 @@ export function Stats() {
     mutationFn: () => api.getStats(true),
     onSuccess: (data) => qc.setQueryData(["stats"], data),
   });
-  if (!stats.data) return <p className="text-muted-foreground">Loading...</p>;
+  if (stats.isError) {
+    return <ErrorState message={stats.error.message} onRetry={() => stats.refetch()} />;
+  }
+  if (!stats.data) return <LoadingState label="Crunching numbers…" />;
   const s = stats.data;
 
   const stageData = Object.entries(s.avg_stage_ms).map(([stage, ms]) => ({
@@ -52,19 +65,22 @@ export function Stats() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Stats</h1>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => refresh.mutate()}
-          disabled={refresh.isPending}
-          title="Recompute now (stats are cached for ~1 min)"
-        >
-          {refresh.isPending ? <Spinner /> : <RefreshCw className="h-4 w-4" />}
-          Refresh
-        </Button>
-      </div>
+      <PageHeader
+        title="Stats"
+        subtitle="Volume, cost and per-stage timings across everything you've processed."
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refresh.mutate()}
+            disabled={refresh.isPending}
+            title="Recompute now (stats are cached for ~1 min)"
+          >
+            {refresh.isPending ? <Spinner /> : <RefreshCw className="h-4 w-4" />}
+            Refresh
+          </Button>
+        }
+      />
 
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
         <Stat icon={LayoutGrid} label="Items" value={formatCount(s.total_items)} sub={`${done} done`} />
@@ -91,11 +107,9 @@ export function Stats() {
           {stageData.length ? (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={stageData}>
-                <XAxis dataKey="stage" stroke="#94a3b8" fontSize={12} />
-                <YAxis stroke="#94a3b8" fontSize={12} />
-                <Tooltip
-                  contentStyle={{ background: "#0f172a", border: "1px solid #1e293b" }}
-                />
+                <XAxis dataKey="stage" stroke={AXIS_COLOR} fontSize={12} />
+                <YAxis stroke={AXIS_COLOR} fontSize={12} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
                 <Bar dataKey="avg" radius={[4, 4, 0, 0]}>
                   {stageData.map((_, i) => (
                     <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -125,9 +139,7 @@ export function Stats() {
                     <Cell key={i} fill={COLORS[i % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={{ background: "#0f172a", border: "1px solid #1e293b" }}
-                />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
               </PieChart>
             </ResponsiveContainer>
           ) : (
@@ -195,7 +207,7 @@ export function Stats() {
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-emerald-400"
+                        className="h-full rounded-full bg-success"
                         style={{ width: `${Math.max(pct, 2)}%` }}
                       />
                     </div>
@@ -212,7 +224,7 @@ export function Stats() {
           </h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {Object.entries(s.total_stage_ms).map(([stage, ms]) => (
-              <div key={stage} className="rounded-md bg-muted/50 p-3">
+              <div key={stage} className="rounded-md bg-card-muted p-3">
                 <div className="text-lg font-semibold">{formatMs(ms)}</div>
                 <div className="text-xs capitalize text-muted-foreground">{stage}</div>
               </div>

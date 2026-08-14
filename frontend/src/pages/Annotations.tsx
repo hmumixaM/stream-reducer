@@ -3,7 +3,16 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Highlighter, MessageSquare } from "lucide-react";
 import { api, type Annotation } from "@/lib/api";
-import { Badge, Card, Spinner } from "@/components/ui";
+import { Badge, Card } from "@/components/ui";
+import {
+  ChipRow,
+  EmptyState,
+  ErrorState,
+  FilterChip,
+  LoadingLine,
+  PageHeader,
+  TextColumn,
+} from "@/components/shell";
 import { PlatformBadge } from "@/components/badges";
 import { hlClass } from "@/components/Highlightable";
 import { timeAgo, cn } from "@/lib/utils";
@@ -38,47 +47,34 @@ export function Annotations() {
   }, [all.data]);
 
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Highlights & notes</h1>
-        <p className="text-sm text-muted-foreground">
-          Every highlight and comment you've made, newest first. Click through to
-          open the item where you made it.
-        </p>
-      </div>
+    <TextColumn>
+      <PageHeader
+        title="Highlights & notes"
+        subtitle="Every highlight and comment you've made, newest first. Click through to open the item where you made it."
+      />
 
-      <div className="mb-5 flex flex-wrap items-center gap-2">
+      <ChipRow>
         {FILTERS.map((f) => (
-          <button
+          <FilterChip
             key={f.key}
+            label={f.label}
+            active={filter === f.key}
+            count={f.key === "all" ? undefined : counts[f.key]}
             onClick={() => setFilter(f.key)}
-            className={cn(
-              "rounded-full px-3 py-1 text-sm font-medium transition-colors",
-              filter === f.key
-                ? "bg-primary text-primary-foreground"
-                : "border border-border text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {f.label}
-            {f.key === "highlight" && ` (${counts.highlight})`}
-            {f.key === "comment" && ` (${counts.comment})`}
-          </button>
+          />
         ))}
-      </div>
+      </ChipRow>
 
-      {all.isLoading && (
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Spinner /> Loading…
-        </div>
-      )}
+      {all.isLoading && <LoadingLine />}
       {all.isError && (
-        <Card className="p-6 text-center text-sm text-red-400">{String(all.error)}</Card>
+        <ErrorState message={all.error.message} onRetry={() => all.refetch()} />
       )}
       {all.isSuccess && rows.length === 0 && (
-        <Card className="p-10 text-center text-muted-foreground">
-          Nothing here yet. Select text in an item's summary or transcript to create
-          a highlight, or leave a comment.
-        </Card>
+        <EmptyState
+          icon={<Highlighter className="h-5 w-5" />}
+          title="Nothing here yet"
+          description="Select text in an item's summary or transcript to create a highlight, or leave a comment."
+        />
       )}
 
       <div className="space-y-3">
@@ -86,7 +82,7 @@ export function Annotations() {
           <AnnotationCard key={`${a.kind}-${a.id}`} a={a} />
         ))}
       </div>
-    </div>
+    </TextColumn>
   );
 }
 
@@ -98,11 +94,11 @@ function AnnotationCard({ a }: { a: Annotation }) {
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <PlatformBadge platform={a.item.platform} />
         {isHighlight ? (
-          <Badge className="bg-amber-500/15 text-amber-400">
+          <Badge className="bg-warning/15 text-warning">
             <Highlighter className="mr-1 h-3 w-3" /> {a.source}
           </Badge>
         ) : (
-          <Badge className="bg-sky-500/15 text-sky-400">
+          <Badge className="bg-sky-500/15 text-sky-600 dark:text-sky-400">
             <MessageSquare className="mr-1 h-3 w-3" /> comment
           </Badge>
         )}

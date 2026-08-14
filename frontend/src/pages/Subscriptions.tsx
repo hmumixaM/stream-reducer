@@ -1,25 +1,44 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Compass, RefreshCw, Rss, Search, Trash2 } from "lucide-react";
+import { Compass, Link2, Rss, Search } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
-import { PlatformBadge } from "@/components/badges";
 import { ChannelCard } from "@/components/ChannelCard";
-import { Button, Card, Input, Select, Spinner, Switch } from "@/components/ui";
+import { ChannelRow, LegacyFollowRow } from "@/components/ChannelRow";
+import { ChannelTile } from "@/components/ChannelTile";
+import { Button, Card, Input, Select, Spinner } from "@/components/ui";
+import {
+  ChipRow,
+  EmptyState,
+  ErrorState,
+  FilterChip,
+  InfiniteScrollSentinel,
+  ItemGrid,
+  LoadingState,
+  PageHeader,
+  SectionHeader,
+  SkeletonGrid,
+  Toolbar,
+} from "@/components/shell";
+import { nextPageError } from "@/lib/useInfiniteScroll";
 import {
   api,
   type ChannelFollowRead,
   type ChannelRead,
+  type Group,
   type Platform,
-  type Subscription,
 } from "@/lib/api";
-import { cn, timeAgo } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 24;
+// Follows change only when a poll lands, so a slow baseline is plenty; a poll in
+// flight temporarily tightens it (see FollowingChannels).
+const FOLLOW_REFETCH_MS = 15000;
+const FOLLOW_REFETCH_ACTIVE_MS = 3000;
 const PLATFORMS: { value: Platform; label: string }[] = [
   { value: "youtube", label: "YouTube" },
   { value: "bilibili", label: "Bilibili" },
@@ -50,13 +69,10 @@ export function Subscriptions() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold">Channels</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Discover known channels, follow the ones you care about, and optionally receive
-          new items automatically.
-        </p>
-      </div>
+      <PageHeader
+        title="Channels"
+        subtitle="Discover known channels, follow the ones you care about, and optionally receive new items automatically."
+      />
 
       <nav className="mb-6 flex border-b border-border" aria-label="Channel views">
         <TabLink
@@ -87,15 +103,11 @@ export function Subscriptions() {
   );
 }
 
-function DiscoverChannels({
-  groups,
-}: {
-  groups: Awaited<ReturnType<typeof api.listGroups>>;
-}) {
+function DiscoverChannels({ groups }: { groups: Group[] }) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [platform, setPlatform] = useState<Platform | "">("");
-  const [channelUrl, setChannelUrl] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
   const [preview, setPreview] = useState<ChannelRead | null>(null);
   const debouncedQuery = useDebouncedValue(query.trim(), 300);
 
@@ -112,14 +124,6 @@ function DiscoverChannels({
     getNextPageParam: (lastPage, pages) =>
       lastPage.length === PAGE_SIZE ? pages.length * PAGE_SIZE : undefined,
   });
-  const resolve = useMutation({
-    mutationFn: () => api.resolveChannel(channelUrl.trim()),
-    onMutate: () => setPreview(null),
-    onSuccess: (channel) => {
-      setPreview(channel);
-      queryClient.invalidateQueries({ queryKey: ["channels", "catalog"] });
-    },
-  });
   const rows = channels.data?.pages.flat() ?? [];
   const filtering = Boolean(debouncedQuery || platform);
 
@@ -129,95 +133,61 @@ function DiscoverChannels({
 
   return (
     <div className="space-y-6">
-      <Card className="p-4">
-        <form
-          method="get"
-          action="/subscriptions"
-          className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]"
-          onSubmit={(event) => event.preventDefault()}
+      <Toolbar className="mb-0">
+        <label className="relative min-w-[200px] flex-1">
+          <span className="sr-only">Search channel names</span>
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            name="q"
+            value={query}
+            maxLength={100}
+            placeholder="Search known channels"
+            className="pl-9"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+        <Select
+          name="platform"
+          className="w-auto min-w-[160px]"
+          title="Platform"
+          value={platform}
+          onChange={(event) => setPlatform(event.target.value as Platform | "")}
         >
-          <label className="block text-xs font-medium text-muted-foreground">
-            Search channel names
-            <span className="relative mt-1 block">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4" />
-              <Input
-                name="q"
-                value={query}
-                maxLength={100}
-                placeholder="Search known channels"
-                className="pl-9"
-                onChange={(event) => setQuery(event.target.value)}
-              />
-            </span>
-          </label>
-          <label className="block text-xs font-medium text-muted-foreground">
-            Platform
-            <Select
-              name="platform"
-              className="mt-1"
-              value={platform}
-              onChange={(event) => setPlatform(event.target.value as Platform | "")}
-            >
-              <option value="">All platforms</option>
-              {PLATFORMS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </label>
-        </form>
-      </Card>
+          <option value="">All platforms</option>
+          {PLATFORMS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
+        <Button variant="outline" onClick={() => setAddOpen(true)}>
+          <Link2 className="h-4 w-4" /> Add by URL
+        </Button>
+      </Toolbar>
 
-      <Card className="p-4">
-        <form
-          className="flex flex-col gap-3 sm:flex-row sm:items-end"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (channelUrl.trim()) resolve.mutate();
+      {addOpen && (
+        <AddChannelDialog
+          onClose={() => setAddOpen(false)}
+          onResolved={(channel) => {
+            setPreview(channel);
+            setAddOpen(false);
+            queryClient.invalidateQueries({ queryKey: ["channels", "catalog"] });
           }}
-        >
-          <label className="min-w-0 flex-1 text-xs font-medium text-muted-foreground">
-            Paste a channel or feed URL
-            <Input
-              name="channel_url"
-              type="url"
-              required
-              className="mt-1"
-              value={channelUrl}
-              placeholder="https://www.youtube.com/@channel or https://example.com/feed.xml"
-              onChange={(event) => {
-                setChannelUrl(event.target.value);
-                if (preview) setPreview(null);
-              }}
-            />
-          </label>
-          <Button
-            type="submit"
-            disabled={resolve.isPending}
-            aria-busy={resolve.isPending}
-          >
-            {resolve.isPending ? (
-              <>
-                <Spinner /> Previewing…
-              </>
-            ) : (
-              "Preview channel"
-            )}
-          </Button>
-        </form>
-        {resolve.isError && (
-          <p className="mt-3 text-sm text-red-400" role="alert">
-            Could not resolve that channel: {resolve.error.message}
-          </p>
-        )}
-      </Card>
+        />
+      )}
 
       {preview && (
         <section aria-labelledby="channel-preview-title">
-          <h2 id="channel-preview-title" className="mb-3 text-sm font-semibold">
-            Channel preview
-          </h2>
+          <SectionHeader
+            id="channel-preview-title"
+            title="Channel preview"
+            subtitle="Resolved from the URL you pasted."
+            actions={
+              <Button size="sm" variant="ghost" onClick={() => setPreview(null)}>
+                Dismiss
+              </Button>
+            }
+          />
           <ChannelCard
             channel={preview}
             groups={groups}
@@ -227,18 +197,9 @@ function DiscoverChannels({
       )}
 
       <section aria-labelledby="known-channels-title">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 id="known-channels-title" className="text-lg font-semibold">
-            Known channels
-          </h2>
-          {!channels.isLoading && (
-            <span className="text-xs text-muted-foreground">
-              {rows.length}{channels.hasNextPage ? "+" : ""} shown
-            </span>
-          )}
-        </div>
+        <SectionHeader id="known-channels-title" title="Known channels" />
         {channels.isLoading ? (
-          <LoadingState label="Loading channels…" />
+          <SkeletonGrid count={8} />
         ) : channels.isError ? (
           <ErrorState
             message={`Channels could not be loaded: ${channels.error.message}`}
@@ -246,26 +207,35 @@ function DiscoverChannels({
           />
         ) : rows.length === 0 ? (
           <EmptyState
+            icon={<Compass className="h-5 w-5" />}
             title={filtering ? "No matching channels" : "No known channels yet"}
             description={
               filtering
                 ? "Try another name or platform."
-                : "Paste a channel or feed URL above to add the first one to the catalog."
+                : "Paste a channel or feed URL to add the first one to the catalog."
+            }
+            action={
+              !filtering && (
+                <Button size="sm" onClick={() => setAddOpen(true)}>
+                  <Link2 className="h-4 w-4" /> Add by URL
+                </Button>
+              )
             }
           />
         ) : (
           <>
-            <div className="grid gap-4 lg:grid-cols-2">
+            <ItemGrid>
               {rows.map((channel) => (
-                <ChannelCard key={channel.id} channel={channel} groups={groups} />
+                <ChannelTile key={channel.id} channel={channel} groups={groups} />
               ))}
-            </div>
-            {channels.hasNextPage && (
-              <LoadMore
-                loading={channels.isFetchingNextPage}
-                onClick={() => channels.fetchNextPage()}
-              />
-            )}
+            </ItemGrid>
+            <InfiniteScrollSentinel
+              hasNextPage={!!channels.hasNextPage}
+              isFetchingNextPage={channels.isFetchingNextPage}
+              fetchNextPage={() => channels.fetchNextPage()}
+              error={nextPageError(channels)}
+              totalLabel={`${rows.length} channel${rows.length === 1 ? "" : "s"}`}
+            />
           </>
         )}
       </section>
@@ -273,13 +243,91 @@ function DiscoverChannels({
   );
 }
 
+function AddChannelDialog({
+  onClose,
+  onResolved,
+}: {
+  onClose: () => void;
+  onResolved: (channel: ChannelRead) => void;
+}) {
+  const [channelUrl, setChannelUrl] = useState("");
+  const resolve = useMutation({
+    mutationFn: () => api.resolveChannel(channelUrl.trim()),
+    onSuccess: onResolved,
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-24 animate-fade-in"
+      onClick={onClose}
+    >
+      <Card className="w-full max-w-lg p-5" onClick={(event) => event.stopPropagation()}>
+        <h2 className="mb-1 text-lg font-semibold">Add a channel by URL</h2>
+        <p className="mb-4 text-sm text-muted-foreground">
+          Paste a YouTube channel, Bilibili space, Apple Podcasts show, 小宇宙 podcast,
+          or any RSS feed. We resolve it to a shared channel you can then follow.
+        </p>
+        <form
+          className="space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (channelUrl.trim()) resolve.mutate();
+          }}
+        >
+          <Input
+            autoFocus
+            name="channel_url"
+            type="url"
+            required
+            value={channelUrl}
+            placeholder="https://www.youtube.com/@channel or https://example.com/feed.xml"
+            onChange={(event) => setChannelUrl(event.target.value)}
+          />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={resolve.isPending} aria-busy={resolve.isPending}>
+              {resolve.isPending ? (
+                <>
+                  <Spinner /> Previewing…
+                </>
+              ) : (
+                "Preview channel"
+              )}
+            </Button>
+          </div>
+        </form>
+        {resolve.isError && (
+          <p className="mt-3 text-sm text-danger" role="alert">
+            Could not resolve that channel: {resolve.error.message}
+          </p>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+type FollowFilter = "all" | "auto" | "paused" | "errors";
+const FOLLOW_FILTER_LABELS: Record<FollowFilter, string> = {
+  all: "All",
+  auto: "Auto-updating",
+  paused: "Paused",
+  errors: "Errors",
+};
+
 function FollowingChannels({
   groups,
   onDiscover,
 }: {
-  groups: Awaited<ReturnType<typeof api.listGroups>>;
+  groups: Group[];
   onDiscover: () => void;
 }) {
+  const [filter, setFilter] = useState<FollowFilter>("all");
+  const [query, setQuery] = useState("");
+  const [polling, setPolling] = useState(0);
+  const refetchInterval = polling > 0 ? FOLLOW_REFETCH_ACTIVE_MS : FOLLOW_REFETCH_MS;
+
   const channels = useInfiniteQuery({
     queryKey: ["channels", "following"],
     queryFn: ({ pageParam }) =>
@@ -287,17 +335,44 @@ function FollowingChannels({
     initialPageParam: 0,
     getNextPageParam: (lastPage, pages) =>
       lastPage.length === PAGE_SIZE ? pages.length * PAGE_SIZE : undefined,
-    refetchInterval: 5000,
+    refetchInterval,
   });
   const legacySubscriptions = useQuery({
     queryKey: ["subs"],
     queryFn: api.listSubscriptions,
-    refetchInterval: 5000,
+    refetchInterval,
   });
   const rows = channels.data?.pages.flat() ?? [];
   const legacyRows = (legacySubscriptions.data ?? []).filter(
     (subscription) => subscription.channel_id == null,
   );
+
+  const counts = useMemo(
+    () => ({
+      all: rows.length + legacyRows.length,
+      auto: rows.filter((channel) => channel.follow?.follow_latest).length,
+      paused: rows.filter((channel) => channel.follow && !channel.follow.follow_latest).length,
+      errors: rows.filter((channel) => channel.follow?.last_status === "error").length,
+    }),
+    [rows, legacyRows.length],
+  );
+  const search = query.trim().toLowerCase();
+  const visible = rows.filter((channel) => {
+    const follow = channel.follow;
+    if (filter === "auto" && !follow?.follow_latest) return false;
+    if (filter === "paused" && (!follow || follow.follow_latest)) return false;
+    if (filter === "errors" && follow?.last_status !== "error") return false;
+    if (!search) return true;
+    return (channel.title || channel.feed_url).toLowerCase().includes(search);
+  });
+  const visibleLegacy = legacyRows.filter((subscription) => {
+    if (filter === "auto" || filter === "errors" || filter === "paused") return false;
+    if (!search) return true;
+    return (subscription.title || subscription.feed_url).toLowerCase().includes(search);
+  });
+
+  const trackPoll = (pending: boolean) =>
+    setPolling((count) => Math.max(0, count + (pending ? 1 : -1)));
 
   if (channels.isLoading || legacySubscriptions.isLoading) {
     return <LoadingState label="Loading followed channels…" />;
@@ -305,11 +380,11 @@ function FollowingChannels({
   if (
     !channels.isError &&
     !legacySubscriptions.isError &&
-    rows.length === 0 &&
-    legacyRows.length === 0
+    counts.all === 0
   ) {
     return (
       <EmptyState
+        icon={<Rss className="h-5 w-5" />}
         title="You are not following any channels"
         description="Discover the shared catalog and follow a channel to keep it here."
         action={
@@ -322,29 +397,46 @@ function FollowingChannels({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      <Toolbar className="mb-0">
+        <p className="px-1 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">{counts.all}</span> following ·{" "}
+          {counts.auto} auto-updating
+          {counts.errors > 0 && (
+            <>
+              {" · "}
+              <span className="font-medium text-danger">{counts.errors} with errors</span>
+            </>
+          )}
+        </p>
+        <label className="relative ml-auto min-w-[180px] max-w-xs flex-1">
+          <span className="sr-only">Filter followed channels</span>
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={query}
+            placeholder="Filter by name"
+            className="pl-9"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+      </Toolbar>
+
+      <ChipRow className="mb-0">
+        {(Object.keys(FOLLOW_FILTER_LABELS) as FollowFilter[]).map((value) => (
+          <FilterChip
+            key={value}
+            label={FOLLOW_FILTER_LABELS[value]}
+            active={filter === value}
+            count={counts[value]}
+            onClick={() => setFilter(value)}
+          />
+        ))}
+      </ChipRow>
+
       {channels.isError && (
         <ErrorState
           message={`Followed channels could not be loaded: ${channels.error.message}`}
           onRetry={() => channels.refetch()}
-        />
-      )}
-      {rows.length > 0 && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {rows.map((channel) => (
-            <ChannelCard
-              key={channel.id}
-              channel={channel}
-              groups={groups}
-              management
-            />
-          ))}
-        </div>
-      )}
-      {channels.hasNextPage && (
-        <LoadMore
-          loading={channels.isFetchingNextPage}
-          onClick={() => channels.fetchNextPage()}
         />
       )}
       {legacySubscriptions.isError && (
@@ -353,167 +445,40 @@ function FollowingChannels({
           onRetry={() => legacySubscriptions.refetch()}
         />
       )}
-      {legacyRows.length > 0 && (
-        <section aria-labelledby="legacy-follows-title">
-          <div className="mb-3">
-            <h2 id="legacy-follows-title" className="text-lg font-semibold">
-              Follows awaiting migration
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              These existing follows remain manageable while they are linked to the
-              shared channel catalog.
-            </p>
-          </div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            {legacyRows.map((subscription) => (
-              <LegacyFollowCard
-                key={subscription.id}
-                subscription={subscription}
-                groups={groups}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
 
-function LegacyFollowCard({
-  subscription,
-  groups,
-}: {
-  subscription: Subscription;
-  groups: Awaited<ReturnType<typeof api.listGroups>>;
-}) {
-  const queryClient = useQueryClient();
-  const refresh = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["subs"] }),
-      queryClient.invalidateQueries({ queryKey: ["channels", "catalog"] }),
-      queryClient.invalidateQueries({ queryKey: ["channels", "following"] }),
-    ]);
-  const toggle = useMutation({
-    mutationFn: () => api.toggleSubscription(subscription.id),
-    onSuccess: refresh,
-  });
-  const updateFolder = useMutation({
-    mutationFn: (folderId: number | null) =>
-      api.updateSubscription(subscription.id, { folder_id: folderId }),
-    onSuccess: refresh,
-  });
-  const poll = useMutation({
-    mutationFn: () => api.pollSubscription(subscription.id),
-    onSuccess: refresh,
-  });
-  const remove = useMutation({
-    mutationFn: () => api.deleteSubscription(subscription.id),
-    onSuccess: refresh,
-  });
-  const pending =
-    toggle.isPending ||
-    updateFolder.isPending ||
-    poll.isPending ||
-    remove.isPending;
-  const mutationError =
-    toggle.error ?? updateFolder.error ?? poll.error ?? remove.error;
-  const followsLatest = subscription.follow_latest ?? subscription.enabled;
-
-  return (
-    <Card className="p-4">
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <PlatformBadge platform={subscription.platform} />
-        <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-400">
-          Awaiting migration
-        </span>
-      </div>
-      <h3 className="break-words font-semibold">
-        {subscription.title || subscription.feed_url}
-      </h3>
-      <p className="mt-1 break-all text-xs text-muted-foreground">
-        {subscription.feed_url}
-      </p>
-      <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
-        <span>Every {subscription.interval_minutes}m</span>
-        <span>Last {subscription.window_days}d</span>
-        <span>
-          {subscription.last_checked_at
-            ? `Checked ${timeAgo(subscription.last_checked_at)}`
-            : "Never checked"}
-        </span>
-        {subscription.last_status && <span>Status: {subscription.last_status}</span>}
-      </div>
-      {subscription.last_error && (
-        <p className="mt-2 break-words text-xs text-red-400">
-          Last poll failed: {subscription.last_error}
-        </p>
-      )}
-      <div className="mt-4 space-y-3 border-t border-border pt-4">
-        <Switch
-          checked={followsLatest}
-          disabled={pending}
-          label="Follow latest"
-          onCheckedChange={() => toggle.mutate()}
+      {visible.length === 0 && visibleLegacy.length === 0 ? (
+        <EmptyState
+          title="No follows match this view"
+          description="Clear the filter or search to see the rest of your channels."
         />
-        <label className="block text-xs font-medium text-muted-foreground">
-          Folder
-          <Select
-            className="mt-1"
-            value={
-              subscription.folder_id != null ? String(subscription.folder_id) : ""
-            }
-            disabled={!followsLatest || pending}
-            onChange={(event) =>
-              updateFolder.mutate(
-                event.target.value ? Number(event.target.value) : null,
-              )
-            }
-          >
-            <option value="">Unfiled</option>
-            {groups.map((group) => (
-              <option key={group.id} value={group.id}>
-                {group.title || "Folder"}
-              </option>
-            ))}
-          </Select>
-        </label>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!followsLatest || pending}
-            aria-busy={poll.isPending}
-            onClick={() => poll.mutate()}
-          >
-            {poll.isPending ? <Spinner /> : <RefreshCw className="h-4 w-4" />}
-            Poll now
-          </Button>
-          <Button
-            size="sm"
-            variant="danger"
-            disabled={pending}
-            aria-busy={remove.isPending}
-            onClick={() => {
-              if (
-                window.confirm(
-                  "Unfollow this channel? Existing library items will be kept.",
-                )
-              ) {
-                remove.mutate();
-              }
-            }}
-          >
-            {remove.isPending ? <Spinner /> : <Trash2 className="h-4 w-4" />}
-            Unfollow
-          </Button>
+      ) : (
+        <div className="space-y-2">
+          {visible.map((channel) => (
+            <ChannelRow
+              key={channel.id}
+              channel={channel}
+              groups={groups}
+              onPoll={trackPoll}
+            />
+          ))}
+          {visibleLegacy.map((subscription) => (
+            <LegacyFollowRow
+              key={`legacy-${subscription.id}`}
+              subscription={subscription}
+              groups={groups}
+            />
+          ))}
         </div>
-        {mutationError && (
-          <p className="text-sm text-red-400" role="alert">
-            {mutationError.message}
-          </p>
-        )}
-      </div>
-    </Card>
+      )}
+
+      <InfiniteScrollSentinel
+        hasNextPage={!!channels.hasNextPage}
+        isFetchingNextPage={channels.isFetchingNextPage}
+        fetchNextPage={() => channels.fetchNextPage()}
+        error={nextPageError(channels)}
+        variant="rows"
+      />
+    </div>
   );
 }
 
@@ -534,7 +499,7 @@ function TabLink({
       aria-current={active ? "page" : undefined}
       onClick={onClick}
       className={cn(
-        "-mb-px inline-flex min-h-11 items-center gap-2 border-b-2 px-4 text-sm font-medium",
+        "-mb-px inline-flex min-h-11 items-center gap-2 border-b-2 px-4 text-sm font-medium transition-colors",
         active
           ? "border-primary text-primary"
           : "border-transparent text-muted-foreground hover:text-foreground",
@@ -543,66 +508,6 @@ function TabLink({
       {icon}
       {children}
     </button>
-  );
-}
-
-function LoadingState({ label }: { label: string }) {
-  return (
-    <Card className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
-      <Spinner /> {label}
-    </Card>
-  );
-}
-
-function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <Card className="p-8 text-center">
-      <p className="mb-3 text-sm text-red-400" role="alert">
-        {message}
-      </p>
-      <Button size="sm" variant="outline" onClick={onRetry}>
-        Try again
-      </Button>
-    </Card>
-  );
-}
-
-function EmptyState({
-  title,
-  description,
-  action,
-}: {
-  title: string;
-  description: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <Card className="p-10 text-center">
-      <h3 className="font-medium">{title}</h3>
-      <p className="mx-auto mt-1 max-w-lg text-sm text-muted-foreground">{description}</p>
-      {action && <div className="mt-4">{action}</div>}
-    </Card>
-  );
-}
-
-function LoadMore({ loading, onClick }: { loading: boolean; onClick: () => void }) {
-  return (
-    <div className="mt-6 flex justify-center">
-      <Button
-        variant="outline"
-        disabled={loading}
-        aria-busy={loading}
-        onClick={onClick}
-      >
-        {loading ? (
-          <>
-            <Spinner /> Loading…
-          </>
-        ) : (
-          "Load more"
-        )}
-      </Button>
-    </div>
   );
 }
 

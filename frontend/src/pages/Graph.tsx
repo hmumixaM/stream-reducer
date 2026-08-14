@@ -2,38 +2,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Network, RefreshCw, Search as SearchIcon, X } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type Platform } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Input, Spinner } from "@/components/ui";
+import { PLATFORM_LABELS } from "@/components/badges";
+import { FilterChip } from "@/components/shell";
 import { GraphCanvas, type GraphCanvasHandle } from "@/components/GraphCanvas";
 import { NodePanel } from "@/components/NodePanel";
 import { timeAgo } from "@/lib/utils";
 import { graphFilters, parseGraphQuery } from "@/lib/graphModel";
 
-const PLATFORMS = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
-
-function FilterChip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-full border px-3 py-1 text-xs font-medium capitalize transition-colors ${
-        active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border text-muted-foreground hover:bg-accent"
-      }`}
-    >
-      {label.replace("_", " ")}
-    </button>
-  );
-}
+const PLATFORMS: Platform[] = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
 
 export function Graph() {
   const [params, setParams] = useSearchParams();
@@ -125,9 +104,9 @@ export function Graph() {
   return (
     <div className="flex h-[calc(100vh-7rem)] flex-col md:h-[calc(100vh-3rem)]">
       <div className="mb-3 flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold">
+            <h1 className="flex items-center gap-2 text-display font-semibold">
               <Network className="h-6 w-6 text-primary" /> Knowledge graph
             </h1>
             <p className="text-sm text-muted-foreground">
@@ -171,7 +150,7 @@ export function Graph() {
             {PLATFORMS.map((p) => (
               <FilterChip
                 key={p}
-                label={p}
+                label={PLATFORM_LABELS[p]}
                 active={platform === p}
                 onClick={() => setParam("platform", platform === p ? null : p)}
               />
@@ -196,7 +175,7 @@ export function Graph() {
               <Spinner /> <span className="ml-2">Loading graph…</span>
             </div>
           ) : graph.isError ? (
-            <div className="flex h-full items-center justify-center text-sm text-red-400">
+            <div className="flex h-full items-center justify-center text-sm text-danger">
               Failed to load the graph.
             </div>
           ) : data && data.nodes.length > 0 ? (

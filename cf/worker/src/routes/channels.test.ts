@@ -84,6 +84,48 @@ describe("channel route safeguards", () => {
     expect(queries[0].sql).toContain("i.status != 'excluded'");
   });
 
+  it("falls back to the default sort when the sort key is unknown", async () => {
+    const app = new Hono<AppContext>();
+    app.route("/channels", channelRoutes);
+    const { env, queries } = fakeEnv({ id: 1 });
+
+    const response = await app.request("/channels/1/items?sort=; DROP TABLE item", undefined, env);
+
+    expect(response.status).toBe(200);
+    const itemQuery = queries.find((query) => query.sql.includes("FROM channel_item ci"))!;
+    expect(itemQuery.sql).toContain("ORDER BY i.published_at DESC, i.id DESC");
+    expect(itemQuery.sql).not.toContain("DROP TABLE");
+  });
+
+  it("sorts channel items by discovery time on request", async () => {
+    const app = new Hono<AppContext>();
+    app.route("/channels", channelRoutes);
+    const { env, queries } = fakeEnv({ id: 1 });
+
+    const response = await app.request(
+      "/channels/1/items?sort=discovered&order=asc",
+      undefined,
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    const itemQuery = queries.find((query) => query.sql.includes("FROM channel_item ci"))!;
+    expect(itemQuery.sql).toContain("ORDER BY discovered_at ASC, i.id DESC");
+  });
+
+  it("filters channel items to those missing from the library", async () => {
+    const app = new Hono<AppContext>();
+    app.route("/channels", channelRoutes);
+    const { env, queries } = fakeEnv({ id: 1 });
+
+    const response = await app.request("/channels/1/items?saved=false", undefined, env);
+
+    expect(response.status).toBe(200);
+    const itemQuery = queries.find((query) => query.sql.includes("FROM channel_item ci"))!;
+    expect(itemQuery.sql).toContain("ui.id IS NULL");
+    expect(itemQuery.sql).toContain("i.status != 'excluded'");
+  });
+
   it("rejects legacy manual polls when follow-latest is disabled", async () => {
     const app = new Hono<AppContext>();
     app.route("/subscriptions", subscriptionRoutes);

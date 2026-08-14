@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Login } from "@/pages/Login";
 import { useMe } from "@/lib/auth";
+import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Spinner } from "@/components/ui";
 import "@/lib/firebase"; // initialize Firebase monitoring (Performance + Analytics)
 import "katex/dist/katex.min.css"; // math formula styling for react-markdown + rehype-katex
@@ -21,6 +22,7 @@ const named = <T extends string>(
     return { default: module[name] };
   });
 
+const Timeline = named(() => import("@/pages/Timeline"), "Timeline");
 const Library = named(() => import("@/pages/Library"), "Library");
 const Browse = named(() => import("@/pages/Browse"), "Browse");
 const Search = named(() => import("@/pages/Search"), "Search");
@@ -120,11 +122,14 @@ function PublicHome() {
   );
 }
 
-// Signed-in users land on their library; anonymous visitors get a public front page.
+// Signed-in users land on their subscription timeline; the read-only mirror has
+// no follows so it stays on the mirrored library; anonymous visitors get the
+// public front page.
 function Home() {
   const me = useMe();
   if (me.isLoading) return <FullScreenSpinner />;
-  return me.data?.user ? <Library /> : <PublicHome />;
+  if (MIRROR) return <Library />;
+  return me.data?.user ? <Timeline /> : <PublicHome />;
 }
 
 const router = createBrowserRouter([
@@ -138,6 +143,7 @@ const router = createBrowserRouter([
       { path: "browse", element: <Browse /> },
       { path: "items/:id", element: <ItemDetail /> },
       // Personal pages require a session.
+      { path: "library", element: <RequireAuth><Library /></RequireAuth> },
       { path: "search", element: <RequireAuth><Search /></RequireAuth> },
       { path: "graph", element: <RequireAuth><Graph /></RequireAuth> },
       { path: "folders/:id", element: <RequireAuth><FolderView /></RequireAuth> },

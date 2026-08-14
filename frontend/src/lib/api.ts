@@ -323,6 +323,33 @@ export interface ChannelRead {
 
 export interface ChannelItemRead extends Item {
   in_library: boolean;
+  discovered_at?: string | null;
+}
+
+/** A timeline entry: a channel item plus the channel that surfaced it. */
+export interface TimelineItem extends ChannelItemRead {
+  channel_id: number;
+  channel_title?: string | null;
+}
+
+export interface ListTimelineParams {
+  platform?: Platform;
+  /** Restrict to items already in (or not yet in) the personal library. */
+  saved?: boolean;
+  /** Only fully processed items. */
+  ready?: boolean;
+  sort?: string;
+  order?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListChannelItemsParams {
+  sort?: string;
+  order?: "asc" | "desc";
+  saved?: boolean;
+  limit?: number;
+  offset?: number;
 }
 
 export interface ListChannelsParams {
@@ -819,12 +846,27 @@ export const api = {
     }),
   unfollowChannel: (id: number) =>
     req<{ ok: boolean }>(`/api/channels/${id}/follow`, { method: "DELETE" }),
-  listChannelItems: (id: number, params?: { limit?: number; offset?: number }) => {
+  listChannelItems: (id: number, params?: ListChannelItemsParams) => {
     const sp = new URLSearchParams();
+    if (params?.sort) sp.set("sort", params.sort);
+    if (params?.order) sp.set("order", params.order);
+    if (params?.saved !== undefined) sp.set("saved", String(params.saved));
     if (params?.limit !== undefined) sp.set("limit", String(params.limit));
     if (params?.offset !== undefined) sp.set("offset", String(params.offset));
     const qs = sp.toString();
     return req<ChannelItemRead[]>(`/api/channels/${id}/items${qs ? `?${qs}` : ""}`);
+  },
+  listTimeline: (params?: ListTimelineParams) => {
+    const sp = new URLSearchParams();
+    if (params?.platform) sp.set("platform", params.platform);
+    if (params?.saved !== undefined) sp.set("saved", String(params.saved));
+    if (params?.ready !== undefined) sp.set("ready", String(params.ready));
+    if (params?.sort) sp.set("sort", params.sort);
+    if (params?.order) sp.set("order", params.order);
+    if (params?.limit !== undefined) sp.set("limit", String(params.limit));
+    if (params?.offset !== undefined) sp.set("offset", String(params.offset));
+    const qs = sp.toString();
+    return req<TimelineItem[]>(`/api/timeline${qs ? `?${qs}` : ""}`);
   },
   pollChannel: (id: number) =>
     req<{ ok: boolean }>(`/api/channels/${id}/poll`, { method: "POST" }),

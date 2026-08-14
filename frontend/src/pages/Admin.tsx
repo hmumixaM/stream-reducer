@@ -4,20 +4,21 @@ import { Shield, ShieldOff, Trash2, ArrowUp, RefreshCw, Users, ListChecks } from
 import { api, type AdminUser, type AdminQueueItem } from "@/lib/api";
 import { useMe } from "@/lib/auth";
 import { Button, Card, Spinner } from "@/components/ui";
+import { EmptyState, PageHeader, SectionHeader } from "@/components/shell";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { timeAgo } from "@/lib/utils";
 
 export function Admin() {
   return (
-    <div className="space-y-10">
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold">
-          <Shield className="h-6 w-6 text-primary" /> Admin
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Manage users and the global processing queue.
-        </p>
-      </div>
+    <div className="space-y-8">
+      <PageHeader
+        title={
+          <span className="flex items-center gap-2">
+            <Shield className="h-6 w-6 text-primary" /> Admin
+          </span>
+        }
+        subtitle="Manage users and the global processing queue."
+      />
       <UsersPanel />
       <QueuePanel />
     </div>
@@ -44,10 +45,14 @@ function UsersPanel() {
 
   return (
     <section>
-      <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
-        <Users className="h-5 w-5" /> Users
-        <span className="text-sm font-normal text-muted-foreground">({rows.length})</span>
-      </h2>
+      <SectionHeader
+        title={
+          <span className="flex items-center gap-2">
+            <Users className="h-5 w-5" /> Users
+            <span className="text-sm font-normal text-muted-foreground">({rows.length})</span>
+          </span>
+        }
+      />
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -131,12 +136,22 @@ function QueuePanel() {
 
   return (
     <section>
-      <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
-        <ListChecks className="h-5 w-5" /> Global queue
-        <span className="text-sm font-normal text-muted-foreground">({rows.length} pending)</span>
-      </h2>
+      <SectionHeader
+        title={
+          <span className="flex items-center gap-2">
+            <ListChecks className="h-5 w-5" /> Global queue
+            <span className="text-sm font-normal text-muted-foreground">
+              ({rows.length} pending)
+            </span>
+          </span>
+        }
+      />
       {rows.length === 0 ? (
-        <Card className="p-8 text-center text-muted-foreground">Nothing pending — the queue is clear.</Card>
+        <EmptyState
+          icon={<ListChecks className="h-5 w-5" />}
+          title="Nothing pending"
+          description="The global queue is clear."
+        />
       ) : (
         <div className="space-y-2">
           {rows.map((item: AdminQueueItem) => (
@@ -155,7 +170,7 @@ function QueuePanel() {
                 <div className="mt-0.5 flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <span>{item.owner_count} owner{item.owner_count === 1 ? "" : "s"}</span>
                   {item.owners.length > 0 && <span className="truncate">{item.owners.join(", ")}</span>}
-                  {item.error && <span className="text-red-400">{item.error.slice(0, 80)}</span>}
+                  {item.error && <span className="text-danger">{item.error.slice(0, 80)}</span>}
                 </div>
               </div>
               <div className="flex shrink-0 gap-2">

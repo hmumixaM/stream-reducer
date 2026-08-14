@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo, type ReactNode } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft,
   RefreshCw,
   Trash2,
   ExternalLink,
@@ -30,6 +29,7 @@ import {
 import { MIRROR } from "@/lib/mirror";
 import { useMe } from "@/lib/auth";
 import { Button, Card, Select, Spinner } from "@/components/ui";
+import { BackLink, ErrorState, LoadingState } from "@/components/shell";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { RelatedArticles } from "@/components/RelatedArticles";
 import { HighlightableMarkdown, HighlightLayer, hlClass } from "@/components/Highlightable";
@@ -99,7 +99,7 @@ export function ItemDetail() {
     mutationFn: () => api.deleteItem(itemId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["items"] });
-      navigate("/");
+      navigate("/library");
     },
   });
   const deleteMedia = useMutation({
@@ -125,9 +125,14 @@ export function ItemDetail() {
     onSuccess: refreshAnnotations,
   });
 
-  if (item.isLoading) return <p className="text-muted-foreground">Loading...</p>;
+  if (item.isLoading) return <LoadingState />;
   if (item.isError || !item.data)
-    return <p className="text-red-400">Failed to load item.</p>;
+    return (
+      <ErrorState
+        message={item.error?.message ?? "Failed to load item."}
+        onRetry={() => item.refetch()}
+      />
+    );
 
   const d = item.data;
   const summaryHighlights = d.highlights?.filter((h) => h.source === "summary") ?? [];
@@ -136,26 +141,28 @@ export function ItemDetail() {
   const onUpdateHighlight = (id: number, note: string) =>
     updateHighlight.mutate({ id, note });
   const onDeleteHighlight = (id: number) => deleteHighlight.mutate(id);
+  // "/" is the mirror library, the signed-in timeline, or the public catalog.
+  const backTo = MIRROR
+    ? { to: "/", label: "Library" }
+    : me.data?.user
+      ? { to: "/", label: "Timeline" }
+      : { to: "/browse", label: "Browse" };
 
   return (
     <div className={readMode ? "mx-auto max-w-3xl" : ""}>
-      <Link
-        to={me.data?.user ? "/" : "/browse"}
-        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-4 w-4" /> {me.data?.user ? "Library" : "Browse"}
-      </Link>
+      <BackLink to={backTo.to} label={backTo.label} />
 
       <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="flex-1">
-          <div className="mb-2 flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             <PlatformBadge platform={d.platform} />
             <StatusBadge status={d.status} />
           </div>
-          <h1 className="text-2xl font-semibold leading-tight">{d.title || d.source_url}</h1>
+          <h1 className="text-display font-semibold leading-tight">{d.title || d.source_url}</h1>
           {d.author && <p className="mt-1 text-sm text-muted-foreground">{d.author}</p>}
         </div>
-        <div className="flex flex-wrap gap-2">
+        {/* Capped so a long action row wraps instead of squeezing the title. */}
+        <div className="flex flex-wrap gap-2 md:max-w-[55%] md:justify-end">
           {!readMode && canEdit && (
             <>
               <Button
@@ -245,7 +252,7 @@ export function ItemDetail() {
       </div>
 
       {d.error && (
-        <Card className="mb-4 border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
+        <Card className="mb-4 border-danger/40 bg-danger/10 p-4 text-sm text-danger">
           {d.error}
         </Card>
       )}
@@ -561,7 +568,7 @@ function SummaryView({
           className={mdClass}
         />
       ) : translation.data?.status === "error" ? (
-        <div className="space-y-3 text-sm text-red-400">
+        <div className="space-y-3 text-sm text-danger">
           <p>Translation failed.{translation.data.error ? ` ${translation.data.error}` : ""}</p>
           {authed && (
             <Button size="sm" variant="outline" onClick={() => request.mutate(lang!)} disabled={request.isPending}>
@@ -660,7 +667,7 @@ function InfographicView({
     }
     if (status === "error") {
       return (
-        <div className="flex flex-col items-center gap-3 py-8 text-sm text-red-400">
+        <div className="flex flex-col items-center gap-3 py-8 text-sm text-danger">
           <p>Infographic generation failed.{data?.error ? ` ${data.error}` : ""}</p>
           {authed && (
             <Button size="sm" variant="outline" onClick={() => request.mutate()} disabled={pending}>
@@ -673,7 +680,7 @@ function InfographicView({
     // No infographic yet.
     return (
       <div className="flex flex-col items-center gap-3 py-10 text-center">
-        <Sparkles className="h-7 w-7 text-blue-400/80" />
+        <Sparkles className="h-7 w-7 text-primary/80" />
         <p className="text-sm text-muted-foreground max-w-sm">
           Turn this summary into a shareable infographic poster, rendered by an
           image model on request.
@@ -758,10 +765,10 @@ function ProcessingPanel({
               <span
                 className={`text-xs ${
                   s.status === "done"
-                    ? "text-emerald-400"
+                    ? "text-success"
                     : s.status === "error"
-                      ? "text-red-400"
-                      : "text-amber-400"
+                      ? "text-danger"
+                      : "text-warning"
                 }`}
               >
                 {s.status === "running" ? `${s.chunk_done}/${s.chunk_count || "?"}` : s.status}
@@ -774,10 +781,10 @@ function ProcessingPanel({
               {s.chunk_count > 0 && <span>{s.chunk_count} chunks</span>}
               {s.total_tokens > 0 && <span>{s.total_tokens.toLocaleString()} tok</span>}
               {s.http_429_count > 0 && (
-                <span className="text-amber-400">{s.http_429_count}× 429</span>
+                <span className="text-warning">{s.http_429_count}× 429</span>
               )}
             </div>
-            {s.error && <p className="mt-1 text-xs text-red-400">{s.error}</p>}
+            {s.error && <p className="mt-1 text-xs text-danger">{s.error}</p>}
           </div>
         ))}
       </div>
@@ -874,7 +881,7 @@ function MediaPanel({
                       onClick={onDeleteMedia}
                       disabled={deletingMedia}
                       title="Delete the downloaded file (a retry will re-download it)"
-                      className="shrink-0 rounded-md border border-border p-1 text-muted-foreground transition-colors hover:border-red-500 hover:text-red-400 disabled:opacity-50"
+                      className="shrink-0 rounded-md border border-border p-1 text-muted-foreground transition-colors hover:border-danger hover:text-danger disabled:opacity-50"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -947,7 +954,7 @@ function CommentsSection({
               <span>{timeAgo(c.created_at)}</span>
               <button
                 onClick={() => remove.mutate(c.id)}
-                className="opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400"
+                className="opacity-0 transition-opacity group-hover:opacity-100 hover:text-danger"
                 title="Delete comment"
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -1056,7 +1063,7 @@ function HighlightsList({
               <button
                 onClick={() => onDelete(h.id)}
                 title="Delete highlight"
-                className="self-start opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400"
+                className="self-start opacity-0 transition-opacity group-hover:opacity-100 hover:text-danger"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>

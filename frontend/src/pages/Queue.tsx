@@ -1,8 +1,14 @@
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, AlertTriangle } from "lucide-react";
+import { RefreshCw, AlertTriangle, ListChecks } from "lucide-react";
 import { api, type QueueItem } from "@/lib/api";
 import { Button, Card } from "@/components/ui";
+import {
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  SkeletonRows,
+} from "@/components/shell";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { timeAgo } from "@/lib/utils";
 
@@ -26,27 +32,33 @@ export function Queue() {
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-semibold">Queue</h1>
-      <p className="mb-6 text-sm text-muted-foreground">
-        {active.length} processing
-        {stalled.length > 0 ? ` · ${stalled.length} stalled` : ""} · {failed.length} failed
-        {queueTotal ? ` · ${queueTotal} item${queueTotal === 1 ? "" : "s"} pending site-wide` : ""}
-      </p>
+      <PageHeader
+        title="Queue"
+        subtitle={
+          <>
+            {active.length} processing
+            {stalled.length > 0 ? ` · ${stalled.length} stalled` : ""} · {failed.length} failed
+            {queueTotal
+              ? ` · ${queueTotal} item${queueTotal === 1 ? "" : "s"} pending site-wide`
+              : ""}
+          </>
+        }
+      />
 
       {(stalled.length > 0 || failed.length > 0) && (
-        <Card className="mb-6 flex items-start gap-3 border-amber-500/30 bg-amber-500/5 p-4 text-sm">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-          <div className="text-muted-foreground">
+        <Card className="mb-6 flex items-start gap-3 border-warning/30 bg-warning/5 p-4 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+          <div className="space-y-1 text-muted-foreground">
             {stalled.length > 0 && (
               <p>
-                <span className="font-medium text-amber-400">{stalled.length} stalled</span>: a
+                <span className="font-medium text-warning">{stalled.length} stalled</span>: a
                 processing container was orphaned (usually a long item competing for limited
                 container slots). These auto-restart up to 3 times, then need a manual retry.
               </p>
             )}
             {failed.length > 0 && (
               <p>
-                <span className="font-medium text-red-400">{failed.length} failed</span>: see the
+                <span className="font-medium text-danger">{failed.length} failed</span>: see the
                 error on each row. Repeated <code>503 no Container instance available</code> means
                 the pipeline is at its concurrent-instance cap — retry once load clears.
               </p>
@@ -55,8 +67,16 @@ export function Queue() {
         </Card>
       )}
 
-      {items.length === 0 ? (
-        <Card className="p-10 text-center text-muted-foreground">Queue is empty.</Card>
+      {queue.isLoading ? (
+        <SkeletonRows count={3} />
+      ) : queue.isError ? (
+        <ErrorState message={queue.error.message} onRetry={() => queue.refetch()} />
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={<ListChecks className="h-5 w-5" />}
+          title="Queue is empty"
+          description="Nothing is processing right now. Add a link from Saved or follow a channel to keep it fed."
+        />
       ) : (
         <div className="space-y-3">
           {items.map((item) => (
@@ -70,22 +90,27 @@ export function Queue() {
 
 // Human-readable phase + the tone to color it with, derived from the raw status,
 // the current pipeline stage, and whether the run has stalled.
+const TONE = {
+  download: "text-sky-600 dark:text-sky-400",
+  work: "text-violet-600 dark:text-violet-400",
+} as const;
+
 function phase(item: QueueItem): { label: string; tone: string } {
-  if (item.status === "error") return { label: "failed", tone: "text-red-400" };
-  if (item.stalled) return { label: "stalled — waiting to restart", tone: "text-amber-400" };
+  if (item.status === "error") return { label: "failed", tone: "text-danger" };
+  if (item.stalled) return { label: "stalled — waiting to restart", tone: "text-warning" };
   if (item.status === "queued") return { label: "waiting in line", tone: "text-muted-foreground" };
   // Prefer the live progress heartbeat; fall back to the post-hoc stage_run.
   const stage = item.progress_stage || item.current_stage;
   const detail = item.progress_detail;
   if (stage === "download")
-    return { label: detail ? `downloading · ${detail}` : "downloading audio", tone: "text-blue-400" };
+    return { label: detail ? `downloading · ${detail}` : "downloading audio", tone: TONE.download };
   if (stage === "transcribe") {
     const d = detail || (item.chunk_count > 0 ? `chunk ${item.chunk_done}/${item.chunk_count}` : "");
-    return { label: d ? `transcribing · ${d}` : "transcribing", tone: "text-amber-400" };
+    return { label: d ? `transcribing · ${d}` : "transcribing", tone: "text-warning" };
   }
-  if (stage === "summarize") return { label: "summarizing", tone: "text-violet-400" };
-  if (item.status === "fetching") return { label: "downloading audio", tone: "text-blue-400" };
-  if (stage) return { label: stage, tone: "text-violet-400" };
+  if (stage === "summarize") return { label: "summarizing", tone: TONE.work };
+  if (item.status === "fetching") return { label: "downloading audio", tone: TONE.download };
+  if (stage) return { label: stage, tone: TONE.work };
   return { label: item.status, tone: "text-muted-foreground" };
 }
 
@@ -107,7 +132,7 @@ function QueueRow({ item, onRetry }: { item: QueueItem; onRetry: () => void }) {
             </span>
           )}
           {item.stalled && (
-            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-400">
+            <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
               stalled
             </span>
           )}
@@ -134,12 +159,16 @@ function QueueRow({ item, onRetry }: { item: QueueItem; onRetry: () => void }) {
         {item.progress_pct != null && item.status !== "error" && !item.stalled && (
           <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-blue-400 transition-all"
+              className="h-full rounded-full bg-primary transition-all"
               style={{ width: `${Math.min(100, Math.max(0, item.progress_pct))}%` }}
             />
           </div>
         )}
-        {item.error && <p className="mt-1 truncate text-xs text-red-400" title={item.error}>{item.error}</p>}
+        {item.error && (
+          <p className="mt-1 truncate text-xs text-danger" title={item.error}>
+            {item.error}
+          </p>
+        )}
       </div>
       {(item.status === "error" || item.stalled) && (
         <Button size="sm" variant="outline" onClick={onRetry}>

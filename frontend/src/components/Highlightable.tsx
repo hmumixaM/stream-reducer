@@ -386,7 +386,7 @@ function HighlightPopover({
           <button
             onClick={onDelete}
             title="Delete highlight"
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-400"
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger"
           >
             <Trash2 className="h-4 w-4" />
           </button>
