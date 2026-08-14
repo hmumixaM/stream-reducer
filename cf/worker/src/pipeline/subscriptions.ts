@@ -16,10 +16,11 @@ const MAX_NEW_PER_POLL = 10;
 // shorts/clips). Manual adds are NOT affected. Override with env.
 const DEFAULT_MIN_DURATION_S = 300;
 // Ceiling on how many entries a single poll may look up at the source to learn
-// their duration. Each lookup is a container call, and the batch below only
-// needs MAX_NEW_PER_POLL survivors, so the walk normally stops long before
-// this; the cap only bounds a first poll of a channel that is mostly clips.
-const MAX_DURATION_LOOKUPS = 16;
+// their duration and publish date. Each lookup is a container call, and the
+// batch below only needs MAX_NEW_PER_POLL survivors, so the walk normally stops
+// long before this; the cap only bounds a first poll of a channel that is
+// mostly clips.
+const MAX_SOURCE_LOOKUPS = 16;
 const YT_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
@@ -63,39 +64,52 @@ async function youtubeDuration(link: string | null): Promise<number | null> {
 
 // Ask the pipeline container what a video actually is. Bilibili channels are
 // enumerated by a flat yt-dlp extraction that returns ids and nothing else, so
-// without this the duration floor never applied to them and 47-second clips
-// went through the full download + transcribe. One metadata call is far cheaper
-// than the run it prevents. Limited to platforms whose metadata is a cheap
-// lookup — an RSS enclosure would mean fetching the audio itself.
-const SOURCE_DURATION_PLATFORMS = new Set(["bilibili", "youtube"]);
+// without this neither the duration floor nor the publish window applied to
+// them: 47-second clips and six-year-old uploads both went through the full
+// download + transcribe. One metadata call is far cheaper than the run it
+// prevents. Limited to platforms whose metadata is a cheap lookup — an RSS
+// enclosure would mean fetching the audio itself.
+const SOURCE_FACT_PLATFORMS = new Set(["bilibili", "youtube"]);
 
-async function sourceDuration(env: Env, url: string, platform: string): Promise<number | null> {
-  if (!SOURCE_DURATION_PLATFORMS.has(platform)) return null;
+async function sourceMetadata(env: Env, url: string, platform: string) {
+  if (!SOURCE_FACT_PLATFORMS.has(platform)) return null;
   try {
     const { fetchMetadata } = await import("./container");
-    const metadata = await fetchMetadata(env, url, platform);
-    return metadata?.duration_s ?? null;
+    return await fetchMetadata(env, url, platform);
   } catch (err) {
-    // Unknown duration means "keep it": a flaky lookup must not silently drop
+    // An unresolved entry is kept: a flaky lookup must not silently drop
     // episodes a channel really published.
-    console.warn("subscription duration lookup failed", url, String(err));
+    console.warn("subscription entry lookup failed", url, String(err));
     return null;
   }
 }
 
-// Best-effort duration (seconds) for a feed entry; null when unknown.
-async function entryDuration(
+interface EntryFacts {
+  durationS: number | null;
+  published: string | null;
+}
+
+// What the feed said about an entry, filled in from the source where it was
+// silent. Both facts come from one lookup.
+async function entryFacts(
   env: Env,
   entry: FeedEntry,
   platform: string,
   url: string | null,
-): Promise<number | null> {
-  if (entry.duration_s != null) return entry.duration_s;
-  if (platform === "youtube") {
-    const scraped = await youtubeDuration(entry.link);
-    if (scraped != null) return scraped;
+): Promise<EntryFacts> {
+  let durationS = entry.duration_s ?? null;
+  const published = entry.published ?? null;
+  if (durationS == null && platform === "youtube") {
+    durationS = await youtubeDuration(entry.link);
   }
-  return url ? sourceDuration(env, url, platform) : null;
+  if ((durationS == null || published == null) && url) {
+    const metadata = await sourceMetadata(env, url, platform);
+    return {
+      durationS: durationS ?? metadata?.duration_s ?? null,
+      published: published ?? metadata?.published_at ?? null,
+    };
+  }
+  return { durationS, published };
 }
 
 // Record the outcome of a poll so a broken feed is visible instead of silently
@@ -282,21 +296,28 @@ async function selectPollBatch(
   const inWindow = fresh.filter((e) => !minPublished || !e.published || e.published >= minPublished);
   const minDuration = Number(env.SUBSCRIPTION_MIN_DURATION_S || DEFAULT_MIN_DURATION_S);
 
-  // A poll takes the OLDEST survivors and remembers the newest of them, so the
-  // next tick walks forward in time. Walking in that same order lets the
-  // duration checks stop as soon as the batch is full instead of resolving a
-  // whole back-catalogue up front.
+  // A dated feed is consumed OLDEST first and the cursor stops at the newest
+  // entry taken, so successive polls walk forward through the backfill window.
+  // A feed with no dates at all (Bilibili's flat enumeration) can't be windowed
+  // that way — walking from the old end would just replay 2020 uploads — so it
+  // is read newest first and each candidate is resolved at the source until one
+  // falls outside the window.
+  const undated = inWindow.length > 0 && inWindow.every((entry) => !entry.published);
   const batch: FeedEntry[] = [];
   let lookups = 0;
   let leftover = false;
-  for (const entry of inWindow.slice().reverse()) {
-    let duration = entry.duration_s ?? null;
-    if (duration == null && lookups < MAX_DURATION_LOOKUPS) {
+  for (const entry of undated ? inWindow : inWindow.slice().reverse()) {
+    let facts: EntryFacts = {
+      durationS: entry.duration_s ?? null,
+      published: entry.published ?? null,
+    };
+    if ((facts.durationS == null || facts.published == null) && lookups < MAX_SOURCE_LOOKUPS) {
       lookups++;
       const { url, platform } = entryUrl(entry);
-      duration = await entryDuration(env, entry, platform, url);
+      facts = await entryFacts(env, entry, platform, url);
     }
-    if (duration != null && duration < minDuration) continue;
+    if (undated && minPublished && facts.published && facts.published < minPublished) break;
+    if (facts.durationS != null && facts.durationS < minDuration) continue;
     if (batch.length === MAX_NEW_PER_POLL) {
       leftover = true;
       break;
@@ -304,8 +325,12 @@ async function selectPollBatch(
     batch.push(entry);
   }
 
-  // More survivors than one poll takes: resume from the newest one enqueued.
-  // Otherwise the whole feed is consumed, so jump the cursor to its newest entry.
+  // An undated feed has had everything the window could contain considered, so
+  // the cursor jumps to the newest entry and later polls only see fresh uploads
+  // (a channel that published more than one batch since the follow started
+  // keeps the newest of them). A dated feed with survivors left over resumes
+  // from the newest entry enqueued.
+  if (undated) return { entries: batch.reverse(), nextSeenGuid: entries[0]?.guid ?? null };
   const nextSeenGuid = leftover
     ? batch[batch.length - 1]?.guid ?? null
     : entries[0]?.guid ?? null;

@@ -252,6 +252,39 @@ describe("subscription channel polling", () => {
     expect(mocks.addUrlToLibrary.mock.calls[0][2]).toBe("https://www.bilibili.com/video/BV1full");
   });
 
+  it("windows an undated feed from the newest entry backwards", async () => {
+    const { env, queries } = fakeEnv(subscription({
+      platform: "bilibili",
+      min_published_at: "2026-06-15T00:00:00.000Z",
+    }));
+    const undated = (guid: string) => ({
+      title: null,
+      link: `https://www.bilibili.com/video/${guid}`,
+      guid,
+      published: null,
+      audio: null,
+      duration_s: null,
+    });
+    mocks.fetchFeed.mockResolvedValue({
+      title: "UP creator",
+      entries: [undated("BVnew"), undated("BVold"), undated("BVancient")],
+    });
+    mocks.fetchMetadata.mockImplementation(async (_env: unknown, url: string) => ({
+      duration_s: 1800,
+      published_at: url.endsWith("BVnew") ? "2026-08-01T00:00:00.000Z" : "2020-01-01T00:00:00.000Z",
+    }));
+
+    await expect(pollSubscription(env, 7)).resolves.toBe(1);
+
+    // The walk stops at the first entry older than the window, so the ancient
+    // upload is never even resolved.
+    expect(mocks.fetchMetadata).toHaveBeenCalledTimes(2);
+    expect(mocks.addUrlToLibrary).toHaveBeenCalledTimes(1);
+    expect(mocks.addUrlToLibrary.mock.calls[0][2]).toBe("https://www.bilibili.com/video/BVnew");
+    const successUpdate = queries.find((query) => query.sql.includes("last_seen_guid = COALESCE"));
+    expect(successUpdate?.bindings[1]).toBe("BVnew");
+  });
+
   it("keeps an entry whose duration cannot be resolved", async () => {
     const { env } = fakeEnv(subscription({ platform: "bilibili" }));
     mocks.fetchFeed.mockResolvedValue({
