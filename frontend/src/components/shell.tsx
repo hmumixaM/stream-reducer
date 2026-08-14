@@ -1,18 +1,36 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 import { Button, Card, Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { supportsInfiniteScroll, useInfiniteScroll } from "@/lib/useInfiniteScroll";
 
-/** Standalone "back to the list" link, for pages whose title lives in a card. */
+/**
+ * Standalone "back" link. It retraces the last step whenever the visitor took
+ * one inside the app; `to` and `label` only describe where a cold landing —
+ * a shared URL, a new tab — should go instead.
+ */
 export function BackLink({ to, label }: { to: string; label: string }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  // react-router numbers its history entries; entry 0 is whatever the tab
+  // showed before us, so only later entries have somewhere of ours to return to.
+  const historyIndex = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+  const canGoBack = historyIndex > 0 || location.key !== "default";
+
   return (
     <Link
       to={to}
+      onClick={(event) => {
+        if (!canGoBack || event.defaultPrevented) return;
+        // Leave modified clicks alone so "open in new tab" still works.
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        navigate(-1);
+      }}
       className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
     >
-      <ArrowLeft className="h-4 w-4" /> {label}
+      <ArrowLeft className="h-4 w-4" /> {canGoBack ? "Back" : label}
     </Link>
   );
 }
