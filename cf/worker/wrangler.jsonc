@@ -176,7 +176,10 @@
     "STT_MODEL": "openai/whisper-large-v3-turbo",
     "EMBEDDING_DIM": "1024",
     "SUBSCRIPTION_WINDOW_DAYS": "90",
-    "SUBSCRIPTION_MIN_DURATION_S": "600",
+    // Shortest video a subscription poll will pick up on its own: below this a
+    // channel's clips and teasers aren't worth a transcribe. Adding a URL by
+    // hand ignores this floor — an explicit request is always honoured.
+    "SUBSCRIPTION_MIN_DURATION_S": "300",
     "GRAPH_KNN_K": "6",
     "GRAPH_SIM_THRESHOLD": "0.6",
     "ADMIN_EMAILS": "huyangmax@gmail.com",

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   addUrlToLibrary: vi.fn(),
   fetchFeed: vi.fn(),
   resolveFeedUrl: vi.fn(),
+  fetchMetadata: vi.fn(),
 }));
 
 vi.mock("../lib/ingest", () => ({
@@ -15,6 +16,10 @@ vi.mock("../lib/ingest", () => ({
 vi.mock("../lib/feed", () => ({
   fetchFeed: mocks.fetchFeed,
   resolveFeedUrl: mocks.resolveFeedUrl,
+}));
+
+vi.mock("./container", () => ({
+  fetchMetadata: mocks.fetchMetadata,
 }));
 
 import { pollDueSubscriptions, pollSubscription } from "./subscriptions";
@@ -112,6 +117,7 @@ describe("subscription channel polling", () => {
     mocks.fetchFeed.mockResolvedValue(feed);
     mocks.resolveFeedUrl.mockImplementation(async (url: string) => url);
     mocks.addUrlToLibrary.mockResolvedValue({ item: { id: 19 } });
+    mocks.fetchMetadata.mockResolvedValue({ duration_s: null });
   });
 
   it("uses a migrated channel feed and passes its channel through ingest", async () => {
@@ -194,6 +200,76 @@ describe("subscription channel polling", () => {
 
     expect(mocks.fetchFeed).not.toHaveBeenCalled();
     expect(mocks.addUrlToLibrary).not.toHaveBeenCalled();
+  });
+
+  it("skips clips shorter than the floor and keeps the rest", async () => {
+    const { env } = fakeEnv(subscription());
+    mocks.fetchFeed.mockResolvedValue({
+      title: "Shared show title",
+      entries: [
+        { ...feed.entries[0], guid: "long", link: "https://example.com/long", duration_s: 301 },
+        { ...feed.entries[0], guid: "clip", link: "https://example.com/clip", duration_s: 299 },
+      ],
+    });
+
+    await expect(pollSubscription(env, 7)).resolves.toBe(1);
+
+    expect(mocks.addUrlToLibrary).toHaveBeenCalledTimes(1);
+    expect(mocks.addUrlToLibrary.mock.calls[0][2]).toBe("https://cdn.example.com/episodes/1.mp3");
+  });
+
+  it("asks the source for a duration the feed omitted", async () => {
+    const { env } = fakeEnv(subscription({ platform: "bilibili" }));
+    mocks.fetchFeed.mockResolvedValue({
+      title: "UP creator",
+      entries: [
+        {
+          title: null,
+          link: "https://www.bilibili.com/video/BV1clip",
+          guid: "BV1clip",
+          published: null,
+          audio: null,
+          duration_s: null,
+        },
+        {
+          title: null,
+          link: "https://www.bilibili.com/video/BV1full",
+          guid: "BV1full",
+          published: null,
+          audio: null,
+          duration_s: null,
+        },
+      ],
+    });
+    mocks.fetchMetadata.mockImplementation(async (_env: unknown, url: string) =>
+      url.endsWith("BV1clip") ? { duration_s: 47 } : { duration_s: 1800 },
+    );
+
+    await expect(pollSubscription(env, 7)).resolves.toBe(1);
+
+    expect(mocks.fetchMetadata).toHaveBeenCalledTimes(2);
+    expect(mocks.addUrlToLibrary).toHaveBeenCalledTimes(1);
+    expect(mocks.addUrlToLibrary.mock.calls[0][2]).toBe("https://www.bilibili.com/video/BV1full");
+  });
+
+  it("keeps an entry whose duration cannot be resolved", async () => {
+    const { env } = fakeEnv(subscription({ platform: "bilibili" }));
+    mocks.fetchFeed.mockResolvedValue({
+      title: "UP creator",
+      entries: [{
+        title: null,
+        link: "https://www.bilibili.com/video/BV1unknown",
+        guid: "BV1unknown",
+        published: null,
+        audio: null,
+        duration_s: null,
+      }],
+    });
+    mocks.fetchMetadata.mockRejectedValue(new Error("container 503"));
+
+    await expect(pollSubscription(env, 7)).resolves.toBe(1);
+
+    expect(mocks.addUrlToLibrary).toHaveBeenCalledTimes(1);
   });
 
   it("selects only enabled follows while retaining the migration fallback", async () => {

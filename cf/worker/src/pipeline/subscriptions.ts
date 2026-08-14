@@ -14,7 +14,12 @@ import { errorMessage, isTransientCapacity } from "./transient";
 const MAX_NEW_PER_POLL = 10;
 // Subscriptions skip videos shorter than this (avoids flooding a library with
 // shorts/clips). Manual adds are NOT affected. Override with env.
-const DEFAULT_MIN_DURATION_S = 600;
+const DEFAULT_MIN_DURATION_S = 300;
+// Ceiling on how many entries a single poll may look up at the source to learn
+// their duration. Each lookup is a container call, and the batch below only
+// needs MAX_NEW_PER_POLL survivors, so the walk normally stops long before
+// this; the cap only bounds a first poll of a channel that is mostly clips.
+const MAX_DURATION_LOOKUPS = 16;
 const YT_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
@@ -56,11 +61,41 @@ async function youtubeDuration(link: string | null): Promise<number | null> {
   }
 }
 
+// Ask the pipeline container what a video actually is. Bilibili channels are
+// enumerated by a flat yt-dlp extraction that returns ids and nothing else, so
+// without this the duration floor never applied to them and 47-second clips
+// went through the full download + transcribe. One metadata call is far cheaper
+// than the run it prevents. Limited to platforms whose metadata is a cheap
+// lookup — an RSS enclosure would mean fetching the audio itself.
+const SOURCE_DURATION_PLATFORMS = new Set(["bilibili", "youtube"]);
+
+async function sourceDuration(env: Env, url: string, platform: string): Promise<number | null> {
+  if (!SOURCE_DURATION_PLATFORMS.has(platform)) return null;
+  try {
+    const { fetchMetadata } = await import("./container");
+    const metadata = await fetchMetadata(env, url, platform);
+    return metadata?.duration_s ?? null;
+  } catch (err) {
+    // Unknown duration means "keep it": a flaky lookup must not silently drop
+    // episodes a channel really published.
+    console.warn("subscription duration lookup failed", url, String(err));
+    return null;
+  }
+}
+
 // Best-effort duration (seconds) for a feed entry; null when unknown.
-async function entryDuration(entry: FeedEntry, platform: string): Promise<number | null> {
+async function entryDuration(
+  env: Env,
+  entry: FeedEntry,
+  platform: string,
+  url: string | null,
+): Promise<number | null> {
   if (entry.duration_s != null) return entry.duration_s;
-  if (platform === "youtube") return youtubeDuration(entry.link);
-  return null;
+  if (platform === "youtube") {
+    const scraped = await youtubeDuration(entry.link);
+    if (scraped != null) return scraped;
+  }
+  return url ? sourceDuration(env, url, platform) : null;
 }
 
 // Record the outcome of a poll so a broken feed is visible instead of silently
@@ -246,17 +281,36 @@ async function selectPollBatch(
   const fresh = lastSeenIndex >= 0 ? entries.slice(0, lastSeenIndex) : entries;
   const inWindow = fresh.filter((e) => !minPublished || !e.published || e.published >= minPublished);
   const minDuration = Number(env.SUBSCRIPTION_MIN_DURATION_S || DEFAULT_MIN_DURATION_S);
-  const durations = await Promise.all(inWindow.map((e) => entryDuration(e, entryUrl(e).platform)));
-  const within = inWindow.filter((_, i) => durations[i] == null || durations[i]! >= minDuration);
 
-  const newestFirstBatch = within.length > MAX_NEW_PER_POLL
-    ? within.slice(-MAX_NEW_PER_POLL)
-    : within;
-  const nextSeenGuid = within.length > MAX_NEW_PER_POLL
-    ? newestFirstBatch[0]?.guid ?? null
+  // A poll takes the OLDEST survivors and remembers the newest of them, so the
+  // next tick walks forward in time. Walking in that same order lets the
+  // duration checks stop as soon as the batch is full instead of resolving a
+  // whole back-catalogue up front.
+  const batch: FeedEntry[] = [];
+  let lookups = 0;
+  let leftover = false;
+  for (const entry of inWindow.slice().reverse()) {
+    let duration = entry.duration_s ?? null;
+    if (duration == null && lookups < MAX_DURATION_LOOKUPS) {
+      lookups++;
+      const { url, platform } = entryUrl(entry);
+      duration = await entryDuration(env, entry, platform, url);
+    }
+    if (duration != null && duration < minDuration) continue;
+    if (batch.length === MAX_NEW_PER_POLL) {
+      leftover = true;
+      break;
+    }
+    batch.push(entry);
+  }
+
+  // More survivors than one poll takes: resume from the newest one enqueued.
+  // Otherwise the whole feed is consumed, so jump the cursor to its newest entry.
+  const nextSeenGuid = leftover
+    ? batch[batch.length - 1]?.guid ?? null
     : entries[0]?.guid ?? null;
 
-  return { entries: newestFirstBatch.slice().reverse(), nextSeenGuid };
+  return { entries: batch, nextSeenGuid };
 }
 
 async function enqueueSubscriptionBatch(
