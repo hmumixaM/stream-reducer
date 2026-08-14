@@ -250,9 +250,10 @@ function youtubeFeed(channelId: string): string {
   return `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
 }
 
-// Fetch a YouTube channel/handle page and pull the canonical channel id out of
-// the embedded JSON (works for @handles, /c/ and /user/ custom URLs).
-async function fetchYoutubeChannelId(pageUrl: string): Promise<string | null> {
+// Fetch a page as a browser would. YouTube/Apple serve stripped-down markup (or
+// a consent wall) to UA-less datacenter requests, so the embedded ids we scrape
+// below are only present with these headers.
+async function fetchPageHtml(pageUrl: string): Promise<string | null> {
   try {
     const res = await fetch(pageUrl, {
       headers: {
@@ -261,22 +262,62 @@ async function fetchYoutubeChannelId(pageUrl: string): Promise<string | null> {
         "accept-language": "en-US,en;q=0.9",
       },
     });
-    const html = await res.text();
-    // A channel page embeds MANY channel ids — recommended/featured channels
-    // (gridChannelRenderer) often appear BEFORE the page's own id, so grabbing
-    // the first "channelId" picks the wrong channel (e.g. "… Clips"). Prefer the
-    // canonical markers that always denote THIS page's channel: rel="canonical",
-    // og:url, and channelMetadataRenderer.externalId. Only fall back to a bare
-    // "channelId" if none are present.
-    const m =
-      html.match(/rel="canonical"\s+href="https:\/\/www\.youtube\.com\/channel\/(UC[0-9A-Za-z_-]{22})"/) ||
-      html.match(/property="og:url"\s+content="https:\/\/www\.youtube\.com\/channel\/(UC[0-9A-Za-z_-]{22})"/) ||
-      html.match(/"externalId":"(UC[0-9A-Za-z_-]{22})"/) ||
-      html.match(/"channelId":"(UC[0-9A-Za-z_-]{22})"/);
-    return m ? m[1] : null;
-  } catch {
+    if (!res.ok) {
+      console.warn(`fetchPageHtml ${pageUrl} http ${res.status}`);
+      return null;
+    }
+    return await res.text();
+  } catch (err) {
+    console.warn(`fetchPageHtml ${pageUrl} failed: ${String(err)}`);
     return null;
   }
+}
+
+// Pull the owning channel id out of a YouTube WATCH page. Unlike a channel page,
+// the canonical/og:url markers here point at the video, so the id only lives in
+// the embedded player/microdata payloads. Used to recover channel attribution
+// for videos that were added before (or despite) a metadata fetch.
+export async function fetchYoutubeVideoChannelId(watchUrl: string): Promise<string | null> {
+  const html = await fetchPageHtml(watchUrl);
+  if (!html) return null;
+  const m =
+    html.match(/<link\s+itemprop="url"\s+href="https?:\/\/www\.youtube\.com\/channel\/(UC[0-9A-Za-z_-]{22})"/) ||
+    html.match(/"externalChannelId":"(UC[0-9A-Za-z_-]{22})"/) ||
+    html.match(/"channelId":"(UC[0-9A-Za-z_-]{22})"/) ||
+    html.match(/"browseId":"(UC[0-9A-Za-z_-]{22})"/);
+  return m ? m[1] : null;
+}
+
+// Fetch a YouTube channel/handle page and pull the canonical channel id out of
+// the embedded JSON (works for @handles, /c/ and /user/ custom URLs).
+async function fetchYoutubeChannelId(pageUrl: string): Promise<string | null> {
+  const html = await fetchPageHtml(pageUrl);
+  if (!html) return null;
+  // A channel page embeds MANY channel ids — recommended/featured channels
+  // (gridChannelRenderer) often appear BEFORE the page's own id, so grabbing
+  // the first "channelId" picks the wrong channel (e.g. "… Clips"). Prefer the
+  // canonical markers that always denote THIS page's channel: rel="canonical",
+  // og:url, and channelMetadataRenderer.externalId. Only fall back to a bare
+  // "channelId" if none are present.
+  const m =
+    html.match(/rel="canonical"\s+href="https:\/\/www\.youtube\.com\/channel\/(UC[0-9A-Za-z_-]{22})"/) ||
+    html.match(/property="og:url"\s+content="https:\/\/www\.youtube\.com\/channel\/(UC[0-9A-Za-z_-]{22})"/) ||
+    html.match(/"externalId":"(UC[0-9A-Za-z_-]{22})"/) ||
+    html.match(/"channelId":"(UC[0-9A-Za-z_-]{22})"/);
+  return m ? m[1] : null;
+}
+
+// Pull the show id out of a 小宇宙 episode page (`/podcast/<pid>` link in the
+// embedded payload). 小宇宙 exposes no RSS, so the show page IS the channel's
+// canonical URL; the id keeps every episode of a show on one channel.
+export async function fetchXiaoyuzhouPodcastId(episodeUrl: string): Promise<string | null> {
+  const html = await fetchPageHtml(episodeUrl);
+  if (!html) return null;
+  const m =
+    html.match(/"pid"\s*:\s*"([0-9a-f]{24})"/i) ||
+    html.match(/xiaoyuzhoufm\.com(?:\\?\/|\/)podcast(?:\\?\/|\/)([0-9a-f]{24})/i) ||
+    html.match(/\/podcast\/([0-9a-f]{24})/i);
+  return m ? m[1].toLowerCase() : null;
 }
 
 // The channel/show-level cover: <itunes:image href> or RSS <image><url>. Many

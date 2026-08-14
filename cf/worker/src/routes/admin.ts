@@ -15,6 +15,7 @@ import { cacheThumbnail } from "../lib/ingest";
 import { refreshBilibiliCookie } from "../lib/biliRefresh";
 import { loadBiliAuth } from "../lib/biliAuth";
 import { readJson } from "../lib/request";
+import { channelLinkRoutes } from "./adminChannelLink";
 import {
   groupSelectedResolvedFollows,
   mergeFollowsIntoChannel,
@@ -27,6 +28,7 @@ import {
 // Admin-only: user management + global processing-queue oversight.
 export const adminRoutes = new Hono<AppContext>();
 adminRoutes.use("*", requireAdmin);
+adminRoutes.route("/", channelLinkRoutes);
 
 interface AdminUserRow {
   id: number;

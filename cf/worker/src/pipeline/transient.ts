@@ -24,7 +24,11 @@ export function isTransientCapacity(msg: string): boolean {
     m.includes("durable object was reset") ||
     m.includes("durable object reset because its code was updated") ||
     m.includes("container port connection closed unexpectedly") ||
-    m.includes("error proxying request to container")
+    m.includes("error proxying request to container") ||
+    // An overloaded container instance drops the connection mid-request and the
+    // DO surfaces it as a 500. Match the phrase, not "container 500": a genuine
+    // yt-dlp/download failure also comes back as 500 and must stay fatal.
+    m.includes("container suddenly disconnected")
   );
 }
 

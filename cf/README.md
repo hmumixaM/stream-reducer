@@ -165,6 +165,7 @@ ingest pipeline calls will fail locally but the rest of the API works.
 | Shared channel catalog + per-user follows | `migrations/0010_channels.sql`, `src/lib/channels.ts`, `src/routes/channels.ts`; the legacy `subscription` row remains the per-user follow so folders, poll cursors, comments, and highlights keep their IDs |
 | Follow-latest polling, last-3-months default | `src/routes/subscriptions.ts` (`window_days = 90`), `src/pipeline/subscriptions.ts`; `enabled` is exposed by the channel API as `follow_latest` |
 | Metadata-first ingest | `src/pipeline/consumer.ts` (`fetchMetadata` before `runPipeline`) |
+| Item → channel attribution | `src/lib/itemChannel.ts` (`attachItemChannel`): the single derivation used by manual adds, subscription polls and finished pipeline runs, so every item writes both `channel_item` and `item_feed`. A finished run re-attributes the item, which self-heals adds whose metadata prefetch failed |
 | Prioritization (views + subscribers + requesters/interest) | `src/lib/priority.ts`, `src/lib/ingest.ts` (`recomputePriority`); subscriber demand uses the global `item_feed` link (`migrations/0002_item_feed.sql`) so manually-added videos still credit their channel's subscribers |
 | Dedup (one item, many libraries, waiting/done) | `src/lib/ingest.ts` + `user_item` join in `migrations/0001_init.sql`; the per-user `waiting` badge surfaces in Browse/Library (`components/ItemCard.tsx`, `pages/Browse.tsx`) |
 | Gemini summary endpoint | `vars.LLM_BASE_URL` + `GEMINI_API_KEY` (used in `cf/pipeline/llm.py`) |
@@ -176,3 +177,18 @@ deployed. Admins first call
 without `dry_run` using the returned cursor. The companion
 `POST /api/admin/backfill-channel-items` route links historical `item_feed`
 records to the shared catalog. Both operations are bounded and idempotent.
+
+Items that never got a channel (added before `attachItemChannel`, or whose
+metadata prefetch failed) are repaired with the routes in
+`src/routes/adminChannelLink.ts`:
+
+- `GET /api/admin/channel-link-audit` explains the gap: unchanneled items bucketed
+  by platform and reason, plus poll health for every channel with no items (which
+  separates "polling is broken" from "nothing new inside the window").
+- `POST /api/admin/backfill-item-channels?phase=a` rebuilds channels from the
+  item's existing `item_feed` rows and drops the malformed YouTube-template rows
+  the pipeline used to write for non-YouTube platforms.
+- `POST /api/admin/backfill-item-channels?phase=b&limit=25` goes back to each
+  item's `source_url` for the rest. It needs the network (and the container's WARP
+  egress for Bilibili), so it runs in small batches; `dry_run=true`, `limit` and
+  `after_item_id` bound every call and re-running is idempotent.
