@@ -94,4 +94,21 @@ describe("timeline route", () => {
     expect(query.sql).toContain("i.platform = ?");
     expect(query.bindings).toEqual([7, 7, "bilibili", 10, 20]);
   });
+
+  it("narrows the timeline to a single channel", async () => {
+    const query = await timelineQuery("/timeline?channel_id=42&limit=10&offset=0");
+
+    expect(query.sql).toContain("ci.channel_id = ?");
+    expect(query.bindings).toEqual([7, 7, 42, 10, 0]);
+  });
+
+  it("rejects a channel_id that is not a positive integer", async () => {
+    const app = new Hono<AppContext>();
+    app.route("/timeline", timelineRoutes);
+    const { env } = fakeEnv();
+
+    const response = await app.request("/timeline?channel_id=abc", undefined, env);
+
+    expect(response.status).toBe(400);
+  });
 });

@@ -14,11 +14,14 @@ import {
   Toolbar,
 } from "@/components/shell";
 import { CatalogItemCard } from "@/components/CatalogItemCard";
+import { ChannelFilterStrip } from "@/components/ChannelFilterStrip";
 import { ItemCard, type ItemCardActions } from "@/components/ItemCard";
 import { TIMELINE_SORTS } from "@/lib/sorts";
 import { nextPageError } from "@/lib/useInfiniteScroll";
 
 const PAGE_SIZE = 30;
+/** The API caps a channel page at 50, which is also as many avatars as a strip can carry. */
+const MAX_STRIP_CHANNELS = 50;
 const PLATFORMS: { value: Platform; label: string }[] = [
   { value: "youtube", label: "YouTube" },
   { value: "bilibili", label: "Bilibili" },
@@ -38,6 +41,7 @@ export function Timeline() {
   const sort = searchParams.get("sort") ?? "published";
   const platform = (searchParams.get("platform") ?? "") as Platform | "";
   const focus = (searchParams.get("focus") ?? "all") as Focus;
+  const channelId = Number(searchParams.get("channel")) || null;
   const queryClient = useQueryClient();
 
   const setParam = (key: string, value: string) => {
@@ -48,10 +52,11 @@ export function Timeline() {
   };
 
   const timeline = useInfiniteQuery({
-    queryKey: ["timeline", { sort, platform, focus }],
+    queryKey: ["timeline", { sort, platform, focus, channelId }],
     queryFn: ({ pageParam }) =>
       api.listTimeline({
         sort,
+        channelId: channelId ?? undefined,
         platform: platform || undefined,
         saved: focus === "unsaved" ? false : undefined,
         ready: focus === "ready" ? true : undefined,
@@ -64,9 +69,10 @@ export function Timeline() {
     refetchInterval: 30000,
   });
   const groups = useQuery({ queryKey: ["groups"], queryFn: () => api.listGroups() });
+  // Own key: the Following tab pages the same endpoint under ["channels", "following"].
   const follows = useQuery({
-    queryKey: ["channels", "following"],
-    queryFn: () => api.listChannels({ following: true, limit: 1 }),
+    queryKey: ["channels", "following", "strip"],
+    queryFn: () => api.listChannels({ following: true, limit: MAX_STRIP_CHANNELS }),
   });
 
   const invalidate = () => {
@@ -106,8 +112,10 @@ export function Timeline() {
   };
 
   const rows = timeline.data?.pages.flat() ?? [];
-  const filtering = Boolean(platform) || focus !== "all";
-  const hasFollows = (follows.data ?? []).length > 0;
+  const filtering = Boolean(platform) || focus !== "all" || channelId !== null;
+  const channels = follows.data ?? [];
+  const hasFollows = channels.length > 0;
+  const activeChannel = channels.find((channel) => channel.id === channelId) ?? null;
 
   const renderCard = (item: TimelineItem) => {
     const channel = { id: item.channel_id, title: item.channel_title };
@@ -128,7 +136,26 @@ export function Timeline() {
     <div>
       <PageHeader
         title="Timeline"
-        subtitle="The newest episodes from every channel you follow. Add the ones you want processed."
+        subtitle={
+          activeChannel
+            ? `Everything ${activeChannel.title || activeChannel.feed_url} has published.`
+            : "The newest episodes from every channel you follow. Add the ones you want processed."
+        }
+        actions={
+          activeChannel && (
+            <Link to={`/channels/${activeChannel.id}`}>
+              <Button size="sm" variant="outline">
+                Channel page
+              </Button>
+            </Link>
+          )
+        }
+      />
+
+      <ChannelFilterStrip
+        channels={channels}
+        activeId={channelId}
+        onSelect={(id) => setParam("channel", id === null ? "" : String(id))}
       />
 
       <Toolbar>

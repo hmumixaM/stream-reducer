@@ -332,6 +332,8 @@ export interface TimelineItem extends ChannelItemRead {
 }
 
 export interface ListTimelineParams {
+  /** Show only what this followed channel published. */
+  channelId?: number;
   platform?: Platform;
   /** Restrict to items already in (or not yet in) the personal library. */
   saved?: boolean;
@@ -858,6 +860,7 @@ export const api = {
   },
   listTimeline: (params?: ListTimelineParams) => {
     const sp = new URLSearchParams();
+    if (params?.channelId !== undefined) sp.set("channel_id", String(params.channelId));
     if (params?.platform) sp.set("platform", params.platform);
     if (params?.saved !== undefined) sp.set("saved", String(params.saved));
     if (params?.ready !== undefined) sp.set("ready", String(params.ready));

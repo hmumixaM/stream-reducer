@@ -46,6 +46,15 @@ timelineRoutes.get("/", async (c) => {
     where.push("i.platform = ?");
     binds.push(query.platform);
   }
+  // Narrow the timeline to one followed channel (the avatar strip on the page).
+  if (query.channel_id) {
+    const channelId = Number(query.channel_id);
+    if (!Number.isInteger(channelId) || channelId <= 0) {
+      return c.json({ error: "channel_id must be a positive integer" }, 400);
+    }
+    where.push("ci.channel_id = ?");
+    binds.push(channelId);
+  }
   if (query.saved === "false") where.push("ui.id IS NULL");
   if (query.saved === "true") where.push("ui.id IS NOT NULL");
   if (query.ready === "true") where.push("i.status = 'done'");
