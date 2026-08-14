@@ -191,7 +191,7 @@ function BrowseCard({
       <Link to={`/items/${item.id}`} className="block">
         <div className="aspect-video w-full overflow-hidden bg-muted">
           {item.thumbnail ? (
-            <img src={item.thumbnail} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+            <img src={item.thumbnail} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
           ) : (
             <div className="flex h-full items-center justify-center text-muted-foreground">
               <Film className="h-8 w-8" />
@@ -256,7 +256,7 @@ function HeadlineRow({
       <div className="flex flex-col gap-3 sm:flex-row">
         <Link to={`/items/${item.id}`} className="block aspect-video w-full shrink-0 overflow-hidden rounded-md bg-muted sm:w-32">
           {item.thumbnail ? (
-            <img src={item.thumbnail} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+            <img src={item.thumbnail} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
           ) : (
             <div className="flex h-full items-center justify-center text-muted-foreground">
               <Film className="h-6 w-6" />

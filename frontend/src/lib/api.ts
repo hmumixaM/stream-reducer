@@ -1,4 +1,5 @@
 import { MIRROR } from "@/lib/mirror";
+import { forgetSession } from "@/lib/session";
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 export interface JsonObject {
@@ -526,7 +527,9 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (res.status === 401) {
-    // Session missing/expired: bounce to login (unless already there).
+    // Session missing/expired: bounce to login (unless already there). Drop the
+    // cached session hint too, so the next load doesn't paint a signed-in shell.
+    forgetSession();
     if (!location.pathname.startsWith("/login")) {
       location.href = "/login";
     }

@@ -5,22 +5,26 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Login } from "@/pages/Login";
 import { useMe } from "@/lib/auth";
+import { sessionSnapshot } from "@/lib/session";
 import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Spinner } from "@/components/ui";
-import "@/lib/firebase"; // initialize Firebase monitoring (Performance + Analytics)
-import "katex/dist/katex.min.css"; // math formula styling for react-markdown + rehype-katex
 import "./index.css";
 
 // Every page is code-split so the initial load only ships the shell + the
-// route you actually open.
+// route you actually open. `preload` starts that chunk early: the landing
+// route is otherwise only discovered after the session request resolves, which
+// made two round trips run back to back.
+type Route = React.LazyExoticComponent<React.ComponentType> & { preload: () => void };
+
 const named = <T extends string>(
   loader: () => Promise<Record<T, React.ComponentType>>,
   name: T,
-) =>
-  lazy(async () => {
-    const module = await loader();
-    return { default: module[name] };
-  });
+): Route => {
+  const load = async () => ({ default: (await loader())[name] });
+  const route = lazy(load) as Route;
+  route.preload = () => void load();
+  return route;
+};
 
 const Timeline = named(() => import("@/pages/Timeline"), "Timeline");
 const Library = named(() => import("@/pages/Library"), "Library");
@@ -38,7 +42,16 @@ const Settings = named(() => import("@/pages/Settings"), "Settings");
 const Admin = named(() => import("@/pages/Admin"), "Admin");
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { refetchOnWindowFocus: false, retry: false } },
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: false,
+      // Without this every remount refetched from scratch, so moving between
+      // pages re-paid the network cost of lists that had just been fetched.
+      // Mutations still invalidate explicitly, so edits stay immediate.
+      staleTime: 30_000,
+    },
+  },
 });
 
 const FullScreenSpinner = () => (
@@ -159,6 +172,10 @@ const router = createBrowserRouter([
   },
 ]);
 
+// Start the landing route's chunk alongside the session request rather than
+// after it. Which one depends on where this visitor last landed.
+(MIRROR ? Library : sessionSnapshot()?.user ? Timeline : Browse).preload();
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
@@ -166,3 +183,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+// Monitoring is not part of the first paint: loading the Firebase SDK eagerly
+// put ~30 kB of gzipped JS ahead of the UI on the critical path.
+const startMonitoring = () => void import("@/lib/firebase");
+if ("requestIdleCallback" in window) requestIdleCallback(startMonitoring);
+else setTimeout(startMonitoring, 2000);

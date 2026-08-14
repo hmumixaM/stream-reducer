@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/auth";
+import { forgetSession } from "@/lib/session";
 import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Select, Spinner } from "@/components/ui";
 import { SkeletonGrid } from "@/components/shell";
@@ -173,6 +174,7 @@ export function Layout() {
 
   const logout = async () => {
     await api.logout();
+    forgetSession();
     window.location.href = "/login";
   };
 

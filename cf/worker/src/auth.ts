@@ -23,14 +23,16 @@ export function isValidEmail(email: string): boolean {
 
 // Create a single-use magic-link token for `email` and email the link.
 export async function sendMagicLink(env: Env, email: string): Promise<void> {
-  await env.DB.prepare(
-    "DELETE FROM auth_token WHERE expires_at < ? OR used_at IS NOT NULL",
-  ).bind(isoNow()).run();
   const since = new Date(Date.now() - MAGIC_LINK_WINDOW_MS).toISOString();
-  const recent = await first<{ n: number }>(
-    env.DB.prepare("SELECT COUNT(*) AS n FROM auth_token WHERE email = ? AND created_at >= ?").bind(email, since),
-  );
-  if ((recent?.n ?? 0) >= MAGIC_LINK_MAX_PER_WINDOW) {
+  // Sweeping spent tokens and counting recent ones travel together: the user is
+  // watching a spinner until the email is away, so spend one round trip, not two.
+  const [, recent] = await env.DB.batch<{ n: number }>([
+    env.DB.prepare("DELETE FROM auth_token WHERE expires_at < ? OR used_at IS NOT NULL").bind(isoNow()),
+    env.DB
+      .prepare("SELECT COUNT(*) AS n FROM auth_token WHERE email = ? AND created_at >= ?")
+      .bind(email, since),
+  ]);
+  if ((recent.results[0]?.n ?? 0) >= MAGIC_LINK_MAX_PER_WINDOW) {
     throw new Error("rate_limited");
   }
 
@@ -65,34 +67,37 @@ export async function verifyMagicLink(env: Env, token: string): Promise<string |
   );
   if (!row || row.used_at || row.expires_at < isoNow()) return null;
 
-  await env.DB.prepare("UPDATE auth_token SET used_at = ? WHERE id = ?")
-    .bind(isoNow(), row.id)
-    .run();
-
-  // Find-or-create the user by email.
-  await env.DB.prepare("INSERT INTO user (email) VALUES (?) ON CONFLICT(email) DO NOTHING")
-    .bind(row.email)
-    .run();
-  // Auto-grant admin to configured admin emails.
+  const sessionToken = randomToken();
+  const sessionHash = await sha256(sessionToken);
   const admins = (env.ADMIN_EMAILS || "")
     .split(",")
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);
-  if (admins.includes(row.email.toLowerCase())) {
-    await env.DB.prepare("UPDATE user SET is_admin = 1 WHERE email = ?").bind(row.email).run();
-  }
-  const user = await first<UserRow>(
-    env.DB.prepare("SELECT * FROM user WHERE email = ?").bind(row.email),
-  );
-  if (!user) return null;
 
-  const sessionToken = randomToken();
-  const sessionHash = await sha256(sessionToken);
-  await env.DB.prepare(
-    "INSERT INTO session (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
-  )
-    .bind(sessionHash, user.id, isoIn(SESSION_TTL_MS))
-    .run();
+  // Burning the token, finding-or-creating the user, and minting the session
+  // are one atomic batch — a single D1 round trip instead of five sequential
+  // ones, on the path a person waits through after clicking the email link.
+  // The session INSERT reads the user id back through a subselect, so nothing
+  // here has to come back to the Worker first.
+  const statements = [
+    env.DB.prepare("UPDATE auth_token SET used_at = ? WHERE id = ?").bind(isoNow(), row.id),
+    env.DB.prepare("INSERT INTO user (email) VALUES (?) ON CONFLICT(email) DO NOTHING").bind(row.email),
+  ];
+  if (admins.includes(row.email.toLowerCase())) {
+    statements.push(env.DB.prepare("UPDATE user SET is_admin = 1 WHERE email = ?").bind(row.email));
+  }
+  statements.push(
+    env.DB
+      .prepare(
+        `INSERT INTO session (token_hash, user_id, expires_at)
+         SELECT ?, id, ? FROM user WHERE email = ?`,
+      )
+      .bind(sessionHash, isoIn(SESSION_TTL_MS), row.email),
+  );
+
+  const results = await env.DB.batch(statements);
+  const created = results[results.length - 1].meta.changes;
+  if (!created) return null;
   return sessionToken;
 }
 
@@ -110,13 +115,19 @@ export async function resolveUser(env: Env, c: Context<AppContext>): Promise<Use
   const token = getCookie(c, SESSION_COOKIE);
   if (!token) return null;
   const hash = await sha256(token);
-  const session = await first<{ user_id: number; expires_at: string }>(
-    env.DB.prepare("SELECT user_id, expires_at FROM session WHERE token_hash = ?").bind(hash),
+  // Every authenticated request pays this lookup, and the session shell of the
+  // SPA waits on it before anything renders, so resolve it in ONE round trip:
+  // the session row and its user used to be two sequential D1 queries.
+  const row = await first<UserRow & { session_expires_at: string }>(
+    env.DB.prepare(
+      `SELECT u.*, s.expires_at AS session_expires_at
+         FROM session s JOIN user u ON u.id = s.user_id
+        WHERE s.token_hash = ?`,
+    ).bind(hash),
   );
-  if (!session || session.expires_at < isoNow()) return null;
-  return first<UserRow>(
-    env.DB.prepare("SELECT * FROM user WHERE id = ?").bind(session.user_id),
-  );
+  if (!row || row.session_expires_at < isoNow()) return null;
+  const { session_expires_at: _expires, ...user } = row;
+  return user as UserRow;
 }
 
 export async function clearSession(env: Env, c: Context<AppContext>): Promise<void> {
