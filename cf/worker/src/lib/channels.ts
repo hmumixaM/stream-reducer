@@ -371,13 +371,18 @@ export interface ChannelItemBrief {
   status: string;
 }
 
+// Backfill window a follow gets when the caller doesn't ask for one: how far
+// back its first poll reaches.
+export function defaultWindowDays(env: Env): number {
+  return Number(env.SUBSCRIPTION_WINDOW_DAYS || "60");
+}
+
 export interface ChannelFollowRead {
   id: number;
   channel_id: number | null;
   title: string | null;
   platform: string;
   feed_url: string;
-  follow_latest: boolean;
   folder_id: number | null;
   interval_minutes: number;
   window_days: number;
@@ -402,7 +407,6 @@ export function toChannelFollowRead(
     title: follow.title ?? channel?.title ?? null,
     platform: channel?.platform ?? follow.platform,
     feed_url: channel?.feed_url ?? follow.feed_url,
-    follow_latest: Boolean(follow.enabled),
     folder_id: follow.folder_id,
     interval_minutes: follow.interval_minutes,
     window_days: follow.window_days,

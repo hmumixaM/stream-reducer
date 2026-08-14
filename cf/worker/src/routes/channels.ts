@@ -8,6 +8,7 @@ import {
   type ItemRow,
 } from "../db";
 import {
+  defaultWindowDays,
   findUserFollow,
   findUnmigratedUserFollowsByIdentity,
   mergeFollowsIntoChannel,
@@ -161,22 +162,12 @@ async function recomputeChannelPriorities(
 }
 
 interface FollowBody {
-  follow_latest?: boolean;
   folder_id?: number | null;
   window_days?: number;
   interval_minutes?: number;
 }
 
-function validateFollowBody(
-  body: FollowBody,
-  requireFollowLatest: boolean,
-): string | null {
-  if (requireFollowLatest && typeof body.follow_latest !== "boolean") {
-    return "follow_latest must be a boolean";
-  }
-  if ("follow_latest" in body && typeof body.follow_latest !== "boolean") {
-    return "follow_latest must be a boolean";
-  }
+function validateFollowBody(body: FollowBody): string | null {
   if (
     body.folder_id !== undefined &&
     body.folder_id !== null &&
@@ -272,7 +263,7 @@ channelRoutes.put("/:id/follow", async (c) => {
   const userId = c.get("user").id;
   const channelId = Number(c.req.param("id"));
   const body = await readJson<FollowBody>(c);
-  const error = validateFollowBody(body, true);
+  const error = validateFollowBody(body);
   if (error) return c.json({ error }, 400);
   const channel = await first<ChannelRow>(
     c.env.DB.prepare("SELECT * FROM channel WHERE id = ?").bind(channelId),
@@ -300,22 +291,22 @@ channelRoutes.put("/:id/follow", async (c) => {
   const survivor = merged
     ? candidates.find((candidate) => candidate.id === merged.survivorId)!
     : null;
+  // Following a channel *is* subscribing to it: every follow polls.
   const wasEnabled = candidates.some((candidate) => Boolean(candidate.enabled));
   const folderId =
     body.folder_id !== undefined ? requestedFolderId : merged?.folderId ?? null;
   const windowDays =
     body.window_days ??
     merged?.windowDays ??
-    Number(c.env.SUBSCRIPTION_WINDOW_DAYS || "90");
+    defaultWindowDays(c.env);
   const intervalMinutes = body.interval_minutes ?? survivor?.interval_minutes ?? 60;
   const cutoff =
     body.window_days !== undefined || !merged
       ? minPublishedAt(windowDays)
       : merged.minPublishedAt;
-  const enabled = body.follow_latest ? 1 : 0;
   if (candidates.length) {
     await mergeFollowsIntoChannel(c.env, channel, candidates, {
-      enabled,
+      enabled: 1,
       folderId,
       windowDays,
       minPublishedAt: cutoff,
@@ -336,7 +327,7 @@ channelRoutes.put("/:id/follow", async (c) => {
       windowDays,
       cutoff,
       folderId,
-      enabled,
+      1,
     ).run();
   }
   let updated = await findUserFollow(c.env, userId, channelId);
@@ -354,7 +345,7 @@ channelRoutes.patch("/:id/follow", async (c) => {
   const userId = c.get("user").id;
   const channelId = Number(c.req.param("id"));
   const body = await readJson<FollowBody>(c);
-  const error = validateFollowBody(body, false);
+  const error = validateFollowBody(body);
   if (error) return c.json({ error }, 400);
   const channel = await first<ChannelRow>(
     c.env.DB.prepare("SELECT * FROM channel WHERE id = ?").bind(channelId),
@@ -371,10 +362,6 @@ channelRoutes.patch("/:id/follow", async (c) => {
 
   const sets: string[] = [];
   const binds: unknown[] = [];
-  if (body.follow_latest !== undefined) {
-    sets.push("enabled = ?");
-    binds.push(body.follow_latest ? 1 : 0);
-  }
   if ("folder_id" in body) {
     sets.push("folder_id = ?");
     binds.push(body.folder_id ?? null);
@@ -392,13 +379,8 @@ channelRoutes.patch("/:id/follow", async (c) => {
       `UPDATE subscription SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`,
     ).bind(...binds, follow.id, userId).run();
   }
-  let updated = await findUserFollow(c.env, userId, channelId);
+  const updated = await findUserFollow(c.env, userId, channelId);
   if (!updated) throw new Error("failed to read channel follow");
-  if (!follow.enabled && updated.enabled) {
-    await enqueueFollowPoll(c.env, updated.id);
-    updated = await findUserFollow(c.env, userId, channelId);
-    if (!updated) throw new Error("failed to refresh channel follow");
-  }
   return c.json(toChannelFollowRead(updated, channel));
 });
 
@@ -483,9 +465,6 @@ channelRoutes.post("/:id/poll", async (c) => {
   const channelId = Number(c.req.param("id"));
   const follow = await findUserFollow(c.env, userId, channelId);
   if (!follow) return c.json({ error: "channel follow not found" }, 404);
-  if (!follow.enabled) {
-    return c.json({ error: "follow_latest must be enabled to poll" }, 400);
-  }
   await enqueueFollowPoll(c.env, follow.id);
   return c.json({ ok: true });
 });

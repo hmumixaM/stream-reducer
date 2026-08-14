@@ -126,7 +126,7 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
         WHERE subscription.id = ?`,
     ).bind(subId),
   );
-  if (!sub || !sub.enabled) return 0;
+  if (!sub) return 0;
 
   const healedSub = await selfHealSubscriptionFeed(env, sub);
   const feed = await fetchSubscriptionFeed(
@@ -394,14 +394,14 @@ async function recordPollSuccess(
 }
 
 // Cron entrypoint: enqueue polls for every subscription whose interval elapsed.
+// Following a channel is what subscribes to it, so every follow is polled.
 export async function pollDueSubscriptions(env: Env): Promise<void> {
   const now = Date.now();
   const subs = await env.DB.prepare(
     `SELECT subscription.id, subscription.interval_minutes, subscription.last_checked_at
        FROM subscription
        LEFT JOIN channel ON channel.id = subscription.channel_id
-      WHERE subscription.enabled = 1
-        AND COALESCE(channel.feed_url, subscription.feed_url) IS NOT NULL`,
+      WHERE COALESCE(channel.feed_url, subscription.feed_url) IS NOT NULL`,
   ).all<{ id: number; interval_minutes: number; last_checked_at: string | null }>();
   for (const s of subs.results ?? []) {
     const last = s.last_checked_at ? new Date(s.last_checked_at).getTime() : 0;

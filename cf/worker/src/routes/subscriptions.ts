@@ -7,6 +7,7 @@ import { isoNow } from "../lib/crypto";
 import { recomputePriority } from "../lib/ingest";
 import { readJson } from "../lib/request";
 import {
+  defaultWindowDays,
   findUserFollow,
   findUnmigratedUserFollowsByIdentity,
   mergeFollowsIntoChannel,
@@ -56,7 +57,6 @@ function serialize(s: LegacySubscriptionRow) {
     feed_url: channel_feed_url ?? s.feed_url,
     title: s.title ?? channel_title ?? null,
     enabled: Boolean(s.enabled),
-    follow_latest: Boolean(s.enabled),
   };
 }
 
@@ -138,9 +138,9 @@ subscriptionRoutes.post("/", async (c) => {
     }));
   }
 
-  const windowDays = body.window_days ?? Number(c.env.SUBSCRIPTION_WINDOW_DAYS || "90");
-  // New channels only pull in videos published within the window (last 3 months
-  // by default), so subscribing doesn't backfill the entire archive.
+  const windowDays = body.window_days ?? defaultWindowDays(c.env);
+  // New channels only pull in videos published within the window (last two
+  // months by default), so subscribing doesn't backfill the entire archive.
   const minPublished = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
   await c.env.DB.prepare(
     `INSERT OR IGNORE INTO subscription
@@ -212,36 +212,13 @@ subscriptionRoutes.patch("/:id", async (c) => {
   return c.json(serialize(row!));
 });
 
-subscriptionRoutes.post("/:id/toggle", async (c) => {
-  const userId = c.get("user").id;
-  const id = Number(c.req.param("id"));
-  const before = await first<{ enabled: number }>(
-    c.env.DB.prepare("SELECT enabled FROM subscription WHERE id = ? AND user_id = ?").bind(id, userId),
-  );
-  if (!before) return c.json({ error: "subscription not found" }, 404);
-  await c.env.DB.prepare("UPDATE subscription SET enabled = 1 - enabled WHERE id = ? AND user_id = ?").bind(id, userId).run();
-  const row = await first<SubscriptionRow>(
-    c.env.DB.prepare("SELECT * FROM subscription WHERE id = ? AND user_id = ?").bind(id, userId),
-  );
-  if (!row) return c.json({ error: "subscription not found" }, 404);
-  if (!before.enabled && row.enabled) {
-    await c.env.PIPELINE.send({ kind: "poll", subscription_id: row.id });
-  }
-  return c.json(serialize(row));
-});
-
 subscriptionRoutes.post("/:id/poll", async (c) => {
   const userId = c.get("user").id;
   const id = Number(c.req.param("id"));
-  const row = await first<{ id: number; enabled: number }>(
-    c.env.DB.prepare(
-      "SELECT id, enabled FROM subscription WHERE id = ? AND user_id = ?",
-    ).bind(id, userId),
+  const row = await first<{ id: number }>(
+    c.env.DB.prepare("SELECT id FROM subscription WHERE id = ? AND user_id = ?").bind(id, userId),
   );
   if (!row) return c.json({ error: "subscription not found" }, 404);
-  if (!row.enabled) {
-    return c.json({ error: "follow_latest must be enabled to poll" }, 400);
-  }
   await c.env.DB.prepare("UPDATE subscription SET last_checked_at = ? WHERE id = ?").bind(isoNow(), id).run();
   await c.env.PIPELINE.send({ kind: "poll", subscription_id: id });
   return c.json({ ok: true });

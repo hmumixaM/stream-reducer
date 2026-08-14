@@ -242,7 +242,7 @@ export function ChannelDetail() {
           <div className="mt-5 border-t border-border pt-4">
             <ChannelFollowControls
               settingsOpen
-              showToggle={false}
+              showFollowButton={false}
               channelId={channelId}
               follow={follow}
               groups={groups.data ?? []}

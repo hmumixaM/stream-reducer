@@ -21,7 +21,7 @@ vi.mock("../auth", () => ({
 import { channelRoutes } from "./channels";
 import { subscriptionRoutes } from "./subscriptions";
 
-function fakeEnv(firstResult: unknown = null) {
+function fakeEnv(firstResult: unknown | ((sql: string) => unknown) = null) {
   const queries: { sql: string; bindings: unknown[] }[] = [];
   const sends: unknown[] = [];
   const env = {
@@ -35,7 +35,9 @@ function fakeEnv(firstResult: unknown = null) {
             return statement;
           },
           async first() {
-            return firstResult;
+            return typeof firstResult === "function"
+              ? (firstResult as (sql: string) => unknown)(sql)
+              : firstResult;
           },
           async all() {
             return { results: [] };
@@ -126,10 +128,10 @@ describe("channel route safeguards", () => {
     expect(itemQuery.sql).toContain("i.status != 'excluded'");
   });
 
-  it("rejects legacy manual polls when follow-latest is disabled", async () => {
+  it("polls a follow on demand, with no separate auto-update flag to check", async () => {
     const app = new Hono<AppContext>();
     app.route("/subscriptions", subscriptionRoutes);
-    const { env, queries, sends } = fakeEnv({ id: 11, enabled: 0 });
+    const { env, sends } = fakeEnv({ id: 11 });
 
     const response = await app.request(
       "/subscriptions/11/poll",
@@ -137,8 +139,39 @@ describe("channel route safeguards", () => {
       env,
     );
 
-    expect(response.status).toBe(400);
-    expect(queries[0].sql).toContain("SELECT id, enabled");
-    expect(sends).toEqual([]);
+    expect(response.status).toBe(200);
+    expect(sends).toEqual([{ kind: "poll", subscription_id: 11 }]);
+  });
+
+  it("makes every new follow poll, backfilling the default window", async () => {
+    const app = new Hono<AppContext>();
+    app.route("/channels", channelRoutes);
+    let followReads = 0;
+    const { env, queries, sends } = fakeEnv((sql: string) => {
+      if (sql.includes("FROM channel WHERE id")) {
+        return { id: 1, platform: "youtube", feed_url: "https://feed", channel_key: "UC1" };
+      }
+      if (sql.includes("FROM subscription")) {
+        // The route reads the follow before creating it, then again after.
+        return followReads++ === 0 ? null : { id: 42, enabled: 1, channel_id: 1 };
+      }
+      return null;
+    });
+
+    const response = await app.request(
+      "/channels/1/follow",
+      {
+        method: "PUT",
+        body: "{}",
+        headers: { "content-type": "application/json" },
+      },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    const insert = queries.find((query) => query.sql.includes("INSERT OR IGNORE INTO subscription"))!;
+    expect(insert.bindings.at(-1)).toBe(1);
+    expect(insert.bindings).toContain(60);
+    expect(sends).toEqual([{ kind: "poll", subscription_id: 42 }]);
   });
 });

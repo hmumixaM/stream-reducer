@@ -4,22 +4,18 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import {
-  Check,
-  MoreHorizontal,
-  Plus,
-  RefreshCw,
-  Trash2,
-  Zap,
-} from "lucide-react";
+import { Check, MoreHorizontal, Plus, RefreshCw, Trash2 } from "lucide-react";
 import {
   api,
   type ChannelFollowRead,
   type Group,
 } from "@/lib/api";
-import { Button, Input, Select, Spinner, Switch } from "@/components/ui";
+import { Button, Input, Select, Spinner } from "@/components/ui";
 import { Menu, MenuRow } from "@/components/shell";
 import { timeAgo } from "@/lib/utils";
+
+/** Mirrors the worker's SUBSCRIPTION_WINDOW_DAYS: how far a new follow backfills. */
+export const DEFAULT_WINDOW_DAYS = 60;
 
 export function invalidateChannelQueries(queryClient: QueryClient, channelId: number) {
   queryClient.invalidateQueries({ queryKey: ["channels", "catalog"] });
@@ -31,17 +27,19 @@ export function invalidateChannelQueries(queryClient: QueryClient, channelId: nu
 }
 
 /**
- * Follow state for one channel: the follow/unfollow buttons plus an optional
- * settings panel. The panel is *controlled* — the compact tile never opens it,
- * while `ChannelRow` and the detail page expand it on demand — so a grid of
- * channels is no longer padded out by three always-visible form fields.
+ * Follow state for one channel: the follow/unfollow button plus an optional
+ * settings panel. Following a channel subscribes to it — new episodes are
+ * pulled in automatically — so there is one action, not a follow plus a
+ * separate auto-update switch. The panel is *controlled* — the compact tile
+ * never opens it, while `ChannelRow` and the detail page expand it on demand —
+ * so a grid of channels is no longer padded out by three form fields.
  */
 export function ChannelFollowControls({
   channelId,
   follow,
   groups,
   settingsOpen = false,
-  showToggle = true,
+  showFollowButton = true,
   compact = false,
   onFollowChanged,
 }: {
@@ -49,24 +47,22 @@ export function ChannelFollowControls({
   follow: ChannelFollowRead | null;
   groups: Group[];
   settingsOpen?: boolean;
-  /** False when the toggle is rendered elsewhere and this instance is settings-only. */
-  showToggle?: boolean;
+  /** False when the button is rendered elsewhere and this instance is settings-only. */
+  showFollowButton?: boolean;
   /** Tile mode: a single primary action plus an overflow menu, no inline forms. */
   compact?: boolean;
   onFollowChanged?: (follow: ChannelFollowRead | null) => void;
 }) {
   const queryClient = useQueryClient();
   const instanceId = useId();
-  const latestSettingsId = `${instanceId}-latest-settings`;
   const intervalHelpId = `${instanceId}-interval-help`;
-  const [showLatestSetup, setShowLatestSetup] = useState(false);
   const [folderId, setFolderId] = useState("");
-  const [windowDays, setWindowDays] = useState("90");
+  const [windowDays, setWindowDays] = useState(String(DEFAULT_WINDOW_DAYS));
   const [intervalMinutes, setIntervalMinutes] = useState("60");
 
   useEffect(() => {
     setFolderId(follow?.folder_id != null ? String(follow.folder_id) : "");
-    setWindowDays(String(follow?.window_days ?? 90));
+    setWindowDays(String(follow?.window_days ?? DEFAULT_WINDOW_DAYS));
     setIntervalMinutes(String(follow?.interval_minutes ?? 60));
   }, [follow]);
 
@@ -76,22 +72,8 @@ export function ChannelFollowControls({
   };
 
   const followChannel = useMutation({
-    mutationFn: (followLatest: boolean) =>
-      api.followChannel(
-        channelId,
-        followLatest
-          ? {
-              follow_latest: true,
-              folder_id: folderId ? Number(folderId) : null,
-              window_days: Number(windowDays),
-              interval_minutes: Number(intervalMinutes),
-            }
-          : { follow_latest: false },
-      ),
-    onSuccess: (next) => {
-      setShowLatestSetup(false);
-      refresh(next);
-    },
+    mutationFn: () => api.followChannel(channelId, {}),
+    onSuccess: refresh,
   });
   const update = useMutation({
     mutationFn: (payload: Parameters<typeof api.updateChannelFollow>[1]) =>
@@ -123,83 +105,20 @@ export function ChannelFollowControls({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
-            variant={compact ? "default" : "outline"}
             disabled={pending}
             aria-busy={followChannel.isPending}
-            onClick={() => followChannel.mutate(false)}
+            onClick={() => followChannel.mutate()}
           >
             {followChannel.isPending ? <Spinner /> : <Plus className="h-4 w-4" />}
             Follow
           </Button>
-          {compact ? (
-            <Menu
-              label="More follow options"
-              trigger={({ toggle }) => (
-                <Button size="icon" variant="outline" title="More options" onClick={toggle}>
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              )}
-            >
-              {({ close }) => (
-                <MenuRow
-                  onClick={() => {
-                    followChannel.mutate(true);
-                    close();
-                  }}
-                >
-                  <Zap className="h-4 w-4 text-primary" />
-                  Follow latest…
-                </MenuRow>
-              )}
-            </Menu>
-          ) : (
-            <Button
-              size="sm"
-              disabled={pending}
-              aria-expanded={showLatestSetup}
-              aria-controls={latestSettingsId}
-              onClick={() => setShowLatestSetup((open) => !open)}
-            >
-              Follow latest
-            </Button>
+          {!compact && (
+            <span className="text-xs text-muted-foreground">
+              New episodes from the last {DEFAULT_WINDOW_DAYS} days are summarised
+              automatically.
+            </span>
           )}
         </div>
-        {!compact && showLatestSetup && (
-          <form
-            id={latestSettingsId}
-            className="rounded-md border border-border bg-card-muted p-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              followChannel.mutate(true);
-            }}
-          >
-            <FollowSettings
-              intervalHelpId={intervalHelpId}
-              groups={groups}
-              folderId={folderId}
-              windowDays={windowDays}
-              intervalMinutes={intervalMinutes}
-              onFolderChange={setFolderId}
-              onWindowChange={setWindowDays}
-              onIntervalChange={setIntervalMinutes}
-            />
-            <Button
-              className="mt-3"
-              size="sm"
-              type="submit"
-              disabled={pending}
-              aria-busy={followChannel.isPending}
-            >
-              {followChannel.isPending ? (
-                <>
-                  <Spinner /> Following latest…
-                </>
-              ) : (
-                "Confirm follow latest"
-              )}
-            </Button>
-          </form>
-        )}
         {mutationError && <MutationError error={mutationError} />}
       </div>
     );
@@ -223,28 +142,15 @@ export function ChannelFollowControls({
           )}
         >
           {({ close }) => (
-            <>
-              <MenuRow
-                onClick={() => {
-                  update.mutate({ follow_latest: !follow.follow_latest });
-                  close();
-                }}
-              >
-                <Zap
-                  className={follow.follow_latest ? "h-4 w-4 text-primary" : "h-4 w-4 text-muted-foreground"}
-                />
-                {follow.follow_latest ? "Stop auto-updates" : "Follow latest…"}
-              </MenuRow>
-              <MenuRow
-                onClick={() => {
-                  close();
-                  confirmUnfollow();
-                }}
-              >
-                <Trash2 className="h-4 w-4 text-danger" />
-                Unfollow
-              </MenuRow>
-            </>
+            <MenuRow
+              onClick={() => {
+                close();
+                confirmUnfollow();
+              }}
+            >
+              <Trash2 className="h-4 w-4 text-danger" />
+              Unfollow
+            </MenuRow>
           )}
         </Menu>
         {mutationError && <MutationError error={mutationError} />}
@@ -254,20 +160,10 @@ export function ChannelFollowControls({
 
   return (
     <div className="space-y-3" onClick={(event) => event.stopPropagation()}>
-      {showToggle && (
-        <div className="flex flex-wrap items-center gap-3">
-          <Switch
-            checked={follow.follow_latest}
-            disabled={pending}
-            label="Follow latest"
-            onCheckedChange={(checked) => update.mutate({ follow_latest: checked })}
-          />
-          {!follow.follow_latest && (
-            <span className="text-xs text-muted-foreground">
-              Following without automatic updates
-            </span>
-          )}
-        </div>
+      {showFollowButton && (
+        <Button size="sm" variant="outline" disabled={pending} onClick={confirmUnfollow}>
+          <Check className="h-4 w-4" /> Following
+        </Button>
       )}
 
       {settingsOpen && (
@@ -283,7 +179,7 @@ export function ChannelFollowControls({
               });
             }}
           >
-            <fieldset disabled={!follow.follow_latest || pending}>
+            <fieldset disabled={pending}>
               <FollowSettings
                 intervalHelpId={intervalHelpId}
                 groups={groups}
@@ -310,18 +206,12 @@ export function ChannelFollowControls({
                 )}
               </Button>
             </fieldset>
-            {!follow.follow_latest && (
-              <p className="text-xs text-muted-foreground">
-                Folder, backfill window, and polling interval apply only when automatic
-                updates are enabled.
-              </p>
-            )}
           </form>
           <div className="flex flex-wrap gap-2 border-t border-border pt-3">
             <Button
               size="sm"
               variant="outline"
-              disabled={!follow.follow_latest || pending}
+              disabled={pending}
               aria-busy={poll.isPending}
               onClick={() => poll.mutate()}
             >
@@ -341,13 +231,6 @@ export function ChannelFollowControls({
 
 /** Compact status pill summarising the last poll of a follow. */
 export function FollowStatusChip({ follow }: { follow: ChannelFollowRead }) {
-  if (!follow.follow_latest) {
-    return (
-      <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-        paused
-      </span>
-    );
-  }
   const tone =
     follow.last_status === "error"
       ? "bg-danger/15 text-danger"

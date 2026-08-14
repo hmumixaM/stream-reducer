@@ -8,7 +8,7 @@ import {
 import { Compass, Link2, Rss, Search } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { ChannelCard } from "@/components/ChannelCard";
-import { ChannelRow, LegacyFollowRow } from "@/components/ChannelRow";
+import { ChannelRow } from "@/components/ChannelRow";
 import { ChannelTile } from "@/components/ChannelTile";
 import { Button, Card, Input, Select, Spinner } from "@/components/ui";
 import {
@@ -308,11 +308,9 @@ function AddChannelDialog({
   );
 }
 
-type FollowFilter = "all" | "auto" | "paused" | "errors";
+type FollowFilter = "all" | "errors";
 const FOLLOW_FILTER_LABELS: Record<FollowFilter, string> = {
   all: "All",
-  auto: "Auto-updating",
-  paused: "Paused",
   errors: "Errors",
 };
 
@@ -337,51 +335,29 @@ function FollowingChannels({
       lastPage.length === PAGE_SIZE ? pages.length * PAGE_SIZE : undefined,
     refetchInterval,
   });
-  const legacySubscriptions = useQuery({
-    queryKey: ["subs"],
-    queryFn: api.listSubscriptions,
-    refetchInterval,
-  });
   const rows = channels.data?.pages.flat() ?? [];
-  const legacyRows = (legacySubscriptions.data ?? []).filter(
-    (subscription) => subscription.channel_id == null,
-  );
 
   const counts = useMemo(
     () => ({
-      all: rows.length + legacyRows.length,
-      auto: rows.filter((channel) => channel.follow?.follow_latest).length,
-      paused: rows.filter((channel) => channel.follow && !channel.follow.follow_latest).length,
+      all: rows.length,
       errors: rows.filter((channel) => channel.follow?.last_status === "error").length,
     }),
-    [rows, legacyRows.length],
+    [rows],
   );
   const search = query.trim().toLowerCase();
   const visible = rows.filter((channel) => {
-    const follow = channel.follow;
-    if (filter === "auto" && !follow?.follow_latest) return false;
-    if (filter === "paused" && (!follow || follow.follow_latest)) return false;
-    if (filter === "errors" && follow?.last_status !== "error") return false;
+    if (filter === "errors" && channel.follow?.last_status !== "error") return false;
     if (!search) return true;
     return (channel.title || channel.feed_url).toLowerCase().includes(search);
-  });
-  const visibleLegacy = legacyRows.filter((subscription) => {
-    if (filter === "auto" || filter === "errors" || filter === "paused") return false;
-    if (!search) return true;
-    return (subscription.title || subscription.feed_url).toLowerCase().includes(search);
   });
 
   const trackPoll = (pending: boolean) =>
     setPolling((count) => Math.max(0, count + (pending ? 1 : -1)));
 
-  if (channels.isLoading || legacySubscriptions.isLoading) {
+  if (channels.isLoading) {
     return <LoadingState label="Loading followed channels…" />;
   }
-  if (
-    !channels.isError &&
-    !legacySubscriptions.isError &&
-    counts.all === 0
-  ) {
+  if (!channels.isError && counts.all === 0) {
     return (
       <EmptyState
         icon={<Rss className="h-5 w-5" />}
@@ -400,8 +376,7 @@ function FollowingChannels({
     <div className="space-y-4">
       <Toolbar className="mb-0">
         <p className="px-1 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">{counts.all}</span> following ·{" "}
-          {counts.auto} auto-updating
+          <span className="font-medium text-foreground">{counts.all}</span> following
           {counts.errors > 0 && (
             <>
               {" · "}
@@ -439,14 +414,7 @@ function FollowingChannels({
           onRetry={() => channels.refetch()}
         />
       )}
-      {legacySubscriptions.isError && (
-        <ErrorState
-          message={`Legacy follows could not be loaded: ${legacySubscriptions.error.message}`}
-          onRetry={() => legacySubscriptions.refetch()}
-        />
-      )}
-
-      {visible.length === 0 && visibleLegacy.length === 0 ? (
+      {visible.length === 0 ? (
         <EmptyState
           title="No follows match this view"
           description="Clear the filter or search to see the rest of your channels."
@@ -459,13 +427,6 @@ function FollowingChannels({
               channel={channel}
               groups={groups}
               onPoll={trackPoll}
-            />
-          ))}
-          {visibleLegacy.map((subscription) => (
-            <LegacyFollowRow
-              key={`legacy-${subscription.id}`}
-              subscription={subscription}
-              groups={groups}
             />
           ))}
         </div>

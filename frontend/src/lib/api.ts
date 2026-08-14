@@ -265,7 +265,6 @@ export interface Subscription {
   window_days: number;
   min_published_at?: string | null;
   enabled: boolean;
-  follow_latest?: boolean;
   last_checked_at?: string | null;
   last_seen_guid?: string | null;
   last_status?: "ok" | "empty" | "error" | null;
@@ -292,7 +291,6 @@ export interface ChannelFollowRead {
   title?: string | null;
   platform: Platform;
   feed_url: string;
-  follow_latest: boolean;
   folder_id: number | null;
   interval_minutes: number;
   window_days: number;
@@ -362,7 +360,6 @@ export interface ListChannelsParams {
 }
 
 export interface ChannelFollowInput {
-  follow_latest: boolean;
   folder_id?: number | null;
   window_days?: number;
   interval_minutes?: number;

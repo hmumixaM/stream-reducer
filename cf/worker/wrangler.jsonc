@@ -175,7 +175,8 @@
     "LLM_MODEL_INFOGRAPHIC": "gemini-3-pro-image-preview",
     "STT_MODEL": "openai/whisper-large-v3-turbo",
     "EMBEDDING_DIM": "1024",
-    "SUBSCRIPTION_WINDOW_DAYS": "90",
+    // How far back a new follow backfills on its first poll.
+    "SUBSCRIPTION_WINDOW_DAYS": "60",
     // Shortest video a subscription poll will pick up on its own: below this a
     // channel's clips and teasers aren't worth a transcribe. Adding a URL by
     // hand ignores this floor — an explicit request is always honoured.

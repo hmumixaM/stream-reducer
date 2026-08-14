@@ -63,7 +63,7 @@ function subscription(overrides: Partial<PollTestRow> = {}): PollTestRow {
   };
 }
 
-function fakeEnv(row: ReturnType<typeof subscription>) {
+function fakeEnv(row: ReturnType<typeof subscription> | null) {
   const queries: RecordedQuery[] = [];
   const sends: unknown[] = [];
   const DB = {
@@ -193,8 +193,8 @@ describe("subscription channel polling", () => {
     ).toBe(true);
   });
 
-  it("does not poll a disabled follow", async () => {
-    const { env } = fakeEnv(subscription({ enabled: 0 }));
+  it("does nothing when the follow is gone", async () => {
+    const { env } = fakeEnv(null);
 
     await expect(pollSubscription(env, 7)).resolves.toBe(0);
 
@@ -272,14 +272,14 @@ describe("subscription channel polling", () => {
     expect(mocks.addUrlToLibrary).toHaveBeenCalledTimes(1);
   });
 
-  it("selects only enabled follows while retaining the migration fallback", async () => {
+  it("polls every follow that has a feed, retaining the migration fallback", async () => {
     const { env, queries } = fakeEnv(subscription());
 
     await pollDueSubscriptions(env);
 
     const dueQuery = queries[0].sql;
     expect(dueQuery).toContain("LEFT JOIN channel");
-    expect(dueQuery).toContain("subscription.enabled = 1");
+    expect(dueQuery).not.toContain("enabled");
     expect(dueQuery).toContain("COALESCE(channel.feed_url, subscription.feed_url)");
   });
 });
