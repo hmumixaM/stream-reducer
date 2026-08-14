@@ -164,14 +164,19 @@
   "vars": {
     "APP_ORIGIN": "https://reducer.xgoose.org",
     "EMAIL_FROM": "noreply@xgoose.org",
+    // A Gemini web reverse proxy, not the Gemini API: it serves a fixed menu of
+    // names and silently answers with its own default for anything else, so a
+    // typo or a model it never heard of looks like success. Check the menu with
+    // `GET /api/admin/llm-check` before changing either model below.
     "LLM_BASE_URL": "https://xgoose-gemini-proxy-1.max-678.workers.dev/v1",
     "LLM_MODEL": "gemini-3.5-flash",
     // Backup summarize model on the SAME proxy. When set, a summarize LLM call
     // that times out, errors, or returns empty/diagnostic content is retried once
-    // against this stable model. This must stay enabled: the primary proxy has
+    // against this model. This must stay enabled: the primary proxy has
     // historically returned HTTP 200 with "Upstream Gemini returned an empty
-    // response", which was previously persisted as 171 episode bodies.
-    "LLM_MODEL_FALLBACK": "gemini-2.5-flash",
+    // response", which was previously persisted as 171 episode bodies. It has to
+    // be a name the proxy actually knows, or the retry repeats the primary.
+    "LLM_MODEL_FALLBACK": "gemini-3.5-flash-thinking-lite",
     "LLM_MODEL_INFOGRAPHIC": "gemini-3-pro-image-preview",
     "STT_MODEL": "openai/whisper-large-v3-turbo",
     "EMBEDDING_DIM": "1024",

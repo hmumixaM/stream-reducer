@@ -17,7 +17,16 @@ function effective(c: Parameters<typeof requireAdmin>[0]) {
     llm_model_default: env.LLM_MODEL,
     stt_model_default: env.STT_MODEL,
     summary_map_model_default: env.LLM_MODEL,
-    llm_model_options: ["gemini-3.5-flash", "gemini-2.5-flash"],
+    // The names the summary endpoint really serves; anything else is silently
+    // answered by its default. `GET /api/admin/llm-check` re-reads the live menu.
+    llm_model_options: [
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-thinking",
+      "gemini-3.5-flash-thinking-lite",
+      "gemini-flash-lite",
+      "gemini-3.1-pro",
+      "gemini-auto",
+    ],
     stt_model_options: ["openai/whisper-large-v3-turbo", "google/chirp-3", "openai/gpt-4o-transcribe"],
     transcribe_chunk_seconds: 300,
     transcribe_rate_limit: 20,

@@ -197,3 +197,10 @@ metadata prefetch failed) are repaired with the routes in
 Gemini release raises: it lists the models `LLM_BASE_URL` serves next to the ones
 `vars` currently pin, and `?model=gemini-3.7-flash` asks that model to reply, so a
 switch can be verified before it is deployed.
+
+Run it before touching `LLM_MODEL`. The endpoint is a Gemini **web** reverse proxy
+rather than the Gemini API: it maps a fixed list of names onto the web app's model
+picker and quietly serves its own default for anything unknown, so an unsupported
+model (a new release, a typo) answers normally while running something else
+entirely. Names outside that list — including anything from Google's API catalogue
+like `gemini-3.7-flash` — are therefore not usable here, whatever the var says.
