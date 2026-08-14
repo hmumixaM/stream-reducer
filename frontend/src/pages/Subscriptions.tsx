@@ -71,7 +71,7 @@ export function Subscriptions() {
     <div>
       <PageHeader
         title="Channels"
-        subtitle="Discover known channels, follow the ones you care about, and optionally receive new items automatically."
+        subtitle="Discover known channels and follow the ones you care about — new episodes arrive summarised."
       />
 
       <nav className="mb-6 flex border-b border-border" aria-label="Channel views">
