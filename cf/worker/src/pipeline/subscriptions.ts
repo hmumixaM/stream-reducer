@@ -306,17 +306,30 @@ async function selectPollBatch(
   const batch: FeedEntry[] = [];
   let lookups = 0;
   let leftover = false;
+  let unresolved = false;
   for (const entry of undated ? inWindow : inWindow.slice().reverse()) {
     let facts: EntryFacts = {
       durationS: entry.duration_s ?? null,
       published: entry.published ?? null,
     };
-    if ((facts.durationS == null || facts.published == null) && lookups < MAX_SOURCE_LOOKUPS) {
+    const looked = (facts.durationS == null || facts.published == null)
+      && lookups < MAX_SOURCE_LOOKUPS;
+    if (looked) {
       lookups++;
       const { url, platform } = entryUrl(entry);
       facts = await entryFacts(env, entry, platform, url);
     }
-    if (undated && minPublished && facts.published && facts.published < minPublished) break;
+    if (undated) {
+      // Nothing to go on: the entry can be neither windowed nor measured. A
+      // failed lookup (the container is busy) is worth another poll, an
+      // exhausted budget is not.
+      if (looked && facts.published == null) {
+        unresolved = true;
+        break;
+      }
+      if (!looked && facts.published == null) break;
+      if (minPublished && facts.published && facts.published < minPublished) break;
+    }
     if (facts.durationS != null && facts.durationS < minDuration) continue;
     if (batch.length === MAX_NEW_PER_POLL) {
       leftover = true;
@@ -328,9 +341,14 @@ async function selectPollBatch(
   // An undated feed has had everything the window could contain considered, so
   // the cursor jumps to the newest entry and later polls only see fresh uploads
   // (a channel that published more than one batch since the follow started
-  // keeps the newest of them). A dated feed with survivors left over resumes
-  // from the newest entry enqueued.
-  if (undated) return { entries: batch.reverse(), nextSeenGuid: entries[0]?.guid ?? null };
+  // keeps the newest of them). A null cursor leaves the follow where it was, so
+  // entries the source refused to describe are reconsidered next time.
+  if (undated) {
+    return {
+      entries: batch.reverse(),
+      nextSeenGuid: unresolved ? null : entries[0]?.guid ?? null,
+    };
+  }
   const nextSeenGuid = leftover
     ? batch[batch.length - 1]?.guid ?? null
     : entries[0]?.guid ?? null;

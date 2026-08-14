@@ -241,9 +241,10 @@ describe("subscription channel polling", () => {
         },
       ],
     });
-    mocks.fetchMetadata.mockImplementation(async (_env: unknown, url: string) =>
-      url.endsWith("BV1clip") ? { duration_s: 47 } : { duration_s: 1800 },
-    );
+    mocks.fetchMetadata.mockImplementation(async (_env: unknown, url: string) => ({
+      duration_s: url.endsWith("BV1clip") ? 47 : 1800,
+      published_at: "2026-08-01T00:00:00.000Z",
+    }));
 
     await expect(pollSubscription(env, 7)).resolves.toBe(1);
 
@@ -285,7 +286,32 @@ describe("subscription channel polling", () => {
     expect(successUpdate?.bindings[1]).toBe("BVnew");
   });
 
-  it("keeps an entry whose duration cannot be resolved", async () => {
+  it("leaves the cursor alone when an undated entry cannot be resolved", async () => {
+    const { env, queries } = fakeEnv(subscription({
+      platform: "bilibili",
+      min_published_at: "2026-06-15T00:00:00.000Z",
+    }));
+    mocks.fetchFeed.mockResolvedValue({
+      title: "UP creator",
+      entries: [{
+        title: null,
+        link: "https://www.bilibili.com/video/BVmystery",
+        guid: "BVmystery",
+        published: null,
+        audio: null,
+        duration_s: null,
+      }],
+    });
+    mocks.fetchMetadata.mockRejectedValue(new Error("container 503"));
+
+    await expect(pollSubscription(env, 7)).resolves.toBe(0);
+
+    expect(mocks.addUrlToLibrary).not.toHaveBeenCalled();
+    const successUpdate = queries.find((query) => query.sql.includes("last_seen_guid = COALESCE"));
+    expect(successUpdate?.bindings[1]).toBeNull();
+  });
+
+  it("keeps a dated entry whose duration cannot be resolved", async () => {
     const { env } = fakeEnv(subscription({ platform: "bilibili" }));
     mocks.fetchFeed.mockResolvedValue({
       title: "UP creator",
@@ -293,7 +319,7 @@ describe("subscription channel polling", () => {
         title: null,
         link: "https://www.bilibili.com/video/BV1unknown",
         guid: "BV1unknown",
-        published: null,
+        published: "2026-08-01T00:00:00.000Z",
         audio: null,
         duration_s: null,
       }],
