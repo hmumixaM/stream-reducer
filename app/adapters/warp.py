@@ -34,6 +34,10 @@ _TRACE_URL = os.environ.get("WARP_TRACE_URL", "https://www.cloudflare.com/cdn-cg
 # are killed when the container exits.
 _processes: list[subprocess.Popen] = []
 
+# Exit IP each spawned proxy landed on, so a failure can say which addresses it
+# was actually refused from.
+exit_ips: dict[str, str] = {}
+
 
 def warp_tooling_available() -> bool:
     return bool(shutil.which("wgcf") and shutil.which("wireproxy"))
@@ -82,6 +86,7 @@ def spawn_fresh_warp(timeout: int = 25) -> str | None:
     # Log the exit IP: it's the whole point of the rotation, and it's what tells
     # you afterwards whether a retry ran from a different address at all.
     logger.info("fresh WARP egress ready: %s (exit ip %s)", proxy, exit_ip)
+    exit_ips[proxy] = exit_ip
     return proxy
 
 

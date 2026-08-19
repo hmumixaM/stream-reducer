@@ -14,6 +14,7 @@ from pathlib import Path
 import httpx
 from yt_dlp import YoutubeDL
 
+from app.adapters import warp
 from app.adapters.base import Adapter, ContentMeta, NativeTranscript
 from app.adapters.subtitles import parse_json3, parse_vtt
 from app.adapters.warp import spawn_fresh_warp
@@ -85,6 +86,15 @@ def _proxy_candidates() -> list[str | None]:
             continue
         out.append(None if p.lower() == "direct" else p)
     return out or [None]
+
+
+def _egress_label(proxy: str | None) -> str:
+    """How an attempt's egress is named in a failure message, with the WARP exit
+    IP when we know it."""
+    if proxy is None:
+        return "direct"
+    ip = warp.exit_ips.get(proxy)
+    return f"{proxy} ({ip})" if ip else proxy
 
 
 def _is_risk_control(exc: Exception) -> bool:
@@ -558,11 +568,13 @@ class YtDlpAdapter(Adapter):
         fresh_allowance = int(os.environ.get("WARP_ROTATE_ATTEMPTS", "2"))
         last_exc: Exception | None = None
         last_log = ""
+        trail: list[str] = []
         index = 0
         while index < len(candidates):
             proxy = candidates[index]
             index += 1
             self._active_proxy = proxy
+            trail.append(_egress_label(proxy))
             logbuf = _CaptureLogger()
             try:
                 return self._download_audio_once(url, dest_dir, outtmpl, logbuf, on_progress)
@@ -584,11 +596,11 @@ class YtDlpAdapter(Adapter):
                 )
                 if more:
                     continue
-                raise RuntimeError(self._download_error(exc, last_log)) from exc
+                raise RuntimeError(self._download_error(exc, last_log, trail)) from exc
         assert last_exc is not None
-        raise RuntimeError(self._download_error(last_exc, last_log)) from last_exc
+        raise RuntimeError(self._download_error(last_exc, last_log, trail)) from last_exc
 
-    def _download_error(self, exc: Exception, log_text: str) -> str:
+    def _download_error(self, exc: Exception, log_text: str, trail: list[str] | None = None) -> str:
         """Build a human-readable failure reason from yt-dlp's captured log
         (last few lines) + the exception, prefixing an IP-block hint when the
         cause looks like a bot wall / 403 / 412."""
@@ -600,7 +612,10 @@ class YtDlpAdapter(Adapter):
         if "no supported javascript runtime" in detail.lower():
             return f"no JS runtime for yt-dlp (install deno in the image): {detail}"
         if _looks_ip_blocked(detail) or _is_risk_control(exc):
-            return f"IP-block — set YT_DLP_PROXY / rotate WARP: {detail}"
+            # Name the egress each attempt used: an IP-shaped failure is only
+            # actionable if you can see which addresses were refused.
+            via = f" [egress: {' -> '.join(trail)}]" if trail else ""
+            return f"IP-block{via}: {detail}"
         return detail
 
     def _download_audio_once(

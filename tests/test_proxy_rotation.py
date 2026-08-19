@@ -104,8 +104,13 @@ def test_map_progress():
 
 def test_download_error_ip_block_hint():
     adapter = YouTubeAdapter()
-    msg = adapter._download_error(RuntimeError("x"), "ERROR: Sign in to confirm you're not a bot")
-    assert "YT_DLP_PROXY" in msg
+    msg = adapter._download_error(
+        RuntimeError("x"), "ERROR: Sign in to confirm you're not a bot",
+        ["socks5://127.0.0.1:41000 (8.8.8.8)", "direct"],
+    )
+    assert msg.startswith("IP-block")
+    # The egress trail is what makes an IP failure actionable.
+    assert "8.8.8.8" in msg and "direct" in msg
 
 
 def test_download_audio_registers_fresh_warp_when_egress_exhausted(monkeypatch, tmp_path):
@@ -164,8 +169,8 @@ def test_download_error_names_missing_js_runtime():
     )
     msg = adapter._download_error(RuntimeError("403"), log)
     assert "no JS runtime" in msg
-    # The 403 is a symptom here, so don't send the reader chasing WARP/proxies.
-    assert "YT_DLP_PROXY" not in msg
+    # The 403 is a symptom here, so don't blame the egress.
+    assert "IP-block" not in msg
 
 
 def test_download_audio_once_uses_audio_only_format(monkeypatch, tmp_path):
