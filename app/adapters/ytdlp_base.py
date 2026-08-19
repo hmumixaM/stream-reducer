@@ -16,6 +16,7 @@ from yt_dlp import YoutubeDL
 
 from app.adapters.base import Adapter, ContentMeta, NativeTranscript
 from app.adapters.subtitles import parse_json3, parse_vtt
+from app.adapters.warp import spawn_fresh_warp
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -549,9 +550,18 @@ class YtDlpAdapter(Adapter):
         # doesn't fail the whole download. The proxy also flows into _ydl_opts
         # for the metadata/native calls earlier in the job (first candidate).
         candidates = _proxy_candidates()
+        # The container's WARP proxies keep the same exit IPs for its whole life,
+        # so once YouTube has refused them (media URLs are bound to the
+        # requesting IP) the only remaining move is a brand-new WARP identity.
+        # Registering one is slow, so it happens lazily: only after the
+        # configured egress is exhausted and only for IP/egress-shaped failures.
+        fresh_allowance = int(os.environ.get("WARP_ROTATE_ATTEMPTS", "2"))
         last_exc: Exception | None = None
         last_log = ""
-        for index, proxy in enumerate(candidates):
+        index = 0
+        while index < len(candidates):
+            proxy = candidates[index]
+            index += 1
             self._active_proxy = proxy
             logbuf = _CaptureLogger()
             try:
@@ -559,7 +569,12 @@ class YtDlpAdapter(Adapter):
             except Exception as exc:  # noqa: BLE001 — rotate, then raise a rich error
                 last_exc = exc
                 last_log = logbuf.text()
-                more = index + 1 < len(candidates)
+                if index >= len(candidates) and fresh_allowance and _should_rotate_egress(exc):
+                    fresh_allowance -= 1
+                    fresh = spawn_fresh_warp()
+                    if fresh:
+                        candidates.append(fresh)
+                more = index < len(candidates)
                 logger.warning(
                     "download_audio via proxy=%s failed (%s%s)%s",
                     proxy or "direct",

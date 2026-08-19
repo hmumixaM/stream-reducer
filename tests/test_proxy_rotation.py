@@ -108,6 +108,47 @@ def test_download_error_ip_block_hint():
     assert "YT_DLP_PROXY" in msg
 
 
+def test_download_audio_registers_fresh_warp_when_egress_exhausted(monkeypatch, tmp_path):
+    monkeypatch.setenv("PROXY_URLS", "socks5://127.0.0.1:40000,direct")
+    monkeypatch.setenv("WARP_ROTATE_ATTEMPTS", "2")
+    adapter = YouTubeAdapter()
+    used: list[object] = []
+    monkeypatch.setattr(ytdlp_base, "spawn_fresh_warp", lambda: "socks5://127.0.0.1:41000")
+
+    def fake_once(url: str, dest_dir: Path, outtmpl: str, logbuf=None, on_progress=None) -> Path:
+        used.append(adapter._active_proxy)
+        if adapter._active_proxy != "socks5://127.0.0.1:41000":
+            raise RuntimeError("unable to download video data: HTTP Error 403: Forbidden")
+        out = dest_dir / "ok.m4a"
+        out.write_text("audio")
+        return out
+
+    monkeypatch.setattr(adapter, "_download_audio_once", fake_once)
+    assert adapter.download_audio("https://example.com/v", tmp_path).name == "ok.m4a"
+    assert used == ["socks5://127.0.0.1:40000", None, "socks5://127.0.0.1:41000"]
+
+
+def test_download_audio_skips_fresh_warp_for_content_errors(monkeypatch, tmp_path):
+    monkeypatch.setenv("PROXY_URLS", "direct")
+    adapter = YouTubeAdapter()
+    spawned: list[int] = []
+
+    def spy() -> str | None:
+        spawned.append(1)
+        return "socks5://127.0.0.1:41000"
+
+    monkeypatch.setattr(ytdlp_base, "spawn_fresh_warp", spy)
+    monkeypatch.setattr(
+        adapter, "_download_audio_once",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("Private video. Sign in")),
+    )
+    with pytest.raises(RuntimeError, match="Private video"):
+        adapter.download_audio("https://example.com/v", tmp_path)
+    # A private/deleted source is not an egress problem, so don't pay for a
+    # WARP registration to learn that again.
+    assert spawned == []
+
+
 def test_age_gate_is_not_an_ip_block():
     msg = "ERROR: [youtube] x: Sign in to confirm your age. This video may be inappropriate"
     assert not ytdlp_base._looks_ip_blocked(msg)
