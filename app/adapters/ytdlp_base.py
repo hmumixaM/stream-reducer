@@ -127,8 +127,16 @@ _IP_BLOCK_MARKERS = (
 )
 
 
+def _is_age_gated(text: str) -> bool:
+    """Age-restricted video: only an age-verified signed-in session opens it, so
+    it must not be mistaken for a bot wall and rotated across every egress."""
+    return "confirm your age" in text.lower()
+
+
 def _looks_ip_blocked(text: str) -> bool:
     t = text.lower()
+    if _is_age_gated(t):
+        return False
     return any(m in t for m in _IP_BLOCK_MARKERS)
 
 

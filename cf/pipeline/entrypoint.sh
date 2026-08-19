@@ -56,4 +56,17 @@ EOF
   done
 } &
 
+# Proof-of-origin token server for yt-dlp's YouTube extractor. The
+# bgutil-ytdlp-pot-provider plugin looks for it on 127.0.0.1:4416 by default;
+# the extractor degrades to token-free clients if it isn't up yet, so this too
+# starts in the background rather than delaying the port bind.
+(
+  cd /opt/bgutil || exit 0
+  DENO_DIR=/opt/bgutil/.cache/deno DENO_NO_PROMPT=1 \
+    deno run --allow-env --allow-net --allow-ffi=/opt/bgutil/node_modules \
+      --allow-read=/opt/bgutil/node_modules /opt/bgutil/src/main.ts \
+      >/tmp/bgutil.log 2>&1
+) &
+echo "[pot] bgutil POT server starting on 127.0.0.1:4416 (pid $!)"
+
 exec uvicorn server:app --host 0.0.0.0 --port 8080

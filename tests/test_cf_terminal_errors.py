@@ -43,5 +43,14 @@ def test_transient_failures_stay_retryable(message):
     assert not _is_members_only(message)
 
 
+def test_age_gated_is_terminal():
+    from pipeline import _is_age_gated
+
+    assert _is_age_gated(
+        "DownloadError: ERROR: [youtube] 5rgrlsPibCA: Sign in to confirm your age."
+    )
+    assert not _is_age_gated("Sign in to confirm you're not a bot")
+
+
 def test_paid_content_is_still_terminal():
     assert _is_members_only("ERROR: [BiliBili] xyz: 该视频为充电专属视频")

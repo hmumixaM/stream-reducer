@@ -108,6 +108,13 @@ def test_download_error_ip_block_hint():
     assert "YT_DLP_PROXY" in msg
 
 
+def test_age_gate_is_not_an_ip_block():
+    msg = "ERROR: [youtube] x: Sign in to confirm your age. This video may be inappropriate"
+    assert not ytdlp_base._looks_ip_blocked(msg)
+    assert not ytdlp_base._should_rotate_egress(RuntimeError(msg))
+    assert ytdlp_base._looks_ip_blocked("Sign in to confirm you're not a bot")
+
+
 def test_download_error_names_missing_js_runtime():
     adapter = YouTubeAdapter()
     log = (

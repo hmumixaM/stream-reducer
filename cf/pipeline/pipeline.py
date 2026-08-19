@@ -126,6 +126,12 @@ def _is_gone(text: str) -> bool:
     return any(marker.lower() in t for marker in _GONE_MARKERS)
 
 
+def _is_age_gated(text: str) -> bool:
+    """Age-restricted videos need an age-verified signed-in session; no client,
+    egress or JS runtime gets around that, so treat them like paid content."""
+    return "confirm your age" in (text or "").lower()
+
+
 @dataclass
 class ItemView:
     platform: str
@@ -1100,10 +1106,10 @@ def run(job: dict, on_progress=None) -> dict:
                 emit({"partial": "transcript", "metadata": metadata, "transcript": transcript})
         except Exception as exc:  # noqa: BLE001
             # Membership/paid-gated videos (YouTube members-only, Bilibili
-            # 充电专属, …) can't be downloaded, and a deleted or private source
-            # never will be — exclude both so they aren't retried forever or
-            # surfaced as failures.
-            if _is_members_only(str(exc)) or _is_gone(str(exc)):
+            # 充电专属, …) can't be downloaded, a deleted or private source never
+            # will be, and an age-gated one needs a verified account — exclude
+            # them so they aren't retried forever or surfaced as failures.
+            if _is_members_only(str(exc)) or _is_gone(str(exc)) or _is_age_gated(str(exc)):
                 return _excluded_result(metadata, stages, f"{type(exc).__name__}: {exc}")
             raise
     else:
