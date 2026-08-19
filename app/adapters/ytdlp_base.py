@@ -571,6 +571,11 @@ class YtDlpAdapter(Adapter):
         cause looks like a bot wall / 403 / 412."""
         tail = [ln for ln in log_text.splitlines() if ln][-6:]
         detail = " | ".join(tail) if tail else str(exc)
+        # A missing JS runtime looks like an IP block (yt-dlp drops to the
+        # android_vr client and its media URLs 403) but no amount of egress
+        # rotation fixes it — say so instead of sending the reader after WARP.
+        if "no supported javascript runtime" in detail.lower():
+            return f"no JS runtime for yt-dlp (install deno in the image): {detail}"
         if _looks_ip_blocked(detail) or _is_risk_control(exc):
             return f"IP-block — set YT_DLP_PROXY / rotate WARP: {detail}"
         return detail

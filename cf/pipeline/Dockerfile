@@ -26,10 +26,23 @@ RUN curl -fsSL -o /usr/local/bin/wgcf \
     && chmod +x /usr/local/bin/wireproxy \
     && rm -f /tmp/wireproxy.tar.gz
 
+# JavaScript runtime for yt-dlp. YouTube's web clients need JS executed to
+# solve the signature/nsig challenge; without a runtime yt-dlp falls back to the
+# android_vr client, whose media URLs answer 403 from datacenter IPs and which
+# ignores cookies (so age-gated videos fail too). deno is the only runtime
+# yt-dlp enables by default, so putting it on PATH is all that's required.
+ARG DENO_VERSION=2.9.5
+RUN curl -fsSL -o /tmp/deno.zip \
+      "https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip" \
+    && python -c "import zipfile; zipfile.ZipFile('/tmp/deno.zip').extractall('/usr/local/bin')" \
+    && chmod +x /usr/local/bin/deno \
+    && rm -f /tmp/deno.zip \
+    && deno --version
+
 WORKDIR /srv
 
 # Rotate worker to get new IP / latest yt-dlp (bump to force a clean rebuild)
-ENV ROTATE_WORKER=bld-v8
+ENV ROTATE_WORKER=bld-v9
 
 COPY cf/pipeline/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
@@ -42,6 +55,7 @@ RUN chmod +x ./entrypoint.sh
 
 ENV DATA_DIR=/tmp/data \
     PYTHONUNBUFFERED=1 \
+    DENO_DIR=/tmp/deno \
     WARP_INSTANCES=2
 EXPOSE 8080
 

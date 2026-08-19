@@ -108,6 +108,18 @@ def test_download_error_ip_block_hint():
     assert "YT_DLP_PROXY" in msg
 
 
+def test_download_error_names_missing_js_runtime():
+    adapter = YouTubeAdapter()
+    log = (
+        "[youtube] No supported JavaScript runtime could be found. Only deno is enabled by default\n"
+        "ERROR: unable to download video data: HTTP Error 403: Forbidden"
+    )
+    msg = adapter._download_error(RuntimeError("403"), log)
+    assert "no JS runtime" in msg
+    # The 403 is a symptom here, so don't send the reader chasing WARP/proxies.
+    assert "YT_DLP_PROXY" not in msg
+
+
 def test_download_audio_once_uses_audio_only_format(monkeypatch, tmp_path):
     captured: dict = {}
 
