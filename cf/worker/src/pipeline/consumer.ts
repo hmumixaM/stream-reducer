@@ -8,10 +8,13 @@ import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
 import { isTransientCapacity } from "./transient";
 
-export async function handleMessage(env: Env, msg: PipelineMessage): Promise<void> {
+export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAttempt = 1): Promise<void> {
   switch (msg.kind) {
     case "process":
-      return processNextQueuedItem(env);
+      if (deliveryAttempt > 1 && msg.item_id > 0) {
+        return recoverRetriedProcessItem(env, msg.item_id);
+      }
+      return processNextQueuedItem(env, msg.item_id);
     case "resummarize":
       return processItem(env, msg.item_id, true);
     case "structured_backfill":
@@ -93,12 +96,15 @@ export async function failStrandedItems(env: Env): Promise<void> {
   if (reaped.length) console.error("failStrandedItems reaped stranded items to 'error'", reaped);
 }
 
-async function processNextQueuedItem(env: Env): Promise<void> {
+async function processNextQueuedItem(env: Env, preferredItemId = 0): Promise<void> {
   // Clear out items that can never be reclaimed again (orphaned + over the
   // reclaim cap) before claiming fresh work, so they don't hang forever.
   await failStrandedItems(env);
-  const item = await claimNextQueuedItem(env);
-  if (!item) return;
+  const item = await claimNextQueuedItem(env, preferredItemId);
+  if (!item) {
+    await enqueueNextIfWork(env);
+    return;
+  }
   // Enqueue the continuation BEFORE processing. concurrency=1 keeps it from
   // overlapping, and it ensures the chain survives even if this invocation is
   // evicted mid-job (which previously stalled the whole queue).
@@ -109,18 +115,23 @@ async function processNextQueuedItem(env: Env): Promise<void> {
 // Reclaim the next claimable item: a queued one, or one stuck in-progress past
 // the stale cutoff (orphaned by a restart). Uses a conditional UPDATE so two
 // concurrent claims can't grab the same item.
-async function claimNextQueuedItem(env: Env): Promise<ItemRow | null> {
+async function claimNextQueuedItem(env: Env, preferredItemId = 0): Promise<ItemRow | null> {
   const cutoff = staleCutoff();
   const clause = claimableClause();
   for (let attempt = 0; attempt < 5; attempt++) {
-    const candidate = await first<ItemRow>(
-      env.DB.prepare(
-        `SELECT * FROM item WHERE ${clause}
-          ORDER BY (CASE WHEN status = 'queued' THEN 0 ELSE 1 END),
-                   priority_score DESC, request_count DESC, enqueued_at ASC
-          LIMIT 1`,
-      ).bind(...claimableBinds(cutoff)),
-    );
+    const candidate = preferredItemId > 0
+      ? await first<ItemRow>(
+          env.DB.prepare(`SELECT * FROM item WHERE id = ? AND ${clause} LIMIT 1`)
+            .bind(preferredItemId, ...claimableBinds(cutoff)),
+        )
+      : await first<ItemRow>(
+          env.DB.prepare(
+            `SELECT * FROM item WHERE ${clause}
+              ORDER BY (CASE WHEN status = 'queued' THEN 0 ELSE 1 END),
+                       priority_score DESC, request_count DESC, enqueued_at ASC
+              LIMIT 1`,
+          ).bind(...claimableBinds(cutoff)),
+        );
     if (!candidate) return null;
 
     // Reclaiming an orphaned in-progress item counts as an attempt (so it can't
@@ -138,6 +149,36 @@ async function claimNextQueuedItem(env: Env): Promise<ItemRow | null> {
     }
   }
   return null;
+}
+
+async function recoverRetriedProcessItem(env: Env, itemId: number): Promise<void> {
+  const item = await first<ItemRow>(env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(itemId));
+  if (!item || item.status === "done" || item.status === "excluded") return;
+
+  const transcriptAvailable = Boolean(
+    await first<{ id: number }>(
+      env.DB.prepare("SELECT id FROM transcript WHERE item_id = ?").bind(itemId),
+    ),
+  );
+  const startedAt = isoNow();
+  // Optimistic lease: only one duplicate/redelivered message can move the row
+  // from the state and start timestamp it observed. This makes an unacked queue
+  // message recover its own interrupted item immediately instead of no-oping
+  // until the generic 20-minute stale sweep.
+  const claimed = await env.DB.prepare(
+    `UPDATE item SET status = 'fetching', started_at = ?, error = NULL,
+       progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+     WHERE id = ? AND status = ? AND COALESCE(started_at, '') = COALESCE(?, '')`,
+  )
+    .bind(startedAt, itemId, item.status, item.started_at)
+    .run();
+  if ((claimed.meta.changes ?? 0) === 0) return;
+
+  await processClaimedItem(
+    env,
+    { ...item, status: "fetching", started_at: startedAt, error: null },
+    transcriptAvailable,
+  );
 }
 
 // Enqueue a continuation 'process' message when claimable work remains.
@@ -454,13 +495,11 @@ async function executePipeline(
   job: ClaimedPipelineJob,
   resummarize: boolean,
 ): Promise<PipelineResult> {
-  if (resummarize) return runPipeline(env, job);
-
   return runPipelineStreaming(
     env,
     job,
     createProgressHeartbeat(env, itemId),
-    (event) => persistPipelinePartial(env, itemId, event),
+    resummarize ? undefined : (event) => persistPipelinePartial(env, itemId, event),
   );
 }
 

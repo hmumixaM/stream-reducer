@@ -52,8 +52,11 @@ export class PipelineContainer extends Container<Env> {
     BILIBILI_COOKIE: this.env.BILIBILI_COOKIE ?? "",
     // Logged-in YouTube web cookies ("name=value; …") for yt-dlp, materialized
     // into a cookie file inside the container — clears YouTube's "confirm you're
-    // not a bot" wall and age/region gates so downloads are more reliable.
+    // not a bot" wall and age/region gates. The adapter only attaches these on
+    // the stable residential Tailscale exit, never direct/WARP datacenter IPs.
     YOUTUBE_COOKIE: this.env.YOUTUBE_COOKIE ?? "",
+    TS_AUTHKEY: this.env.TS_AUTHKEY ?? "",
+    TS_EXIT_NODE: this.env.TS_EXIT_NODE ?? "",
     // Number of Cloudflare WARP SOCKS5 proxies entrypoint.sh brings up; yt-dlp
     // rotates through them (then `direct`) to dodge Bilibili IP risk-control.
     WARP_INSTANCES: this.env.WARP_INSTANCES ?? "2",

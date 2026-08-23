@@ -79,7 +79,7 @@ export default {
   async queue(batch: MessageBatch<PipelineMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
       try {
-        await handleMessage(env, message.body);
+        await handleMessage(env, message.body, message.attempts);
         message.ack();
       } catch (err) {
         console.error("pipeline message failed", message.body, err);

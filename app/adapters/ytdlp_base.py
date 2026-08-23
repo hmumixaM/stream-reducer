@@ -5,11 +5,13 @@ from __future__ import annotations
 import collections
 import logging
 import os
+import socket
 import tempfile
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 from yt_dlp import YoutubeDL
@@ -95,6 +97,23 @@ def _egress_label(proxy: str | None) -> str:
         return "direct"
     ip = warp.exit_ips.get(proxy)
     return f"{proxy} ({ip})" if ip else proxy
+
+
+def _wait_for_local_proxy(proxy: str | None, timeout: float = 15) -> bool:
+    """Wait briefly for a background-started local proxy to bind its port."""
+    if not proxy:
+        return True
+    parsed = urlsplit(proxy)
+    if parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or not parsed.port:
+        return True
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((parsed.hostname, parsed.port), timeout=0.5):
+                return True
+        except OSError:
+            time.sleep(0.25)
+    return False
 
 
 def _is_risk_control(exc: Exception) -> bool:
@@ -278,6 +297,11 @@ def _cookie_header_to_file(env_name: str, header: str, domain: str) -> str:
 
 class YtDlpAdapter(Adapter):
     name = "yt_dlp"
+    # YouTube's current visionOS client works best on the container's direct
+    # IPv4 egress; WARP/VPN ranges are more likely to be challenged. Bilibili
+    # keeps the default WARP-first order to avoid its datacenter-IP risk control.
+    prefer_direct_egress = False
+    rotate_authenticated_egress = False
     # Extra HTTP headers (e.g. Referer) some sites require to avoid bot blocks.
     extra_headers: dict[str, str] = {}
     # When set, a "name=value; …" cookie header is read from this env var and
@@ -290,6 +314,24 @@ class YtDlpAdapter(Adapter):
     # means "use the first configured candidate"; download_audio rewrites it as
     # it rotates through PROXY_URLS on failure.
     _active_proxy: object = _PROXY_UNSET
+
+    def _egress_candidates(self) -> list[str | None]:
+        candidates = _proxy_candidates()
+        if self.prefer_direct_egress and None in candidates:
+            residential = os.environ.get("RESIDENTIAL_PROXY_URL", "").strip()
+            fallbacks = [candidate for candidate in candidates if candidate is not None]
+            if residential in fallbacks:
+                fallbacks = [residential, *(candidate for candidate in fallbacks if candidate != residential)]
+            return [None, *fallbacks]
+        return candidates
+
+    def _should_use_cookies(self, proxy: str | None) -> bool:
+        return True
+
+    def _should_rotate_extraction(self, exc: Exception) -> bool:
+        return _should_rotate_egress(exc) or (
+            self.rotate_authenticated_egress and _is_age_gated(str(exc))
+        )
 
     def _cookies_file(self) -> str | None:
         mounted = _resolve_cookies_file()
@@ -318,12 +360,12 @@ class YtDlpAdapter(Adapter):
             "extractor_retries": 2,
             "http_headers": {"User-Agent": BROWSER_UA, **self.extra_headers},
         }
-        cookies = self._cookies_file()
-        if cookies:
-            opts["cookiefile"] = cookies
         proxy = self._active_proxy
         if proxy is _PROXY_UNSET:
-            proxy = _proxy_candidates()[0]
+            proxy = self._egress_candidates()[0]
+        cookies = self._cookies_file() if self._should_use_cookies(proxy) else None
+        if cookies:
+            opts["cookiefile"] = cookies
         if proxy:
             opts["proxy"] = proxy
         if extra:
@@ -337,16 +379,18 @@ class YtDlpAdapter(Adapter):
         # candidates (other WARP instances, then direct) on egress failures so a
         # single flaky proxy doesn't fail the whole job. (download_audio has its
         # own rotation for the media download itself.)
-        candidates = _proxy_candidates()
+        candidates = self._egress_candidates()
         last_exc: Exception | None = None
         for index, proxy in enumerate(candidates):
             self._active_proxy = proxy
+            if proxy == os.environ.get("RESIDENTIAL_PROXY_URL", "").strip():
+                _wait_for_local_proxy(proxy)
             try:
                 with YoutubeDL(self._ydl_opts(extra)) as ydl:
                     return ydl.extract_info(url, download=download)
             except Exception as exc:  # noqa: BLE001 — rotate egress, then re-raise
                 last_exc = exc
-                if index + 1 < len(candidates) and _should_rotate_egress(exc):
+                if index + 1 < len(candidates) and self._should_rotate_extraction(exc):
                     logger.warning(
                         "extract_info via proxy=%s failed (%s); rotating egress",
                         proxy or "direct", exc,
@@ -559,7 +603,7 @@ class YtDlpAdapter(Adapter):
         # `direct`), rotating to the next on any failure so a single blocked IP
         # doesn't fail the whole download. The proxy also flows into _ydl_opts
         # for the metadata/native calls earlier in the job (first candidate).
-        candidates = _proxy_candidates()
+        candidates = self._egress_candidates()
         # The container's WARP proxies keep the same exit IPs for its whole life,
         # so once YouTube has refused them (media URLs are bound to the
         # requesting IP) the only remaining move is a brand-new WARP identity.
@@ -574,6 +618,8 @@ class YtDlpAdapter(Adapter):
             proxy = candidates[index]
             index += 1
             self._active_proxy = proxy
+            if proxy == os.environ.get("RESIDENTIAL_PROXY_URL", "").strip():
+                _wait_for_local_proxy(proxy)
             trail.append(_egress_label(proxy))
             logbuf = _CaptureLogger()
             try:

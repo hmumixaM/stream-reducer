@@ -48,6 +48,8 @@ export interface Env {
   // Optional single proxy (http(s)://… / socks5://…) for yt-dlp egress; only
   // used when PROXY_URLS (WARP rotation) is not set.
   YT_DLP_PROXY?: string;
+  // Tailscale exit-node address used as a residential YouTube fallback.
+  TS_EXIT_NODE?: string;
   // Container instance-key generation. Bump (in wrangler.jsonc vars) to force
   // every job onto a brand-new container instance running the freshly built
   // image (otherwise long-lived instances keep a stale image after a deploy).
@@ -75,6 +77,8 @@ export interface Env {
   // pipeline container so yt-dlp can authenticate (clears the bot wall / gated
   // content). Optional. Set via `wrangler secret put YOUTUBE_COOKIE`.
   YOUTUBE_COOKIE?: string;
+  // Reusable ephemeral Tailscale auth key for userspace container nodes.
+  TS_AUTHKEY?: string;
 
   // Comma-separated emails auto-granted admin on sign-in.
   ADMIN_EMAILS?: string;

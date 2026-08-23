@@ -1044,11 +1044,14 @@ def run(job: dict, on_progress=None) -> dict:
         try:
             with tempfile.TemporaryDirectory(prefix="sr_media_") as tmp:
                 emit({"stage": "download", "status": "start"})
-                # Cold containers warm WARP in the background; wait briefly so the
-                # first egress (metadata fetch) doesn't race the WireGuard handshake.
-                from app.adapters.ytdlp_base import await_warp_ready
+                # Bilibili is WARP-first to avoid its datacenter risk control,
+                # so a cold container must not race the WireGuard handshake.
+                # YouTube is direct-first: waiting here only delayed every job
+                # before trying its healthier visionOS path.
+                if adapter.name == "bilibili":
+                    from app.adapters.ytdlp_base import await_warp_ready
 
-                await_warp_ready()
+                    await_warp_ready()
                 with Stage("download", provider=adapter.name) as st:
                     meta = adapter.fetch_metadata(source_url)
                     metadata = _meta_to_dict(meta)

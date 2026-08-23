@@ -81,7 +81,18 @@ Then edit `wrangler.jsonc`:
 ```bash
 npx wrangler secret put GEMINI_API_KEY       # bearer for the Gemini summary proxy
 npx wrangler secret put OPENROUTER_API_KEY   # OpenRouter Whisper key
+npx wrangler secret put YOUTUBE_COOKIE       # signed-in browser cookie header
+npx wrangler secret put TS_AUTHKEY           # Tailscale OAuth client secret
 ```
+
+For reliable YouTube extraction, the container tries unsigned direct egress,
+then a residential Tailscale exit node, then WARP. Login cookies are attached
+only on the residential hop so the account never jumps between datacenter IPs.
+Set `vars.TS_EXIT_NODE` to the tailnet address of the exit node. `TS_AUTHKEY`
+should be a non-expiring OAuth client secret restricted to the `auth_keys`
+write scope and a dedicated tag (the default container tag is
+`tag:stream-reduce`); OAuth-created nodes are ephemeral and clean themselves
+up after the container stops.
 
 ## Migrate the database
 

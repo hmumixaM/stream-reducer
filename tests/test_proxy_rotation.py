@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.adapters import ytdlp_base
+from app.adapters import warp, ytdlp_base
 from app.adapters.youtube import YouTubeAdapter
 
 
@@ -24,6 +24,30 @@ def test_proxy_candidates_parsing(monkeypatch):
     ]
 
 
+def test_force_ipv4_profile_removes_ipv6_routes(tmp_path):
+    profile = tmp_path / "warp.conf"
+    profile.write_text(
+        "[Interface]\n"
+        "Address = 172.16.0.2/32\n"
+        "Address = 2606:4700:110:8c7d::2/128\n"
+        "DNS = 1.1.1.1, 2606:4700:4700::1111\n"
+        "[Peer]\n"
+        "AllowedIPs = 0.0.0.0/0, ::/0\n"
+        "Endpoint = engage.cloudflareclient.com:2408\n"
+    )
+
+    warp.force_ipv4_profile(profile)
+
+    assert profile.read_text() == (
+        "[Interface]\n"
+        "Address = 172.16.0.2/32\n"
+        "DNS = 1.1.1.1\n"
+        "[Peer]\n"
+        "AllowedIPs = 0.0.0.0/0\n"
+        "Endpoint = engage.cloudflareclient.com:2408\n"
+    )
+
+
 def test_ydl_opts_injects_active_proxy():
     adapter = YouTubeAdapter()
     adapter._active_proxy = "socks5://127.0.0.1:40000"
@@ -34,6 +58,46 @@ def test_ydl_opts_no_proxy_when_direct():
     adapter = YouTubeAdapter()
     adapter._active_proxy = None  # explicit "direct"
     assert "proxy" not in adapter._ydl_opts()
+
+
+def test_youtube_prefers_direct_then_residential_then_warp(monkeypatch):
+    monkeypatch.setenv(
+        "PROXY_URLS",
+        "socks5://127.0.0.1:40000,socks5://127.0.0.1:42000,"
+        "socks5://127.0.0.1:40001,direct",
+    )
+    monkeypatch.setenv("RESIDENTIAL_PROXY_URL", "socks5://127.0.0.1:42000")
+
+    assert YouTubeAdapter()._egress_candidates() == [
+        None,
+        "socks5://127.0.0.1:42000",
+        "socks5://127.0.0.1:40000",
+        "socks5://127.0.0.1:40001",
+    ]
+
+
+def test_youtube_uses_login_cookies_only_on_residential_proxy(monkeypatch):
+    residential = "socks5://127.0.0.1:42000"
+    monkeypatch.setenv("RESIDENTIAL_PROXY_URL", residential)
+    monkeypatch.setenv("YOUTUBE_COOKIE", "SID=session; PREF=hl=en")
+    ytdlp_base.reset_cookie_cache()
+    adapter = YouTubeAdapter()
+
+    adapter._active_proxy = None
+    assert "cookiefile" not in adapter._ydl_opts()
+
+    adapter._active_proxy = "socks5://127.0.0.1:40000"
+    assert "cookiefile" not in adapter._ydl_opts()
+
+    adapter._active_proxy = residential
+    assert adapter._ydl_opts()["cookiefile"].endswith("ytdlp_cookies_YOUTUBE_COOKIE.txt")
+
+
+def test_youtube_rotates_age_gate_to_authenticated_egress():
+    adapter = YouTubeAdapter()
+    assert adapter._should_rotate_extraction(
+        RuntimeError("Sign in to confirm your age. This video may be inappropriate")
+    )
 
 
 def test_download_audio_rotates_to_working_proxy(monkeypatch, tmp_path):
@@ -53,8 +117,8 @@ def test_download_audio_rotates_to_working_proxy(monkeypatch, tmp_path):
     result = adapter.download_audio("https://example.com/v", tmp_path)
 
     assert result.name == "ok.m4a"
-    # Rotated through the first (failing) proxy then succeeded on the second.
-    assert used == ["socks5://127.0.0.1:40000", "socks5://127.0.0.1:40001"]
+    # YouTube tries direct first, then retains both WARP fallbacks.
+    assert used == [None, "socks5://127.0.0.1:40000", "socks5://127.0.0.1:40001"]
 
 
 def test_download_audio_raises_last_error_when_all_fail(monkeypatch, tmp_path):
@@ -65,7 +129,7 @@ def test_download_audio_raises_last_error_when_all_fail(monkeypatch, tmp_path):
         raise RuntimeError(f"boom via {adapter._active_proxy}")
 
     monkeypatch.setattr(adapter, "_download_audio_once", always_fail)
-    with pytest.raises(RuntimeError, match="boom via None"):
+    with pytest.raises(RuntimeError, match="boom via socks5://127.0.0.1:40000"):
         adapter.download_audio("https://example.com/v", tmp_path)
 
 
@@ -130,7 +194,7 @@ def test_download_audio_registers_fresh_warp_when_egress_exhausted(monkeypatch, 
 
     monkeypatch.setattr(adapter, "_download_audio_once", fake_once)
     assert adapter.download_audio("https://example.com/v", tmp_path).name == "ok.m4a"
-    assert used == ["socks5://127.0.0.1:40000", None, "socks5://127.0.0.1:41000"]
+    assert used == [None, "socks5://127.0.0.1:40000", "socks5://127.0.0.1:41000"]
 
 
 def test_download_audio_skips_fresh_warp_for_content_errors(monkeypatch, tmp_path):

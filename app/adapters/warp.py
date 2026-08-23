@@ -43,6 +43,28 @@ def warp_tooling_available() -> bool:
     return bool(shutil.which("wgcf") and shutil.which("wireproxy"))
 
 
+def force_ipv4_profile(profile: str | Path) -> None:
+    """Restrict a wgcf profile to IPv4 egress.
+
+    YouTube commonly refuses media requests from IPv6 VPN/WARP addresses. wgcf
+    emits dual-stack profiles, so wireproxy may resolve a Google host to IPv6
+    even when the retry was intended to change only the exit IP. Keeping the
+    IPv4 interface address and route makes extraction, token minting and media
+    download use one stable IPv4 identity.
+    """
+    path = Path(profile)
+    output: list[str] = []
+    for line in path.read_text().splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() in {"Address", "AllowedIPs", "DNS"}:
+            ipv4_values = [part.strip() for part in value.split(",") if ":" not in part]
+            if not ipv4_values:
+                continue
+            line = f"{key.rstrip()} = {', '.join(ipv4_values)}"
+        output.append(line)
+    path.write_text("\n".join(output) + "\n")
+
+
 def spawn_fresh_warp(timeout: int = 25) -> str | None:
     """Register a brand-new WARP identity and expose it as a local SOCKS5 proxy.
 
@@ -70,6 +92,7 @@ def spawn_fresh_warp(timeout: int = 25) -> str | None:
             )
             return None
 
+    force_ipv4_profile(profile)
     wireproxy_conf.write_text(
         f"WGConfig = {profile}\n\n[Socks5]\nBindAddress = 127.0.0.1:{port}\n"
     )

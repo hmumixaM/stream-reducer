@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # YouTube changes extractor clients frequently. Daily release PRs keep the
+  # pinned production yt-dlp/bgutil pair visible instead of silently aging until
+  # every download starts failing at once.
+  - package-ecosystem: pip
+    directory: /cf/pipeline
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 3
+    groups:
+      youtube-download-stack:
+        patterns:
+          - yt-dlp
+          - bgutil-ytdlp-pot-provider
+          - yt-dlp-ejs
+
+  - package-ecosystem: docker
+    directory: /cf/pipeline
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
