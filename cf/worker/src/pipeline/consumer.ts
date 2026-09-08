@@ -4,7 +4,10 @@ import { isoNow } from "../lib/crypto";
 import { persistItemMetadata, cacheThumbnail, recomputePriority } from "../lib/ingest";
 import { attachItemChannelBestEffort } from "../lib/itemChannel";
 import { enqueueAutomaticTranslations } from "../lib/autoTranslate";
-import { enqueueAutomaticInfographic } from "../lib/autoInfographic";
+import {
+  enqueueAutomaticInfographic,
+  isInfographicContentReady,
+} from "../lib/autoInfographic";
 import { runPipeline, runPipelineStreaming, type JsonObject, type PipelineResult, type ProgressEvent } from "./container";
 import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
@@ -280,6 +283,15 @@ async function generateInfographic(env: Env, itemId: number): Promise<void> {
     env.DB.prepare("SELECT structured FROM summary WHERE item_id = ?").bind(itemId),
   );
   if (!item || !summary) return fail("item has no summary to render");
+  if (!await isInfographicContentReady(env, itemId)) {
+    // A stale or manually queued message may arrive before all collection
+    // content is ready. Remove the request without calling the paid image API;
+    // the final successful translation will enqueue a fresh message.
+    await env.DB.prepare(
+      "DELETE FROM item_infographic WHERE item_id = ? AND status IN ('queued', 'processing')",
+    ).bind(itemId).run();
+    return;
+  }
 
   await env.DB.prepare(
     "UPDATE item_infographic SET status = 'processing', error = NULL, updated_at = ? WHERE item_id = ?",

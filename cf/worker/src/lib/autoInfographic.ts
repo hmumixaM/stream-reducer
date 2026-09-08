@@ -2,7 +2,7 @@ import type { Env } from "../env";
 import { all, first } from "../db";
 import { isoNow } from "./crypto";
 
-export async function enqueueAutomaticInfographic(
+export async function isInfographicContentReady(
   env: Env,
   itemId: number,
 ): Promise<boolean> {
@@ -24,8 +24,6 @@ export async function enqueueAutomaticInfographic(
         WHERE ci.item_id = ? AND c.auto_infographic = 1`,
     ).bind(itemId),
   );
-  if (!collections.length) return false;
-
   const requiredLanguages = new Set<string>();
   for (const collection of collections) {
     for (const language of JSON.parse(collection.auto_translate_langs) as string[]) {
@@ -47,6 +45,24 @@ export async function enqueueAutomaticInfographic(
       return false;
     }
   }
+  return true;
+}
+
+export async function enqueueAutomaticInfographic(
+  env: Env,
+  itemId: number,
+): Promise<boolean> {
+  const automaticCollection = await first<{ id: number }>(
+    env.DB.prepare(
+      `SELECT c.id
+         FROM collection_item ci
+         JOIN collection c ON c.id = ci.collection_id
+        WHERE ci.item_id = ? AND c.auto_infographic = 1
+        LIMIT 1`,
+    ).bind(itemId),
+  );
+  if (!automaticCollection) return false;
+  if (!await isInfographicContentReady(env, itemId)) return false;
 
   const result = await env.DB.prepare(
     `INSERT INTO item_infographic (item_id, status)

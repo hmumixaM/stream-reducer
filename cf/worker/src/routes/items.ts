@@ -7,6 +7,7 @@ import { addUrlToLibrary, expandPlaylistUrls, recomputePriority } from "../lib/i
 import { splitUrls, nonItemUrlError } from "../lib/url";
 import { readJson } from "../lib/request";
 import { includeSummaryDescription } from "../lib/summaryDescription";
+import { isInfographicContentReady } from "../lib/autoInfographic";
 import {
   LIBRARY_SORT_COLUMNS,
   SORT_COLUMNS,
@@ -414,6 +415,9 @@ itemsRoutes.post("/:id/infographic", requireAuth, async (c) => {
     c.env.DB.prepare("SELECT item_id FROM summary WHERE item_id = ?").bind(id),
   );
   if (!summary) return c.json({ error: "item has no summary yet" }, 409);
+  if (!await isInfographicContentReady(c.env, id)) {
+    return c.json({ error: "item content is still processing" }, 409);
+  }
 
   const existing = await first<{ status: string }>(
     c.env.DB.prepare("SELECT status FROM item_infographic WHERE item_id = ?").bind(id),

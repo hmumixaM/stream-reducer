@@ -18,6 +18,7 @@ function testEnv(options: {
             if (sql.includes("FROM item i")) {
               return options.itemReady ? { id: 42 } : null;
             }
+            if (sql.includes("c.auto_infographic")) return { id: 7 };
             return null;
           },
           async all() {
