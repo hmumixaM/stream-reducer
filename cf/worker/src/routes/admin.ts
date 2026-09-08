@@ -243,40 +243,81 @@ adminRoutes.post("/backfill-headlines", async (c) => {
   return c.json({ affected: itemIds.length, enqueued: dryRun ? 0 : itemIds.length });
 });
 
-// Backfill on-demand infographics for summarized items that don't have one yet.
-// Paid (~$0.13/image), so it's admin-only and supports a dry run + a batch cap:
+// Backfill on-demand infographics for successfully summarized items.
+// Paid (~$0.13/image), so it's admin-only and supports filters:
 //   ?dry_run=true     -> report how many would be enqueued, spend nothing
 //   ?limit=N          -> only enqueue the first N (test batch before going wide)
 //   ?order=views      -> prioritize by view count desc (default: newest item first)
+//   ?collection=slug  -> restrict to a collection and wait for its translations
+//   ?force=true       -> replace completed images made by a different model
 adminRoutes.post("/backfill-infographics", async (c) => {
   const dryRun = c.req.query("dry_run") === "true";
+  const force = c.req.query("force") === "true";
+  const collection = c.req.query("collection")?.trim() || null;
   const limitParam = Number(c.req.query("limit"));
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.floor(limitParam) : null;
   // SQLite sorts NULL as smallest, so DESC naturally puts un-counted items last.
   const orderBy = c.req.query("order") === "views" ? "i.view_count DESC" : "s.item_id DESC";
+  const collectionJoin = collection
+    ? "JOIN collection_item ci ON ci.item_id = s.item_id JOIN collection c ON c.id = ci.collection_id"
+    : "";
+  const collectionFilter = collection
+    ? `AND c.slug = ?
+       AND NOT EXISTS (
+         SELECT 1
+           FROM json_each(COALESCE(c.auto_translate_langs, '[]')) lang
+           LEFT JOIN item_translation tr
+             ON tr.item_id = i.id AND tr.lang = lang.value
+          WHERE tr.item_id IS NULL OR tr.status <> 'done'
+       )`
+    : "";
+  const binds: unknown[] = [];
+  if (collection) binds.push(collection);
+  if (force) binds.push(c.env.LLM_MODEL_INFOGRAPHIC);
+  if (limit) binds.push(limit);
 
   const rows = await all<{ item_id: number }>(
     c.env.DB.prepare(
       `SELECT s.item_id
          FROM summary s
          JOIN item i ON i.id = s.item_id
+         ${collectionJoin}
          LEFT JOIN item_infographic ig ON ig.item_id = s.item_id
-        WHERE ig.item_id IS NULL OR ig.status = 'error'
+        WHERE i.status = 'done'
+          ${collectionFilter}
+          AND (
+            ig.item_id IS NULL
+            OR ig.status = 'error'
+            ${force ? "OR (ig.status = 'done' AND ig.model <> ?)" : ""}
+          )
         ORDER BY ${orderBy}
         ${limit ? "LIMIT ?" : ""}`,
-    ).bind(...(limit ? [limit] : [])),
+    ).bind(...binds),
   );
   const itemIds = rows.map((r) => r.item_id);
   if (!dryRun) {
-    for (const id of itemIds) {
-      await c.env.DB.prepare(
-        `INSERT INTO item_infographic (item_id, status) VALUES (?, 'queued')
-         ON CONFLICT(item_id) DO UPDATE SET status='queued', error=NULL, updated_at=excluded.updated_at`,
-      ).bind(id).run();
-      await c.env.PIPELINE.send({ kind: "infographic", item_id: id });
+    for (let offset = 0; offset < itemIds.length; offset += 100) {
+      const batch = itemIds.slice(offset, offset + 100);
+      await c.env.DB.batch(
+        batch.map((id) =>
+          c.env.DB.prepare(
+            `INSERT INTO item_infographic (item_id, status) VALUES (?, 'queued')
+             ON CONFLICT(item_id) DO UPDATE SET
+               status='queued', error=NULL, updated_at=excluded.updated_at`,
+          ).bind(id),
+        ),
+      );
+      await c.env.PIPELINE.sendBatch(
+        batch.map((id) => ({ body: { kind: "infographic" as const, item_id: id } })),
+      );
     }
   }
-  return c.json({ candidates: itemIds.length, enqueued: dryRun ? 0 : itemIds.length });
+  return c.json({
+    collection,
+    model: c.env.LLM_MODEL_INFOGRAPHIC,
+    candidates: itemIds.length,
+    enqueued: dryRun ? 0 : itemIds.length,
+  });
 });
 
 // Backfill: mirror existing items' remote cover images into R2 and rewrite the

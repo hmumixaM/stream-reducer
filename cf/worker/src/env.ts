@@ -34,7 +34,7 @@ export interface Env {
   // Backup summarize model (same proxy). When non-empty, a summarize LLM call
   // that times out/errors on LLM_MODEL is retried once against this model.
   LLM_MODEL_FALLBACK?: string;
-  // Image model for on-demand infographics (Gemini 3 Pro Image / Nano Banana Pro).
+  // Image model for on-demand infographics (RightCode Draw API).
   LLM_MODEL_INFOGRAPHIC: string;
   STT_MODEL: string;
   EMBEDDING_DIM: string;
@@ -61,10 +61,8 @@ export interface Env {
   // Secrets
   GEMINI_API_KEY: string;
   OPENROUTER_API_KEY: string;
-  // Google AI Studio key for image generation (native generateContent). The
-  // text proxy can't emit images, so infographics talk to AI Studio directly.
-  // Falls back to GEMINI_API_KEY in the container when unset.
-  GEMINI_IMAGE_API_KEY?: string;
+  // RightCode Draw API key for gpt-image-2-vip infographic generation.
+  RIGHTCODE_API_KEY: string;
   // Bilibili web cookies (Netscape values joined as "name=value; …"), used to
   // clear risk-control on the space/season/series feed APIs. Optional. This is
   // only the initial seed/fallback — the live cookie is kept in the BILI_AUTH KV

@@ -1,13 +1,15 @@
-"""LLM + STT clients for the pipeline container.
+"""LLM, image, and STT clients for the pipeline container.
 
 Summary: the provided Gemini proxy (OpenAI-compatible /v1/chat/completions).
-STT: OpenRouter /audio/transcriptions. Both read config from env vars injected
+Images: RightCode Draw's asynchronous GPT Image endpoint.
+STT: OpenRouter /audio/transcriptions. All read config from env vars injected
 by the Worker (see cf/worker/src/pipeline/container.ts).
 """
 
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import random
@@ -190,78 +192,87 @@ class ImageResult:
 
 
 def _image_model() -> str:
-    return os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3-pro-image-preview")
+    return os.environ.get("IMAGE_MODEL", "gpt-image-2-vip")
 
 
 def _image_base() -> str:
-    # Native Gemini (generateContent) endpoint. The OpenAI-compatible proxy used
-    # for text can't return image output (it rejects the image mime), so image
-    # generation talks to AI Studio directly.
-    return os.environ.get("GEMINI_IMAGE_BASE_URL", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+    return os.environ.get("IMAGE_BASE_URL", "https://www.rightapi.ai/draw").rstrip("/")
 
 
 def _image_key() -> str:
-    # A dedicated Google AI Studio key for image generation; fall back to the
-    # general Gemini key when a separate one isn't configured.
-    return os.environ.get("GEMINI_IMAGE_API_KEY") or os.environ["GEMINI_API_KEY"]
+    return os.environ["RIGHTCODE_API_KEY"]
 
 
-# Gemini 3 Pro Image pricing (USD). Image output is a flat per-image rate at the
-# default <=2K resolution (1120 output image tokens); text in/out are token-based.
-_IMG_TOKEN_USD = 0.134 / 1120.0
-_TEXT_OUT_USD = 12.0 / 1_000_000.0
-_TEXT_IN_USD = 2.0 / 1_000_000.0
+def _image_url(payload: dict) -> str | None:
+    data = payload.get("data") or []
+    if data and data[0].get("url"):
+        return data[0]["url"]
+    candidates = payload.get("candidates") or []
+    if candidates:
+        for part in candidates[0].get("content", {}).get("parts", []):
+            text = part.get("text", "")
+            if text.startswith("http"):
+                return text
+    return None
 
 
 def generate_image(prompt: str, *, system: str | None = None) -> ImageResult:
     model = _image_model()
-    payload: dict = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
+    full_prompt = f"{system}\n\n{prompt}" if system else prompt
+    payload = {
+        "model": model,
+        "prompt": full_prompt,
+        "n": 1,
+        "size": os.environ.get("IMAGE_ASPECT_RATIO", "16:9"),
+        "imageSize": os.environ.get("IMAGE_SIZE", "4K"),
+        "async": True,
     }
-    if system:
-        payload["systemInstruction"] = {"parts": [{"text": system}]}
     start = time.monotonic()
-    with httpx.Client(timeout=300) as client:
+    headers = {
+        "Authorization": f"Bearer {_image_key()}",
+        "Content-Type": "application/json",
+    }
+    deadline = float(os.environ.get("IMAGE_TIMEOUT", "600"))
+    with httpx.Client(timeout=120, headers=headers) as client:
         resp = client.post(
-            f"{_image_base()}/models/{model}:generateContent",
+            f"{_image_base()}/v1/images/generations",
             json=payload,
-            headers={"x-goog-api-key": _image_key(), "Content-Type": "application/json"},
         )
         resp.raise_for_status()
         data = resp.json()
+        task_id = data.get("task_id")
+        if not task_id:
+            raise RuntimeError("RightCode image request returned no task_id")
+        task_url = os.environ.get(
+            "IMAGE_TASK_BASE_URL",
+            "https://www.rightapi.ai/v1/tasks",
+        ).rstrip("/")
+        while not (url := _image_url(data)):
+            if time.monotonic() - start >= deadline:
+                raise TimeoutError(
+                    f"RightCode image task {task_id} exceeded {deadline:.0f}s",
+                )
+            time.sleep(2)
+            task_resp = client.get(f"{task_url}/{task_id}")
+            task_resp.raise_for_status()
+            data = task_resp.json()
+            if data.get("status") == "failed":
+                error = data.get("error") or "unknown task failure"
+                if isinstance(error, dict):
+                    error = json.dumps(error, ensure_ascii=False)
+                raise RuntimeError(f"RightCode image task failed: {error}")
 
-    parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or []
-    image_b64 = ""
-    mime_type = "image/png"
-    for part in parts:
-        inline = part.get("inlineData") or part.get("inline_data")
-        if inline and inline.get("data"):
-            image_b64 = inline["data"]
-            mime_type = inline.get("mimeType") or inline.get("mime_type") or mime_type
-            break
-    if not image_b64:
-        raise RuntimeError("image model returned no image data")
-
-    usage = data.get("usageMetadata") or {}
-    prompt_tokens = int(usage.get("promptTokenCount", 0) or 0)
-    total_tokens = int(usage.get("totalTokenCount", 0) or 0)
-    image_tokens = 0
-    for detail in usage.get("candidatesTokensDetails") or []:
-        if (detail.get("modality") or "").upper() == "IMAGE":
-            image_tokens += int(detail.get("tokenCount", 0) or 0)
-    thoughts = int(usage.get("thoughtsTokenCount", 0) or 0)
-    text_out = max(0, int(usage.get("candidatesTokenCount", 0) or 0) - image_tokens) + thoughts
-    cost = image_tokens * _IMG_TOKEN_USD + text_out * _TEXT_OUT_USD + prompt_tokens * _TEXT_IN_USD
+        image_resp = client.get(url)
+        image_resp.raise_for_status()
+        mime_type = image_resp.headers.get("content-type", "image/png").split(";", 1)[0]
+        image_b64 = base64.b64encode(image_resp.content).decode("ascii")
 
     return ImageResult(
         image_b64=image_b64,
         mime_type=mime_type,
         model=model,
-        prompt_tokens=prompt_tokens,
-        image_tokens=image_tokens,
-        total_tokens=total_tokens,
-        cost_usd=round(cost, 6),
+        total_tokens=0,
+        cost_usd=float(os.environ.get("IMAGE_COST_USD", "0.13")),
         latency_ms=int((time.monotonic() - start) * 1000),
     )
 

@@ -4,6 +4,7 @@ import { isoNow } from "../lib/crypto";
 import { persistItemMetadata, cacheThumbnail, recomputePriority } from "../lib/ingest";
 import { attachItemChannelBestEffort } from "../lib/itemChannel";
 import { enqueueAutomaticTranslations } from "../lib/autoTranslate";
+import { enqueueAutomaticInfographic } from "../lib/autoInfographic";
 import { runPipeline, runPipelineStreaming, type JsonObject, type PipelineResult, type ProgressEvent } from "./container";
 import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
@@ -251,6 +252,13 @@ async function translateItem(env: Env, itemId: number, lang: string): Promise<vo
         lang,
       )
       .run();
+    try {
+      await enqueueAutomaticInfographic(env, itemId);
+    } catch (error) {
+      // Translation is already durable. A final-step queue outage must not
+      // rewrite successful translated content as an error.
+      console.error("automatic infographic enqueue failed", itemId, error);
+    }
   } catch (err) {
     await fail(err instanceof Error ? `${err.name}: ${err.message}` : String(err));
     throw err;
@@ -614,6 +622,13 @@ async function persistCompletedPipeline(env: Env, itemId: number, result: Pipeli
     // Translation is follow-up work: a queue outage must not roll a successfully
     // summarized source item back into the processing pipeline.
     console.error("automatic translation enqueue failed", itemId, error);
+  }
+  try {
+    await enqueueAutomaticInfographic(env, itemId);
+  } catch (error) {
+    // Infographics are paid follow-up work. Never roll back a completed summary
+    // if queueing the final presentation step fails.
+    console.error("automatic infographic enqueue failed", itemId, error);
   }
 }
 

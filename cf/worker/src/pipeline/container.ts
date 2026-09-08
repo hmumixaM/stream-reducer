@@ -39,10 +39,14 @@ export class PipelineContainer extends Container<Env> {
     // Backup summarize model: a summarize call that times out/errors on
     // GEMINI_MODEL is retried once against this (same proxy). Empty = disabled.
     GEMINI_MODEL_FALLBACK: this.env.LLM_MODEL_FALLBACK ?? "",
-    // Image generation: model + a dedicated AI Studio key (falls back to
-    // GEMINI_API_KEY inside the container when not set).
-    GEMINI_IMAGE_MODEL: this.env.LLM_MODEL_INFOGRAPHIC,
-    GEMINI_IMAGE_API_KEY: this.env.GEMINI_IMAGE_API_KEY ?? "",
+    // Image generation: RightCode Draw API, using the 4K GPT Image tier.
+    IMAGE_MODEL: this.env.LLM_MODEL_INFOGRAPHIC,
+    IMAGE_BASE_URL: "https://www.rightapi.ai/draw",
+    IMAGE_TASK_BASE_URL: "https://www.rightapi.ai/v1/tasks",
+    IMAGE_SIZE: "4K",
+    IMAGE_ASPECT_RATIO: "16:9",
+    IMAGE_COST_USD: "0.13",
+    RIGHTCODE_API_KEY: this.env.RIGHTCODE_API_KEY,
     OPENROUTER_API_KEY: this.env.OPENROUTER_API_KEY,
     STT_MODEL: this.env.STT_MODEL,
     // Bilibili web cookies for yt-dlp (materialized into a cookie file inside

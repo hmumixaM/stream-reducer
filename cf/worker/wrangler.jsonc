@@ -178,7 +178,7 @@
     // Keep the older route as a last-resort fallback for transient RightCode
     // failures. Empty/diagnostic responses are rejected by cf/pipeline/llm.py.
     "LLM_MODEL_FALLBACK": "gemini-3.5-flash",
-    "LLM_MODEL_INFOGRAPHIC": "gemini-3-pro-image-preview",
+    "LLM_MODEL_INFOGRAPHIC": "gpt-image-2-vip",
     "STT_MODEL": "openai/whisper-large-v3-turbo",
     "EMBEDDING_DIM": "1024",
     // How far back a new follow backfills on its first poll.
@@ -195,15 +195,13 @@
     "TS_EXIT_NODE": "100.77.236.1",
     // Bump to force all container jobs onto fresh instances (new image) after a
     // deploy — avoids long-lived DO instances running a stale container image.
-    "CONTAINER_GEN": "31"
+    "CONTAINER_GEN": "32"
   }
 
   // Secrets (set via `wrangler secret put`):
   //   GEMINI_API_KEY        - bearer token for the Gemini summary proxy
   //   OPENROUTER_API_KEY    - OpenRouter key for Whisper STT
-  //   GEMINI_IMAGE_API_KEY  - Google AI Studio key for infographic image gen
-  //                           (native generateContent; the text proxy can't emit
-  //                           images). Optional: falls back to GEMINI_API_KEY.
+  //   RIGHTCODE_API_KEY     - RightCode Draw API key for 4K infographics
   //   TS_AUTHKEY            - OAuth client secret for ephemeral Tailscale nodes
   //   YOUTUBE_COOKIE        - browser cookie header, used only over Tailscale
 }

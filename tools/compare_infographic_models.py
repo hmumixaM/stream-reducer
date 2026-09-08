@@ -133,6 +133,7 @@ async def generate(
     if response.is_error:
         return {
             "model": model,
+            "image_size": image_size,
             "status": "submit_error",
             "error": response.text[:500],
         }
@@ -160,7 +161,7 @@ async def generate(
         if task.get("status") == "failed":
             return {
                 "model": model,
-            "image_size": image_size,
+                "image_size": image_size,
                 "status": "failed",
                 "elapsed_s": round(time.monotonic() - started, 1),
                 "error": task.get("error"),
@@ -173,26 +174,39 @@ async def generate(
     }
 
 
-async def run(item_id: int, output_dir: Path) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    headers = {"Authorization": f"Bearer {os.environ['RIGHTCODE_API_KEY']}"}
-    async with httpx.AsyncClient(headers=headers, timeout=120) as client:
-        item = (
-            await client.get(f"https://reducer.xgoose.org/api/items/{item_id}")
-        ).raise_for_status().json()
-        prompt = build_prompt(item)
-        results = await asyncio.gather(
-            *(
-                generate(client, model, image_size, prompt, output_dir)
-                for model, image_size in MODEL_IMAGE_SIZES.items()
-            )
+async def compare_item(
+    client: httpx.AsyncClient,
+    item_id: int,
+    output_dir: Path,
+) -> dict[str, Any]:
+    item = (
+        await client.get(f"https://reducer.xgoose.org/api/items/{item_id}")
+    ).raise_for_status().json()
+    prompt = build_prompt(item)
+    item_dir = output_dir / str(item_id)
+    item_dir.mkdir(parents=True, exist_ok=True)
+    results = await asyncio.gather(
+        *(
+            generate(client, model, image_size, prompt, item_dir)
+            for model, image_size in MODEL_IMAGE_SIZES.items()
         )
-    report = {
+    )
+    return {
         "item_id": item_id,
         "title": item["title"],
         "prompt_characters": len(prompt),
         "models": results,
     }
+
+
+async def run(item_ids: list[int], output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    headers = {"Authorization": f"Bearer {os.environ['RIGHTCODE_API_KEY']}"}
+    async with httpx.AsyncClient(headers=headers, timeout=120) as client:
+        items = [
+            await compare_item(client, item_id, output_dir) for item_id in item_ids
+        ]
+    report = {"items": items}
     (output_dir / "report.json").write_text(
         json.dumps(report, indent=2, ensure_ascii=False) + "\n"
     )
@@ -201,7 +215,7 @@ async def run(item_id: int, output_dir: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--item-id", type=int, default=53)
+    parser.add_argument("--item-id", type=int, action="append", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     asyncio.run(run(args.item_id, args.output_dir))

@@ -789,7 +789,7 @@ def generate_infographic(item: ItemView, structured: dict, stages: list[Stage]) 
     lang = language_directive(sample)
     prompt = _build_infographic_prompt(item, structured, lang)
 
-    with Stage("infographic", provider="gemini", model=llm._image_model()) as st:
+    with Stage("infographic", provider="rightcode", model=llm._image_model()) as st:
         res = llm.generate_image(prompt, system=INFOGRAPHIC_SYSTEM)
         st.request_count += 1
         st.total_tokens += res.total_tokens

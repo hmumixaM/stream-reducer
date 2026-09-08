@@ -34,6 +34,7 @@ describe("AI4 collection manifest", () => {
     ).toEqual([]);
     expect(manifest.cover_url).toBe("/collection-covers/ai4-2026.svg");
     expect(manifest.auto_translate_langs).toEqual(["zh"]);
+    expect(manifest.auto_infographic).toBe(true);
   });
 
   it("preserves all 2025 source videos and track memberships", () => {

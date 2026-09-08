@@ -8,8 +8,7 @@ name: Deploy to Cloudflare
 #   CLOUDFLARE_ACCOUNT_ID  - 6789acff6cdae2c3d5073a701c708db7
 #   GEMINI_API_KEY         - Gemini summary proxy bearer token
 #   OPENROUTER_API_KEY     - OpenRouter Whisper key
-#   GEMINI_IMAGE_API_KEY   - Google AI Studio key for infographic image gen
-#                            (optional; falls back to GEMINI_API_KEY when unset)
+#   RIGHTCODE_API_KEY      - RightCode Draw API key for 4K infographic generation
 
 on:
   push:
@@ -67,10 +66,10 @@ jobs:
           secrets: |
             GEMINI_API_KEY
             OPENROUTER_API_KEY
-            GEMINI_IMAGE_API_KEY
+            RIGHTCODE_API_KEY
             ADMIN_TOKEN
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GEMINI_IMAGE_API_KEY: ${{ secrets.GEMINI_IMAGE_API_KEY }}
+          RIGHTCODE_API_KEY: ${{ secrets.RIGHTCODE_API_KEY }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
