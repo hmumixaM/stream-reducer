@@ -3,6 +3,9 @@
   "title": "AI4 2026",
   "description": "AI4 2026 conference sessions, organized by category and track.",
   "source_url": "https://videos.ai4.io/2026/",
+  "auto_translate_langs": [
+    "zh"
+  ],
   "sections": [
     {
       "slug": "ai-transformation",

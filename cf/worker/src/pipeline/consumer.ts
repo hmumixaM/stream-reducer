@@ -3,6 +3,7 @@ import { first, type ItemRow } from "../db";
 import { isoNow } from "../lib/crypto";
 import { persistItemMetadata, cacheThumbnail, recomputePriority } from "../lib/ingest";
 import { attachItemChannelBestEffort } from "../lib/itemChannel";
+import { enqueueAutomaticTranslations } from "../lib/autoTranslate";
 import { runPipeline, runPipelineStreaming, type JsonObject, type PipelineResult, type ProgressEvent } from "./container";
 import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
@@ -581,6 +582,13 @@ async function persistCompletedPipeline(env: Env, itemId: number, result: Pipeli
   await persistResultWithDiagnostics(env, itemId, result);
   await embedChunks(env, itemId);
   await markItemDone(env, itemId);
+  try {
+    await enqueueAutomaticTranslations(env, itemId);
+  } catch (error) {
+    // Translation is follow-up work: a queue outage must not roll a successfully
+    // summarized source item back into the processing pipeline.
+    console.error("automatic translation enqueue failed", itemId, error);
+  }
 }
 
 const EMPTY_SUMMARY_MARKERS = [

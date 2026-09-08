@@ -25,6 +25,7 @@ export interface CollectionManifest {
   title: string;
   description: string;
   source_url: string;
+  auto_translate_langs?: string[];
   sections: CollectionManifestSection[];
 }
 
@@ -73,15 +74,23 @@ async function upsertHierarchy(
 ): Promise<{ collectionId: number; trackIds: Map<string, number> }> {
   const collection = await first<{ id: number }>(
     env.DB.prepare(
-      `INSERT INTO collection (slug, title, description, source_url)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO collection
+         (slug, title, description, source_url, auto_translate_langs)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(slug) DO UPDATE SET
          title = excluded.title,
          description = excluded.description,
          source_url = excluded.source_url,
+         auto_translate_langs = excluded.auto_translate_langs,
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
        RETURNING id`,
-    ).bind(manifest.slug, manifest.title, manifest.description, manifest.source_url),
+    ).bind(
+      manifest.slug,
+      manifest.title,
+      manifest.description,
+      manifest.source_url,
+      JSON.stringify(manifest.auto_translate_langs ?? []),
+    ),
   );
   if (!collection) throw new Error("failed to upsert collection");
 

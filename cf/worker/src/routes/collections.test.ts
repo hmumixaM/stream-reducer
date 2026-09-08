@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import type { AppContext } from "../auth";
 import type { Env } from "../env";
-import ai4ManifestJson from "../manifests/ai4-2026.json";
+import ai42025ManifestJson from "../manifests/ai4-2025.json";
+import ai42026ManifestJson from "../manifests/ai4-2026.json";
 import {
   flattenManifestVideos,
   importCollectionBatch,
@@ -16,8 +17,8 @@ vi.mock("../auth", () => ({
 import { collectionRoutes } from "./collections";
 
 describe("AI4 collection manifest", () => {
-  it("preserves the source hierarchy and multi-track membership", () => {
-    const manifest = ai4ManifestJson as CollectionManifest;
+  it("preserves the 2026 source hierarchy and multi-track membership", () => {
+    const manifest = ai42026ManifestJson as CollectionManifest;
     const videos = flattenManifestVideos(manifest);
 
     expect(manifest.sections).toHaveLength(6);
@@ -26,6 +27,20 @@ describe("AI4 collection manifest", () => {
     ).toBe(76);
     expect(videos).toHaveLength(422);
     expect(videos.filter((video) => video.memberships.length > 1)).toHaveLength(28);
+    expect(manifest.auto_translate_langs).toEqual(["zh"]);
+  });
+
+  it("preserves all 2025 source videos and track memberships", () => {
+    const manifest = ai42025ManifestJson as CollectionManifest;
+    const videos = flattenManifestVideos(manifest);
+
+    expect(manifest.sections).toHaveLength(7);
+    expect(
+      manifest.sections.reduce((count, section) => count + section.tracks.length, 0),
+    ).toBe(64);
+    expect(videos).toHaveLength(356);
+    expect(videos.filter((video) => video.memberships.length > 1)).toHaveLength(35);
+    expect(manifest.auto_translate_langs).toEqual(["zh"]);
   });
 });
 
@@ -143,7 +158,7 @@ function importEnv() {
             return statement;
           },
           async first() {
-            if (sql.includes("INSERT INTO collection ")) return { id: 1 };
+            if (sql.includes("INSERT INTO collection\n")) return { id: 1 };
             if (sql.includes("INSERT INTO collection_section")) return { id: 2 };
             if (sql.includes("INSERT INTO collection_track ")) return { id: 3 };
             if (sql.includes("platform = ? AND external_id = ?")) return item ?? null;
