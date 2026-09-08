@@ -199,7 +199,15 @@ The import creates global items rather than attaching them to one user's
 folder. Every new or previously failed video is queued once, while its category
 and track memberships remain publicly readable under `/api/collections`.
 Publisher descriptions are stored verbatim in both the structured summary and
-the rendered `Video description` section.
+the rendered `Video description` section. If any summaries were completed by a
+stale pre-release container during a rollout, repair them without another LLM
+call by paging through:
+
+```bash
+curl -X POST \
+  -H "x-admin-token: $ADMIN_TOKEN" \
+  "https://reducer.xgoose.org/api/admin/collections/ai4-2026/backfill-descriptions?offset=0&limit=100"
+```
 
 Existing URL-keyed subscriptions are migrated after `0010_channels.sql` is
 deployed. Admins first call

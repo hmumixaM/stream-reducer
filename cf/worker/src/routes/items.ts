@@ -6,6 +6,7 @@ import { toItemRead } from "../lib/serialize";
 import { addUrlToLibrary, expandPlaylistUrls, recomputePriority } from "../lib/ingest";
 import { splitUrls, nonItemUrlError } from "../lib/url";
 import { readJson } from "../lib/request";
+import { includeSummaryDescription } from "../lib/summaryDescription";
 import {
   LIBRARY_SORT_COLUMNS,
   SORT_COLUMNS,
@@ -308,11 +309,19 @@ itemsRoutes.get("/:id", async (c) => {
   const infographic = await first<{ status: string; model: string; image_key: string | null; error: string | null }>(
     c.env.DB.prepare("SELECT status, model, image_key, error FROM item_infographic WHERE item_id = ?").bind(id),
   );
+  const summaryContent = summary
+    ? includeSummaryDescription(
+        summary.markdown,
+        JSON.parse(summary.structured || "{}") as Record<string, unknown>,
+        item.description,
+        item.source_url,
+      )
+    : null;
 
   return c.json({
     ...toItemRead(item, ui, { is_interested: interested != null }),
-    summary: summary
-      ? { ...summary, structured: JSON.parse(summary.structured || "{}") }
+    summary: summaryContent
+      ? { ...summary, ...summaryContent }
       : null,
     transcript: transcript
       ? { ...transcript, segments: JSON.parse(transcript.segments || "[]") }
