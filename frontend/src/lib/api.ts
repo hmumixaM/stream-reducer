@@ -255,6 +255,40 @@ export interface Group {
   created_at: string;
 }
 
+export interface CollectionTrack {
+  id: number;
+  section_id: number;
+  title: string;
+  position: number;
+  item_count: number;
+  ready_count: number;
+}
+
+export interface CollectionSection {
+  id: number;
+  slug: string;
+  title: string;
+  position: number;
+  item_count: number;
+  tracks: CollectionTrack[];
+}
+
+export interface CollectionRead {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  source_url: string;
+  item_count: number;
+  ready_count: number;
+  section_count: number;
+  thumbnail?: string | null;
+}
+
+export interface CollectionDetail extends CollectionRead {
+  sections: CollectionSection[];
+}
+
 export interface Subscription {
   id: number;
   channel_id?: number | null;
@@ -746,6 +780,22 @@ export const api = {
   listItems: (params?: ListItemsParams) => req<Item[]>(`/api/items/library${itemQuery(params)}`),
   // The global catalog everyone has ingested (Browse page).
   browseItems: (params?: ListItemsParams) => req<Item[]>(`/api/items${itemQuery(params)}`),
+  listCollections: () => req<CollectionRead[]>("/api/collections"),
+  getCollection: (slug: string) =>
+    req<CollectionDetail>(`/api/collections/${encodeURIComponent(slug)}`),
+  listCollectionTrackItems: (
+    slug: string,
+    trackId: number,
+    params?: { limit?: number; offset?: number },
+  ) => {
+    const sp = new URLSearchParams();
+    if (params?.limit !== undefined) sp.set("limit", String(params.limit));
+    if (params?.offset !== undefined) sp.set("offset", String(params.offset));
+    const qs = sp.toString();
+    return req<Item[]>(
+      `/api/collections/${encodeURIComponent(slug)}/tracks/${trackId}/items${qs ? `?${qs}` : ""}`,
+    );
+  },
   listGroups: (archived?: boolean) =>
     MIRROR
       ? mirrorJson<Group[]>("/data/groups.json")

@@ -34,10 +34,10 @@ Worker (Hono, TS)  ──►  D1            (users, items, user_item, subs, ...)
 - **Container**: `cf/pipeline` (Python + FastAPI). Reuses the repo's
   `app/adapters` for platform handling. Stateless: returns JSON the Worker
   persists.
-- **Frontend**: the existing `frontend/` SPA. The global **Browse** view and
-  item detail pages are public (no account needed); the per-user **Library**,
-  Search, Graph, annotations, queue, subscriptions, and settings require a
-  magic-link session.
+- **Frontend**: the existing `frontend/` SPA. The global **Browse**,
+  **Collections**, collection detail, and item detail pages are public (no
+  account needed); the per-user **Library**, Search, Graph, annotations, queue,
+  subscriptions, and settings require a magic-link session.
 
 ## Prerequisites
 
@@ -171,6 +171,7 @@ ingest pipeline calls will fail locally but the rest of the API works.
 | --- | --- |
 | Email-only magic-link accounts | `src/auth.ts`, `src/routes/auth.ts` (Email Service `EMAIL` binding) |
 | Individual library / browse-all / add | `src/routes/items.ts` (`/api/items` global, `/api/items/library` personal) |
+| Public curated collections | `migrations/0011_collections.sql`, `src/routes/collections.ts`, and the checked-in AI4 manifest under `src/manifests/` |
 | Per-user comments + highlights | `src/routes/annotations.ts` (every row carries `user_id`) |
 | Per-user knowledge graph | `src/routes/graph.ts` (filters the global graph by the user's `user_item`) |
 | Shared channel catalog + per-user follows | `migrations/0010_channels.sql`, `src/lib/channels.ts`, `src/routes/channels.ts`; the legacy `subscription` row remains the per-user follow so folders, poll cursors, comments, and highlights keep their IDs |
@@ -181,6 +182,24 @@ ingest pipeline calls will fail locally but the rest of the API works.
 | Dedup (one item, many libraries, waiting/done) | `src/lib/ingest.ts` + `user_item` join in `migrations/0001_init.sql`; the per-user `waiting` badge surfaces in Browse/Library (`components/ItemCard.tsx`, `pages/Browse.tsx`) |
 | Gemini summary endpoint | `vars.LLM_BASE_URL` + `GEMINI_API_KEY` (used in `cf/pipeline/llm.py`) |
 | OpenRouter STT (unchanged) | `cf/pipeline/llm.py` `transcribe_chunk` |
+
+### Importing the AI4 2026 collection
+
+After migration `0011_collections.sql` and the matching Worker are deployed,
+the admin import is resumable and idempotent. Call it in batches until
+`done: true`, passing the returned `next_offset` into the next request:
+
+```bash
+curl -X POST \
+  -H "x-admin-token: $ADMIN_TOKEN" \
+  "https://reducer.xgoose.org/api/admin/collections/ai4-2026/import?offset=0&limit=25"
+```
+
+The import creates global items rather than attaching them to one user's
+folder. Every new or previously failed video is queued once, while its category
+and track memberships remain publicly readable under `/api/collections`.
+Publisher descriptions are stored verbatim in both the structured summary and
+the rendered `Video description` section.
 
 Existing URL-keyed subscriptions are migrated after `0010_channels.sql` is
 deployed. Admins first call

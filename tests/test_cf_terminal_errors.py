@@ -11,7 +11,7 @@ import pytest
 # siblings flatly ("import llm"). Reproduce that layout to import it here.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cf" / "pipeline"))
 
-from pipeline import _is_gone, _is_members_only  # noqa: E402
+from pipeline import ItemView, _is_gone, _is_members_only, render_markdown  # noqa: E402
 
 
 @pytest.mark.parametrize(
@@ -54,3 +54,17 @@ def test_age_gated_is_terminal():
 
 def test_paid_content_is_still_terminal():
     assert _is_members_only("ERROR: [BiliBili] xyz: 该视频为充电专属视频")
+
+
+def test_cloudflare_summary_contains_original_video_description():
+    item = ItemView(
+        platform="youtube",
+        source_url="https://www.youtube.com/watch?v=abc",
+        description="Original AI4 abstract.",
+    )
+    structured = {"tldr": "Short summary."}
+
+    markdown = render_markdown(item, structured)
+
+    assert "## Video description\nOriginal AI4 abstract." in markdown
+    assert structured["description"] == "Original AI4 abstract."

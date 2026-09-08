@@ -16,6 +16,7 @@ import { queueRoutes } from "./routes/queue";
 import { settingsRoutes } from "./routes/settings";
 import { adminRoutes } from "./routes/admin";
 import { oauthRoutes } from "./routes/oauth";
+import { collectionRoutes } from "./routes/collections";
 import { mcpHandler } from "./routes/mcp";
 import { handleMessage, failStrandedItems } from "./pipeline/consumer";
 import { pollDueSubscriptions } from "./pipeline/subscriptions";
@@ -33,6 +34,7 @@ app.route("/api/items/groups", folderRoutes);
 // Comments/highlights (/api/items/:id/...) + the /api/annotations feed.
 app.route("/api", annotationRoutes);
 app.route("/api/items", itemsRoutes);
+app.route("/api/collections", collectionRoutes);
 app.route("/api/subscriptions", subscriptionRoutes);
 app.route("/api/channels", channelRoutes);
 app.route("/api/timeline", timelineRoutes);

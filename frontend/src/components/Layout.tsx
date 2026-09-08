@@ -14,6 +14,7 @@ import {
   BarChart3,
   Settings as SettingsIcon,
   Plus,
+  FolderKanban,
   Moon,
   Sun,
   Menu,
@@ -50,6 +51,7 @@ const NAV: {
   { to: "/subscriptions", label: "Channels", icon: Rss, section: "main" },
   { to: "/library", label: "Saved", icon: Bookmark, section: "main" },
   { to: "/browse", label: "Browse", icon: Compass, section: "discover" },
+  { to: "/collections", label: "Collections", icon: FolderKanban, section: "discover" },
   { to: "/search", label: "Search", icon: SearchIcon, section: "discover" },
   { to: "/graph", label: "Graph", icon: Network, section: "discover" },
   { to: "/annotations", label: "Highlights", icon: Highlighter, section: "discover" },
@@ -64,7 +66,7 @@ const NAV: {
 // library rather than a timeline; browsing, search, and the graph are reachable.
 const MIRROR_NAV = new Set(["/", "/search", "/graph"]);
 // Anonymous (no session) visitors can only browse the global catalog.
-const PUBLIC_NAV = new Set(["/browse"]);
+const PUBLIC_NAV = new Set(["/browse", "/collections"]);
 const MIRROR_LABELS: Record<string, string> = { "/": "Library" };
 
 function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {

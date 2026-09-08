@@ -274,6 +274,12 @@ def _chunk_segments(segments: list[dict], max_chars: int) -> list[str]:
 
 def render_markdown(item: ItemView, structured: dict) -> str:
     lines: list[str] = []
+    description = (item.description or "").strip()
+    if description:
+        # Keep the publisher's original description as first-class summary
+        # content. It was historically prompt context only, so the model could
+        # omit details even though the item row retained them.
+        structured["description"] = description
     if structured.get("background"):
         lines += ["## Background", structured["background"], ""]
     if structured.get("tldr"):
@@ -304,6 +310,8 @@ def render_markdown(item: ItemView, structured: dict) -> str:
     danmaku = structured.get("danmaku")
     if isinstance(danmaku, dict):
         lines += render_danmaku_markdown(danmaku)
+    if structured.get("description"):
+        lines += ["## Video description", str(structured["description"]), ""]
     if item.source_url:
         lines.append(f"[Source]({item.source_url})")
     return "\n".join(lines).strip()

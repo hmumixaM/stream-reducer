@@ -375,6 +375,12 @@ def summarize_via_gemini_audio(
 
 def render_markdown(item: Item, structured: dict) -> str:
     lines: list[str] = []
+    description = (item.description or "").strip()
+    if description:
+        # Persist the publisher's original description in the structured
+        # summary as well as rendering it below. Prompt context alone does not
+        # guarantee that the model reproduces it.
+        structured["description"] = description
 
     background = structured.get("background")
     if background:
@@ -431,6 +437,12 @@ def render_markdown(item: Item, structured: dict) -> str:
     if entities:
         lines.append("## Mentioned")
         lines.append(", ".join(str(e) for e in entities))
+        lines.append("")
+
+    description = structured.get("description")
+    if description:
+        lines.append("## Video description")
+        lines.append(str(description))
         lines.append("")
 
     if item.source_url:

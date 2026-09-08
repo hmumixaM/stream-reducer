@@ -29,6 +29,11 @@ const named = <T extends string>(
 const Timeline = named(() => import("@/pages/Timeline"), "Timeline");
 const Library = named(() => import("@/pages/Library"), "Library");
 const Browse = named(() => import("@/pages/Browse"), "Browse");
+const Collections = named(() => import("@/pages/Collections"), "Collections");
+const CollectionDetail = named(
+  () => import("@/pages/CollectionDetail"),
+  "CollectionDetail",
+);
 const Search = named(() => import("@/pages/Search"), "Search");
 const Graph = named(() => import("@/pages/Graph"), "Graph");
 const FolderView = named(() => import("@/pages/FolderView"), "FolderView");
@@ -154,6 +159,8 @@ const router = createBrowserRouter([
       { index: true, element: <Home /> },
       // Public, read-only content.
       { path: "browse", element: <Browse /> },
+      { path: "collections", element: <Collections /> },
+      { path: "collections/:slug", element: <CollectionDetail /> },
       { path: "items/:id", element: <ItemDetail /> },
       // Personal pages require a session.
       { path: "library", element: <RequireAuth><Library /></RequireAuth> },

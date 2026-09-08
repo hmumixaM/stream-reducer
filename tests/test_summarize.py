@@ -35,7 +35,11 @@ def test_chunk_segments_splits():
 
 
 def test_render_markdown():
-    item = Item(platform=Platform.youtube, source_url="https://youtu.be/x")
+    item = Item(
+        platform=Platform.youtube,
+        source_url="https://youtu.be/x",
+        description="Original conference abstract.\nSpeaker: Ada",
+    )
     structured = {
         "background": "Uploaded by Acme on YouTube; a talk about Python.",
         "tldr": "A talk.",
@@ -51,6 +55,9 @@ def test_render_markdown():
     assert "Point one" in md
     assert "t=30s" in md
     assert "Python" in md
+    assert "## Video description" in md
+    assert "Original conference abstract.\nSpeaker: Ada" in md
+    assert structured["description"] == "Original conference abstract.\nSpeaker: Ada"
     assert "[Source]" in md
 
 
