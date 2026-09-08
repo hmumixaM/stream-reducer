@@ -22,6 +22,7 @@ from app.pipeline.prompts import (
     STRICT_JSON_SUFFIX,
     language_directive,
 )
+from app.pipeline.summary_quality import map_notes_issue
 from app.runtime_config import effective_llm_model, effective_summary_map_model
 
 logger = logging.getLogger(__name__)
@@ -238,7 +239,13 @@ def summarize_item(session: Session, item_id: int, tracker: StageTracker | None 
             max_tokens=settings.summary_map_max_tokens,
         )
         _record(tracker, result, model=map_model)
-        note_blocks.append(strip_body_timestamps(_strip_fences(result.text).strip()))
+        notes = strip_body_timestamps(_strip_fences(result.text).strip())
+        issue = map_notes_issue(notes, chunk)
+        if issue:
+            raise RuntimeError(
+                f"summary map chunk {idx}/{len(chunks)} is incomplete: {issue}"
+            )
+        note_blocks.append(notes)
         if tracker is not None:
             tracker.chunk_progress(idx)
     walkthrough = "\n\n".join(note_blocks)

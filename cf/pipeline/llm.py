@@ -13,6 +13,7 @@ import os
 import random
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import httpx
@@ -58,11 +59,17 @@ def _validated_chat_content(data: object, model: str) -> str:
     makes the item retry rather than marking it done with the diagnostic text.
     """
     try:
-        content = data["choices"][0]["message"].get("content") or ""  # type: ignore[index]
+        choice = data["choices"][0]  # type: ignore[index]
+        content = choice["message"].get("content") or ""
     except (KeyError, IndexError, TypeError, AttributeError) as exc:
         raise httpx.RemoteProtocolError(
             f"LLM response from {model} has no assistant content",
         ) from exc
+    finish_reason = choice.get("finish_reason")
+    if finish_reason in {"length", "max_tokens"}:
+        raise httpx.RemoteProtocolError(
+            f"LLM response from {model} was truncated ({finish_reason})",
+        )
     if not isinstance(content, str):
         raise httpx.RemoteProtocolError(f"LLM response from {model} has non-text content")
 
@@ -129,6 +136,7 @@ def generate_text(
     model: str | None = None,
     max_tokens: int | None = None,
     temperature: float = 0.2,
+    content_error: Callable[[str], str | None] | None = None,
 ) -> LlmResult:
     key = os.environ["GEMINI_API_KEY"]
     messages: list[dict] = []
@@ -151,7 +159,17 @@ def generate_text(
     for attempt_model in attempts:
         try:
             res = _chat_once(attempt_model, messages, temperature, max_tokens, key)
-            log.info("llm ok model=%s %dms tokens=%d", attempt_model, res.latency_ms, res.total_tokens)
+            issue = content_error(res.text) if content_error else None
+            if issue:
+                raise httpx.RemoteProtocolError(
+                    f"LLM response from {attempt_model} failed quality validation: {issue}",
+                )
+            log.info(
+                "llm ok model=%s %dms tokens=%d",
+                attempt_model,
+                res.latency_ms,
+                res.total_tokens,
+            )
             return res
         except httpx.HTTPError as exc:
             last_exc = exc

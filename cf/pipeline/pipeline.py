@@ -42,6 +42,7 @@ from app.pipeline.prompts import (
     INFOGRAPHIC_TEMPLATE,
     language_directive,
 )
+from app.pipeline.summary_quality import map_notes_issue
 from app.zh import to_simplified
 
 import llm
@@ -227,6 +228,14 @@ def _strip_fences(text: str) -> str:
         if text.rstrip().endswith("```"):
             text = text.rstrip()[:-3]
     return text
+
+
+def _map_content_error(source_chunk: str):
+    def validate(text: str) -> str | None:
+        notes = strip_body_timestamps(_strip_fences(text).strip())
+        return map_notes_issue(notes, source_chunk)
+
+    return validate
 
 
 def _build_context(item: ItemView) -> str:
@@ -819,23 +828,32 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
         for i, chunk in enumerate(chunks, start=1):
             emit(f"notes {i}/{len(chunks)}")
             if time.monotonic() > deadline:
-                logger.warning("summarize budget exceeded at map chunk %d/%d; using partial", i, len(chunks))
-                break
+                raise RuntimeError(
+                    f"summarize budget exceeded before map chunk {i}/{len(chunks)}"
+                )
+            prompt = MAP_TEMPLATE.format(
+                context=context,
+                index=i,
+                total=len(chunks),
+                chunk=chunk,
+                language_instruction=lang,
+            )
+
             try:
                 res = llm.generate_text(
-                    MAP_TEMPLATE.format(context=context, index=i, total=len(chunks), chunk=chunk, language_instruction=lang),
-                    system=map_system, max_tokens=SUMMARY_MAP_MAX_TOKENS,
+                    prompt,
+                    system=map_system,
+                    max_tokens=SUMMARY_MAP_MAX_TOKENS,
+                    content_error=_map_content_error(chunk),
                 )
             except httpx.HTTPError as exc:
-                # A stalled/failed map call shouldn't hang the whole job; skip
-                # this chunk's notes (best-effort) rather than overrun the budget.
-                logger.warning("summary map chunk %d/%d LLM call failed: %s", i, len(chunks), exc)
-                continue
+                raise RuntimeError(
+                    f"summary map chunk {i}/{len(chunks)} failed quality or transport checks"
+                ) from exc
             st.request_count += 1
             st.total_tokens += res.total_tokens
             notes = strip_body_timestamps(_strip_fences(res.text).strip())
-            if notes:
-                note_blocks.append(notes)
+            note_blocks.append(notes)
         if not note_blocks:
             # Never turn an upstream outage into a successful item with an empty
             # or diagnostic-only body. Raising here re-queues the item; the
