@@ -166,7 +166,12 @@ adminRoutes.post("/queue/:id/bump", async (c) => {
 // Re-enqueue a stuck/errored item.
 adminRoutes.post("/queue/:id/retry", async (c) => {
   const id = Number(c.req.param("id"));
-  await c.env.DB.prepare("UPDATE item SET status = 'queued', error = NULL WHERE id = ?").bind(id).run();
+  await c.env.DB.prepare(
+    `UPDATE item SET status = 'queued', error = NULL, retry_count = 0,
+       started_at = NULL, completed_at = NULL,
+       progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+     WHERE id = ?`,
+  ).bind(id).run();
   await c.env.PIPELINE.send({ kind: "process", item_id: id });
   return c.json({ ok: true });
 });

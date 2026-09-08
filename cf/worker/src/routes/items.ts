@@ -449,7 +449,12 @@ itemsRoutes.post("/:id/retry", requireAuth, async (c) => {
   const id = Number(c.req.param("id"));
   const item = await first<ItemRow>(c.env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(id));
   if (!item) return c.json({ error: "item not found" }, 404);
-  await c.env.DB.prepare("UPDATE item SET status = 'queued', error = NULL WHERE id = ?").bind(id).run();
+  await c.env.DB.prepare(
+    `UPDATE item SET status = 'queued', error = NULL, retry_count = 0,
+       started_at = NULL, completed_at = NULL,
+       progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+     WHERE id = ?`,
+  ).bind(id).run();
   await c.env.PIPELINE.send({ kind: "process", item_id: id });
   return c.json(toItemRead({ ...item, status: "queued", error: null }));
 });
@@ -462,10 +467,20 @@ itemsRoutes.post("/:id/regenerate", requireAuth, async (c) => {
     c.env.DB.prepare("SELECT id FROM transcript WHERE item_id = ?").bind(id),
   );
   if (transcript) {
-    await c.env.DB.prepare("UPDATE item SET status = 'summarizing', error = NULL WHERE id = ?").bind(id).run();
+    await c.env.DB.prepare(
+      `UPDATE item SET status = 'summarizing', error = NULL, retry_count = 0,
+         started_at = NULL, completed_at = NULL,
+         progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+       WHERE id = ?`,
+    ).bind(id).run();
     await c.env.PIPELINE.send({ kind: "resummarize", item_id: id });
   } else {
-    await c.env.DB.prepare("UPDATE item SET status = 'queued', error = NULL WHERE id = ?").bind(id).run();
+    await c.env.DB.prepare(
+      `UPDATE item SET status = 'queued', error = NULL, retry_count = 0,
+         started_at = NULL, completed_at = NULL,
+         progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+       WHERE id = ?`,
+    ).bind(id).run();
     await c.env.PIPELINE.send({ kind: "process", item_id: id });
   }
   return c.json(toItemRead(item));

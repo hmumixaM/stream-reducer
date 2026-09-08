@@ -107,8 +107,16 @@
         // "Maximum number of running container instances exceeded". (Capacity
         // errors are also self-healed now: the consumer re-queues the item
         // instead of failing it.)
-        "max_concurrency": 6,
-        "max_retries": 3,
+        // Summarization fans each item out into several sequential LLM calls.
+        // Six jobs produced 30+ simultaneous proxy requests during the AI4
+        // import, after which the proxy returned empty responses and Workers
+        // repeatedly hit their invocation limit. Keep this conservative: two
+        // jobs still drain continuously without overwhelming the shared proxy.
+        "max_concurrency": 2,
+        // The consumer gives up on the fifth content failure. Queue redelivery
+        // must allow it to reach that terminal decision; three retries stopped
+        // one attempt early and left items stranded in "summarizing".
+        "max_retries": 5,
         "dead_letter_queue": "stream-reduce-pipeline-dlq"
       }
     ]

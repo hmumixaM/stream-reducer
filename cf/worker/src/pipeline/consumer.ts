@@ -17,7 +17,7 @@ export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAtte
       }
       return processNextQueuedItem(env, msg.item_id);
     case "resummarize":
-      return processItem(env, msg.item_id, true);
+      return processItem(env, msg.item_id, true, deliveryAttempt > 1);
     case "structured_backfill":
       return backfillStructuredItem(env, msg.item_id, "structured_backfill");
     case "headline_backfill":
@@ -110,7 +110,11 @@ async function processNextQueuedItem(env: Env, preferredItemId = 0): Promise<voi
   // overlapping, and it ensures the chain survives even if this invocation is
   // evicted mid-job (which previously stalled the whole queue).
   await enqueueNextIfWork(env);
-  await processClaimedItem(env, item, false);
+  // A stale/errored item may already have streamed its transcript to D1 before
+  // the Worker was evicted. Resume from that durable checkpoint instead of
+  // downloading and transcribing the same media again. Repeating those stages
+  // wastes most of the invocation budget and amplifies load during a backlog.
+  await processClaimedItem(env, item, await hasTranscript(env, item.id));
 }
 
 // Reclaim the next claimable item: a queued one, or one stuck in-progress past
@@ -156,11 +160,7 @@ async function recoverRetriedProcessItem(env: Env, itemId: number): Promise<void
   const item = await first<ItemRow>(env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(itemId));
   if (!item || item.status === "done" || item.status === "excluded") return;
 
-  const transcriptAvailable = Boolean(
-    await first<{ id: number }>(
-      env.DB.prepare("SELECT id FROM transcript WHERE item_id = ?").bind(itemId),
-    ),
-  );
+  const transcriptAvailable = await hasTranscript(env, itemId);
   const startedAt = isoNow();
   // Optimistic lease: only one duplicate/redelivered message can move the row
   // from the state and start timestamp it observed. This makes an unacked queue
@@ -179,6 +179,14 @@ async function recoverRetriedProcessItem(env: Env, itemId: number): Promise<void
     env,
     { ...item, status: "fetching", started_at: startedAt, error: null },
     transcriptAvailable,
+  );
+}
+
+async function hasTranscript(env: Env, itemId: number): Promise<boolean> {
+  return Boolean(
+    await first<{ id: number }>(
+      env.DB.prepare("SELECT id FROM transcript WHERE item_id = ?").bind(itemId),
+    ),
   );
 }
 
@@ -388,18 +396,36 @@ async function backfillStructuredItem(
   }
 }
 
-async function processItem(env: Env, itemId: number, resummarize = false): Promise<void> {
+async function processItem(
+  env: Env,
+  itemId: number,
+  resummarize = false,
+  reclaimRetriedMessage = false,
+): Promise<void> {
   const item = await first<ItemRow>(env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(itemId));
   if (!item) return;
 
-  await env.DB.prepare(
-    `UPDATE item SET status = 'fetching', started_at = ?, error = NULL,
+  // A resummarize message is only valid while the item is waiting for that
+  // stage. Claim it conditionally so duplicate queue messages cannot restart an
+  // already-running or completed item and double the upstream LLM traffic.
+  const startedAt = isoNow();
+  const claimed = await env.DB.prepare(
+    `UPDATE item SET status = ?, started_at = ?, error = NULL,
        progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
-     WHERE id = ?`,
+     WHERE id = ?${
+       resummarize
+         ? ` AND status = 'summarizing'${reclaimRetriedMessage ? "" : " AND started_at IS NULL"}`
+         : ""
+     }`,
   )
-    .bind(isoNow(), itemId)
+    .bind(resummarize ? "summarizing" : "fetching", startedAt, itemId)
     .run();
-  return processClaimedItem(env, { ...item, status: "fetching", error: null }, resummarize);
+  if ((claimed.meta.changes ?? 0) === 0) return;
+  return processClaimedItem(
+    env,
+    { ...item, status: resummarize ? "summarizing" : "fetching", started_at: startedAt, error: null },
+    resummarize,
+  );
 }
 
 // Map a streamed pipeline stage to the item's coarse status.
@@ -441,7 +467,7 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
     }
     await persistCompletedPipeline(env, itemId, result);
   } catch (err) {
-    await handlePipelineFailure(env, itemId, runStart, err, resummarize);
+    await handlePipelineFailure(env, itemId, runStart, err);
   }
 }
 
@@ -658,7 +684,6 @@ async function handlePipelineFailure(
   itemId: number,
   runStart: number,
   err: unknown,
-  resummarize: boolean,
 ): Promise<void> {
   const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
   const transcriptAvailable = Boolean(
@@ -671,7 +696,6 @@ async function handlePipelineFailure(
   // burning a retry attempt, so it keeps retrying until a slot frees.
   if (isTransientCapacity(msg)) {
     await requeueTransientPipelineItem(env, itemId, transcriptAvailable);
-    await enqueueResummarizeAfterProcessFailure(env, itemId, resummarize, transcriptAvailable);
     console.warn("pipeline item deferred — capacity, re-queued", itemId);
     throw err;
   }
@@ -685,11 +709,10 @@ async function handlePipelineFailure(
   const attempts = (row?.retry_count ?? 0) + 1;
   if (attempts < MAX_RETRIES) {
     await requeueForRetry(env, itemId, attempts, transcriptAvailable);
-    await enqueueResummarizeAfterProcessFailure(env, itemId, resummarize, transcriptAvailable);
-    // Rethrow so the queue redelivers this message promptly for the retry; a
-    // continuation was also enqueued before processing. If the transcript was
-    // already streamed to D1, an explicit resummarize message was enqueued above
-    // so this retry does NOT pay for download + STT again.
+    // Rethrow so this same queue message is redelivered. The redelivery path
+    // detects the persisted transcript and resumes summarization. Do not enqueue
+    // a second message here: the old behavior raced two jobs for one item,
+    // doubling LLM pressure and sometimes overwriting a completed result.
     console.warn(`pipeline item ${itemId} failed (attempt ${attempts}/${MAX_RETRIES}) — re-queued: ${msg}`);
     throw err;
   }
@@ -705,6 +728,7 @@ async function requeueTransientPipelineItem(
 ): Promise<void> {
   await env.DB.prepare(
     `UPDATE item SET status = ?, error = NULL,
+       started_at = NULL,
        progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
      WHERE id = ?`,
   )
@@ -722,26 +746,12 @@ async function requeueForRetry(
 ): Promise<void> {
   await env.DB.prepare(
     `UPDATE item SET status = ?, error = NULL, retry_count = ?,
+       started_at = NULL,
        progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
      WHERE id = ?`,
   )
     .bind(transcriptAvailable ? "summarizing" : "queued", retryCount, itemId)
     .run();
-}
-
-async function enqueueResummarizeAfterProcessFailure(
-  env: Env,
-  itemId: number,
-  resummarize: boolean,
-  transcriptAvailable: boolean,
-): Promise<void> {
-  // A retried `resummarize` queue message already has the right kind. A failed
-  // full `process` message does not: once its partial transcript is in D1,
-  // enqueue the cheap continuation explicitly and let the original redelivery
-  // move on to other queued work.
-  if (transcriptAvailable && !resummarize) {
-    await env.PIPELINE.send({ kind: "resummarize", item_id: itemId });
-  }
 }
 
 async function markItemErrored(env: Env, itemId: number, msg: string): Promise<void> {
