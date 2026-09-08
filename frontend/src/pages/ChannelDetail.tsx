@@ -41,6 +41,7 @@ import {
   type ChannelItemRead,
 } from "@/lib/api";
 import { cn, formatCount } from "@/lib/utils";
+import { useMe } from "@/lib/auth";
 
 const PAGE_SIZE = 30;
 type SavedFilter = "all" | "saved" | "unsaved";
@@ -51,6 +52,8 @@ const SAVED_LABELS: Record<SavedFilter, string> = {
 };
 
 export function ChannelDetail() {
+  const me = useMe();
+  const canPersonalize = Boolean(me.data?.user);
   const { id } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const channelId = Number(id);
@@ -59,7 +62,9 @@ export function ChannelDetail() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const sort = searchParams.get("sort") ?? "published";
-  const savedFilter = (searchParams.get("saved") ?? "all") as SavedFilter;
+  const savedFilter = canPersonalize
+    ? ((searchParams.get("saved") ?? "all") as SavedFilter)
+    : "all";
   const setParam = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams);
     if (value) params.set(key, value);
@@ -76,7 +81,7 @@ export function ChannelDetail() {
   const groups = useQuery({
     queryKey: ["groups"],
     queryFn: () => api.listGroups(),
-    enabled: validId,
+    enabled: validId && canPersonalize,
   });
   const items = useInfiniteQuery({
     queryKey: ["channel", channelId, "items", { sort, saved: savedFilter }],
@@ -215,6 +220,7 @@ export function ChannelDetail() {
               channelId={channelId}
               follow={follow}
               groups={groups.data ?? []}
+              canFollow={canPersonalize}
             />
             {follow && (
               <>
@@ -257,17 +263,22 @@ export function ChannelDetail() {
         <SectionHeader
           id="channel-items-title"
           title="Channel items"
-          subtitle="Items not already in your library can be added individually."
+          subtitle={
+            canPersonalize
+              ? "Items not already in your library can be added individually."
+              : "Browse this channel publicly. Sign in to save individual items."
+          }
           actions={
             <>
-              {(Object.keys(SAVED_LABELS) as SavedFilter[]).map((value) => (
-                <FilterChip
-                  key={value}
-                  label={SAVED_LABELS[value]}
-                  active={savedFilter === value}
-                  onClick={() => setParam("saved", value === "all" ? "" : value)}
-                />
-              ))}
+              {canPersonalize &&
+                (Object.keys(SAVED_LABELS) as SavedFilter[]).map((value) => (
+                  <FilterChip
+                    key={value}
+                    label={SAVED_LABELS[value]}
+                    active={savedFilter === value}
+                    onClick={() => setParam("saved", value === "all" ? "" : value)}
+                  />
+                ))}
               <Select
                 value={sort}
                 className="w-auto min-w-[160px]"
@@ -319,6 +330,7 @@ export function ChannelDetail() {
                       addToLibrary.isPending && addToLibrary.variables?.id === item.id
                     }
                     onAdd={() => addToLibrary.mutate(item)}
+                    canAdd={canPersonalize}
                   />
                 ),
               )}

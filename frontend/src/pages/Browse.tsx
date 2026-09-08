@@ -37,7 +37,7 @@ function readBrowseView(): BrowseView {
 export function Browse() {
   const [q, setQ] = useState("");
   const [platform, setPlatform] = useState("");
-  const [sort, setSort] = useState("added");
+  const [sort, setSort] = useState("published");
   const [view, setView] = useState<BrowseView>(readBrowseView);
   const qc = useQueryClient();
   const me = useMe();

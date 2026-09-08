@@ -16,26 +16,36 @@ export function CatalogItemCard({
   adding,
   onAdd,
   channel,
+  canAdd = true,
 }: {
   item: ChannelItemRead;
   adding: boolean;
   onAdd: () => void;
   channel?: { id: number; title?: string | null } | null;
+  canAdd?: boolean;
 }) {
   return (
     <Card interactive className="group relative flex h-full flex-col overflow-hidden">
       <div className="absolute right-2 top-2 z-10">
-        <Button
-          size="sm"
-          className="shadow-card"
-          disabled={adding}
-          aria-busy={adding}
-          title="Add to library"
-          onClick={onAdd}
-        >
-          {adding ? <Spinner /> : <Plus className="h-4 w-4" />}
-          <span className="hidden sm:inline">{adding ? "Adding…" : "Add"}</span>
-        </Button>
+        {canAdd ? (
+          <Button
+            size="sm"
+            className="shadow-card"
+            disabled={adding}
+            aria-busy={adding}
+            title="Add to library"
+            onClick={onAdd}
+          >
+            {adding ? <Spinner /> : <Plus className="h-4 w-4" />}
+            <span className="hidden sm:inline">{adding ? "Adding…" : "Add"}</span>
+          </Button>
+        ) : (
+          <Link to="/login">
+            <Button size="sm" variant="outline" className="shadow-card">
+              Sign in to add
+            </Button>
+          </Link>
+        )}
       </div>
       <Link to={`/items/${item.id}`} className="block">
         <div className="aspect-video w-full overflow-hidden bg-muted">

@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   useMutation,
   useQueryClient,
@@ -41,6 +42,7 @@ export function ChannelFollowControls({
   settingsOpen = false,
   showFollowButton = true,
   compact = false,
+  canFollow = true,
   onFollowChanged,
 }: {
   channelId: number;
@@ -51,6 +53,8 @@ export function ChannelFollowControls({
   showFollowButton?: boolean;
   /** Tile mode: a single primary action plus an overflow menu, no inline forms. */
   compact?: boolean;
+  /** Anonymous visitors may inspect channels, but following requires a session. */
+  canFollow?: boolean;
   onFollowChanged?: (follow: ChannelFollowRead | null) => void;
 }) {
   const queryClient = useQueryClient();
@@ -100,6 +104,17 @@ export function ChannelFollowControls({
   };
 
   if (!follow) {
+    if (!canFollow) {
+      return (
+        <div onClick={(event) => event.stopPropagation()}>
+          <Link to="/login">
+            <Button size="sm" variant="outline">
+              Sign in to follow
+            </Button>
+          </Link>
+        </div>
+      );
+    }
     return (
       <div className="space-y-3" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-wrap items-center gap-2">

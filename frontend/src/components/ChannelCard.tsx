@@ -17,10 +17,12 @@ import { formatCount, formatDate, timeAgo } from "@/lib/utils";
 export function ChannelCard({
   channel,
   groups,
+  canFollow = true,
   onFollowChanged,
 }: {
   channel: ChannelRead;
   groups: Group[];
+  canFollow?: boolean;
   onFollowChanged?: (follow: ChannelFollowRead | null) => void;
 }) {
   const title = channel.title || channel.feed_url;
@@ -106,6 +108,7 @@ export function ChannelCard({
             channelId={channel.id}
             follow={follow}
             groups={groups}
+            canFollow={canFollow}
             onFollowChanged={onFollowChanged}
           />
         </div>

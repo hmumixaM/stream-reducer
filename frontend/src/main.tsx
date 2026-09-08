@@ -111,6 +111,9 @@ function PublicHome() {
         <Link to="/browse">
           <Button>Browse public catalog</Button>
         </Link>
+        <Link to="/subscriptions">
+          <Button variant="outline">Browse channels</Button>
+        </Link>
         <Link to="/login">
           <Button variant="outline">Sign in with email</Button>
         </Link>
@@ -162,6 +165,8 @@ const router = createBrowserRouter([
       { path: "collections", element: <Collections /> },
       { path: "collections/:slug", element: <CollectionDetail /> },
       { path: "items/:id", element: <ItemDetail /> },
+      { path: "subscriptions", element: <Subscriptions /> },
+      { path: "channels/:id", element: <ChannelDetail /> },
       // Personal pages require a session.
       { path: "library", element: <RequireAuth><Library /></RequireAuth> },
       { path: "search", element: <RequireAuth><Search /></RequireAuth> },
@@ -169,8 +174,6 @@ const router = createBrowserRouter([
       { path: "folders/:id", element: <RequireAuth><FolderView /></RequireAuth> },
       { path: "annotations", element: <RequireAuth><Annotations /></RequireAuth> },
       { path: "queue", element: <RequireAuth><Queue /></RequireAuth> },
-      { path: "subscriptions", element: <RequireAuth><Subscriptions /></RequireAuth> },
-      { path: "channels/:id", element: <RequireAuth><ChannelDetail /></RequireAuth> },
       { path: "stats", element: <RequireAuth><Stats /></RequireAuth> },
       // Admin-only.
       { path: "settings", element: <RequireAdmin><Settings /></RequireAdmin> },

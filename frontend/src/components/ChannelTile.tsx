@@ -14,11 +14,13 @@ import { cn, formatCount, timeAgo } from "@/lib/utils";
 export function ChannelTile({
   channel,
   groups,
+  canFollow = true,
   highlighted = false,
   onFollowChanged,
 }: {
   channel: ChannelRead;
   groups: Group[];
+  canFollow?: boolean;
   /** Set for the just-resolved preview channel so it reads as the new arrival. */
   highlighted?: boolean;
   onFollowChanged?: (follow: ChannelFollowRead | null) => void;
@@ -74,6 +76,7 @@ export function ChannelTile({
           channelId={channel.id}
           follow={channel.follow}
           groups={groups}
+          canFollow={canFollow}
           onFollowChanged={onFollowChanged}
         />
       </div>

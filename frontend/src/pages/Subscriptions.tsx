@@ -6,7 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { Compass, Link2, Rss, Search } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ChannelCard } from "@/components/ChannelCard";
 import { ChannelRow } from "@/components/ChannelRow";
 import { ChannelTile } from "@/components/ChannelTile";
@@ -33,6 +33,7 @@ import {
   type Platform,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useMe } from "@/lib/auth";
 
 const PAGE_SIZE = 24;
 // Follows change only when a poll lands, so a slow baseline is plenty; a poll in
@@ -49,17 +50,29 @@ const PLATFORMS: { value: Platform; label: string }[] = [
 ];
 
 export function Subscriptions() {
+  const me = useMe();
+  const canFollow = Boolean(me.data?.user);
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
-  const tab = requestedTab === "following" ? "following" : "discover";
-  const groups = useQuery({ queryKey: ["groups"], queryFn: () => api.listGroups() });
+  const tab =
+    requestedTab === "following" && canFollow ? "following" : "discover";
+  const groups = useQuery({
+    queryKey: ["groups"],
+    queryFn: () => api.listGroups(),
+    enabled: canFollow,
+  });
 
   useEffect(() => {
-    if (requestedTab === "discover" || requestedTab === "following") return;
+    if (
+      requestedTab === "discover" ||
+      (requestedTab === "following" && canFollow)
+    ) {
+      return;
+    }
     const params = new URLSearchParams(searchParams);
     params.set("tab", "discover");
     setSearchParams(params, { replace: true });
-  }, [requestedTab, searchParams, setSearchParams]);
+  }, [canFollow, requestedTab, searchParams, setSearchParams]);
 
   const setTab = (next: "discover" | "following") => {
     const params = new URLSearchParams(searchParams);
@@ -82,17 +95,19 @@ export function Subscriptions() {
         >
           Discover
         </TabLink>
-        <TabLink
-          active={tab === "following"}
-          icon={<Rss className="h-4 w-4" />}
-          onClick={() => setTab("following")}
-        >
-          Following
-        </TabLink>
+        {canFollow && (
+          <TabLink
+            active={tab === "following"}
+            icon={<Rss className="h-4 w-4" />}
+            onClick={() => setTab("following")}
+          >
+            Following
+          </TabLink>
+        )}
       </nav>
 
       {tab === "discover" ? (
-        <DiscoverChannels groups={groups.data ?? []} />
+        <DiscoverChannels groups={groups.data ?? []} canFollow={canFollow} />
       ) : (
         <FollowingChannels
           groups={groups.data ?? []}
@@ -103,7 +118,13 @@ export function Subscriptions() {
   );
 }
 
-function DiscoverChannels({ groups }: { groups: Group[] }) {
+function DiscoverChannels({
+  groups,
+  canFollow,
+}: {
+  groups: Group[];
+  canFollow: boolean;
+}) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [platform, setPlatform] = useState<Platform | "">("");
@@ -160,9 +181,15 @@ function DiscoverChannels({ groups }: { groups: Group[] }) {
             </option>
           ))}
         </Select>
-        <Button variant="outline" onClick={() => setAddOpen(true)}>
-          <Link2 className="h-4 w-4" /> Add by URL
-        </Button>
+        {canFollow ? (
+          <Button variant="outline" onClick={() => setAddOpen(true)}>
+            <Link2 className="h-4 w-4" /> Add by URL
+          </Button>
+        ) : (
+          <Link to="/login">
+            <Button variant="outline">Sign in to follow</Button>
+          </Link>
+        )}
       </Toolbar>
 
       {addOpen && (
@@ -191,6 +218,7 @@ function DiscoverChannels({ groups }: { groups: Group[] }) {
           <ChannelCard
             channel={preview}
             groups={groups}
+            canFollow={canFollow}
             onFollowChanged={updatePreviewFollow}
           />
         </section>
@@ -216,9 +244,17 @@ function DiscoverChannels({ groups }: { groups: Group[] }) {
             }
             action={
               !filtering && (
-                <Button size="sm" onClick={() => setAddOpen(true)}>
-                  <Link2 className="h-4 w-4" /> Add by URL
-                </Button>
+                canFollow ? (
+                  <Button size="sm" onClick={() => setAddOpen(true)}>
+                    <Link2 className="h-4 w-4" /> Add by URL
+                  </Button>
+                ) : (
+                  <Link to="/login">
+                    <Button size="sm" variant="outline">
+                      Sign in to follow
+                    </Button>
+                  </Link>
+                )
               )
             }
           />
@@ -226,7 +262,12 @@ function DiscoverChannels({ groups }: { groups: Group[] }) {
           <>
             <ItemGrid>
               {rows.map((channel) => (
-                <ChannelTile key={channel.id} channel={channel} groups={groups} />
+                <ChannelTile
+                  key={channel.id}
+                  channel={channel}
+                  groups={groups}
+                  canFollow={canFollow}
+                />
               ))}
             </ItemGrid>
             <InfiniteScrollSentinel

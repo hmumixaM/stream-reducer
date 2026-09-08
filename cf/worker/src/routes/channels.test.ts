@@ -1,9 +1,19 @@
 import { Hono } from "hono";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppContext } from "../auth";
 import type { Env } from "../env";
 
+const authState = vi.hoisted(() => ({
+  user: null as {
+    id: number;
+    email: string;
+    is_admin: number;
+    created_at: string;
+  } | null,
+}));
+
 vi.mock("../auth", () => ({
+  resolveUser: async () => authState.user,
   requireAuth: async (
     c: { set: (key: string, value: unknown) => void },
     next: () => Promise<void>,
@@ -20,6 +30,10 @@ vi.mock("../auth", () => ({
 
 import { channelRoutes } from "./channels";
 import { subscriptionRoutes } from "./subscriptions";
+
+beforeEach(() => {
+  authState.user = null;
+});
 
 function fakeEnv(firstResult: unknown | ((sql: string) => unknown) = null) {
   const queries: { sql: string; bindings: unknown[] }[] = [];
@@ -59,6 +73,30 @@ function fakeEnv(firstResult: unknown | ((sql: string) => unknown) = null) {
 }
 
 describe("channel route safeguards", () => {
+  it("lists channels anonymously without attaching personal follow state", async () => {
+    const app = new Hono<AppContext>();
+    app.route("/channels", channelRoutes);
+    const { env, queries } = fakeEnv();
+
+    const response = await app.request("/channels", undefined, env);
+
+    expect(response.status).toBe(200);
+    expect(queries[0].bindings[0]).toBe(-1);
+  });
+
+  it("keeps personal channel filters private for anonymous visitors", async () => {
+    const app = new Hono<AppContext>();
+    app.route("/channels", channelRoutes);
+    const { env } = fakeEnv();
+
+    expect(
+      (await app.request("/channels?following=true", undefined, env)).status,
+    ).toBe(401);
+    expect(
+      (await app.request("/channels/1/items?saved=true", undefined, env)).status,
+    ).toBe(401);
+  });
+
   it("excludes paid items from channel item responses", async () => {
     const app = new Hono<AppContext>();
     app.route("/channels", channelRoutes);
@@ -116,6 +154,12 @@ describe("channel route safeguards", () => {
   });
 
   it("filters channel items to those missing from the library", async () => {
+    authState.user = {
+      id: 7,
+      email: "user@example.com",
+      is_admin: 0,
+      created_at: "2026-01-01T00:00:00.000Z",
+    };
     const app = new Hono<AppContext>();
     app.route("/channels", channelRoutes);
     const { env, queries } = fakeEnv({ id: 1 });

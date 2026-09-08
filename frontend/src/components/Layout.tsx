@@ -65,8 +65,8 @@ const NAV: {
 // The public mirror is read-only and has no follows, so `/` stays the mirrored
 // library rather than a timeline; browsing, search, and the graph are reachable.
 const MIRROR_NAV = new Set(["/", "/search", "/graph"]);
-// Anonymous (no session) visitors can only browse the global catalog.
-const PUBLIC_NAV = new Set(["/browse", "/collections"]);
+// Anonymous visitors can browse the global catalog and channel directory.
+const PUBLIC_NAV = new Set(["/subscriptions", "/browse", "/collections"]);
 const MIRROR_LABELS: Record<string, string> = { "/": "Library" };
 
 function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {

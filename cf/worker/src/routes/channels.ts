@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext } from "../auth";
-import { requireAuth } from "../auth";
+import { requireAuth, resolveUser } from "../auth";
 import {
   all,
   first,
@@ -27,7 +27,6 @@ import { CHANNEL_SORT_COLUMNS, sortColumn, sortOrder } from "../lib/sort";
 import { isoNow } from "../lib/crypto";
 
 export const channelRoutes = new Hono<AppContext>();
-channelRoutes.use("*", requireAuth);
 
 const CHANNEL_SELECT = `
   SELECT ch.*,
@@ -193,12 +192,16 @@ function validateFollowBody(body: FollowBody): string | null {
 }
 
 channelRoutes.get("/", async (c) => {
-  const userId = c.get("user").id;
+  const user = await resolveUser(c.env, c);
+  const userId = user?.id ?? -1;
   const query = (c.req.query("q") ?? "").trim().slice(0, 100);
   const platform = (c.req.query("platform") ?? "").trim();
   const following = c.req.query("following");
   if (following !== undefined && following !== "true" && following !== "false") {
     return c.json({ error: "following must be true or false" }, 400);
+  }
+  if (!user && following !== undefined) {
+    return c.json({ error: "unauthorized" }, 401);
   }
   const limit = boundedInt(c.req.query("limit"), 24, 1, 50);
   const offset = boundedInt(c.req.query("offset"), 0, 0, 1_000_000);
@@ -230,7 +233,7 @@ channelRoutes.get("/", async (c) => {
   return c.json(rows.map((row) => toChannelRead(row, latest.get(row.id) ?? [])));
 });
 
-channelRoutes.post("/resolve", async (c) => {
+channelRoutes.post("/resolve", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const body = await readJson<{ url?: string }>(c);
   try {
@@ -251,7 +254,7 @@ channelRoutes.post("/resolve", async (c) => {
 });
 
 channelRoutes.get("/:id", async (c) => {
-  const userId = c.get("user").id;
+  const userId = (await resolveUser(c.env, c))?.id ?? -1;
   const channelId = Number(c.req.param("id"));
   const row = await getChannel(c.env, userId, channelId);
   if (!row) return c.json({ error: "channel not found" }, 404);
@@ -259,7 +262,7 @@ channelRoutes.get("/:id", async (c) => {
   return c.json(toChannelRead(row, latest.get(channelId) ?? []));
 });
 
-channelRoutes.put("/:id/follow", async (c) => {
+channelRoutes.put("/:id/follow", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const channelId = Number(c.req.param("id"));
   const body = await readJson<FollowBody>(c);
@@ -341,7 +344,7 @@ channelRoutes.put("/:id/follow", async (c) => {
   return c.json(toChannelFollowRead(updated, channel));
 });
 
-channelRoutes.patch("/:id/follow", async (c) => {
+channelRoutes.patch("/:id/follow", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const channelId = Number(c.req.param("id"));
   const body = await readJson<FollowBody>(c);
@@ -384,7 +387,7 @@ channelRoutes.patch("/:id/follow", async (c) => {
   return c.json(toChannelFollowRead(updated, channel));
 });
 
-channelRoutes.delete("/:id/follow", async (c) => {
+channelRoutes.delete("/:id/follow", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const channelId = Number(c.req.param("id"));
   const channel = await first<ChannelRow>(
@@ -399,8 +402,13 @@ channelRoutes.delete("/:id/follow", async (c) => {
 });
 
 channelRoutes.get("/:id/items", async (c) => {
-  const userId = c.get("user").id;
+  const user = await resolveUser(c.env, c);
+  const userId = user?.id ?? -1;
   const channelId = Number(c.req.param("id"));
+  const saved = c.req.query("saved");
+  if (!user && saved !== undefined) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
   const exists = await first<{ id: number }>(
     c.env.DB.prepare("SELECT id FROM channel WHERE id = ?").bind(channelId),
   );
@@ -409,7 +417,6 @@ channelRoutes.get("/:id/items", async (c) => {
   const offset = boundedInt(c.req.query("offset"), 0, 0, 1_000_000);
   const sortCol = sortColumn(CHANNEL_SORT_COLUMNS, c.req.query("sort"), "published");
   const order = sortOrder(c.req.query("order"));
-  const saved = c.req.query("saved");
   const where = ["ci.channel_id = ?", "i.status != 'excluded'"];
   if (saved === "true") where.push("ui.id IS NOT NULL");
   if (saved === "false") where.push("ui.id IS NULL");
@@ -460,7 +467,7 @@ channelRoutes.get("/:id/items", async (c) => {
   );
 });
 
-channelRoutes.post("/:id/poll", async (c) => {
+channelRoutes.post("/:id/poll", requireAuth, async (c) => {
   const userId = c.get("user").id;
   const channelId = Number(c.req.param("id"));
   const follow = await findUserFollow(c.env, userId, channelId);

@@ -40,7 +40,7 @@ itemsRoutes.get("/", async (c) => {
     where.push("item.title LIKE ?");
     binds.push(`%${u.q}%`);
   }
-  const sortCol = sortColumn(SORT_COLUMNS, u.sort, "added");
+  const sortCol = sortColumn(SORT_COLUMNS, u.sort, "published");
   const order = sortOrder(u.order);
   const limit = Math.min(Number(u.limit ?? 100), 500);
   const offset = Number(u.offset ?? 0);
