@@ -17,20 +17,45 @@ async function renderDiagram(source: string): Promise<string> {
       securityLevel: "strict",
       theme: "base",
       themeVariables: {
-        primaryColor: "#ede9fe",
-        primaryTextColor: "#111827",
+        primaryColor: "#f5f3ff",
+        primaryTextColor: "#312e81",
         primaryBorderColor: "#8b5cf6",
-        lineColor: "#6b7280",
-        secondaryColor: "#e0f2fe",
-        tertiaryColor: "#f3f4f6",
-        clusterBkg: "#f9fafb",
-        clusterBorder: "#d1d5db",
-        edgeLabelBackground: "#ffffff",
+        lineColor: "#7c3aed",
+        secondaryColor: "#ecfeff",
+        tertiaryColor: "#f0fdf4",
+        clusterBkg: "#ffffff",
+        clusterBorder: "#c4b5fd",
+        edgeLabelBackground: "#fafafa",
         fontFamily: "ui-sans-serif, system-ui, sans-serif",
       },
+      themeCSS: `
+        .node rect, .node circle, .node ellipse, .node polygon, .node path {
+          filter: drop-shadow(0 4px 7px rgb(76 29 149 / 0.14));
+          stroke-width: 1.5px;
+        }
+        .node rect {
+          rx: 10px;
+          ry: 10px;
+        }
+        .nodeLabel, .edgeLabel {
+          font-weight: 600;
+        }
+        .edgePath .path {
+          stroke-width: 2px;
+        }
+        .cluster rect {
+          rx: 14px;
+          ry: 14px;
+          filter: drop-shadow(0 6px 12px rgb(15 23 42 / 0.08));
+        }
+      `,
       flowchart: {
+        curve: "basis",
         htmlLabels: false,
-        useMaxWidth: false,
+        nodeSpacing: 42,
+        rankSpacing: 52,
+        padding: 14,
+        useMaxWidth: true,
       },
     });
     initialized = true;

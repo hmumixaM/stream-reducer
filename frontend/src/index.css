@@ -206,28 +206,33 @@
   }
   .prose-sr .mermaid-diagram,
   .prose-read .mermaid-diagram {
+    inline-size: 100%;
     max-inline-size: 100%;
     margin: 1.5rem 0;
-    padding: 1rem;
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
-    border: 1px solid hsl(var(--border));
-    border-radius: 0.75rem;
-    background: hsl(var(--muted) / 0.45);
-    scrollbar-gutter: stable;
+    padding: clamp(0.75rem, 2.5vw, 1.5rem);
+    overflow: hidden;
+    border: 1px solid hsl(var(--primary) / 0.22);
+    border-radius: 1rem;
+    background:
+      radial-gradient(circle at 8% 0%, hsl(var(--primary) / 0.14), transparent 38%),
+      linear-gradient(145deg, hsl(var(--muted) / 0.72), hsl(var(--background) / 0.94));
+    box-shadow:
+      inset 0 1px 0 hsl(var(--foreground) / 0.04),
+      0 12px 32px hsl(var(--foreground) / 0.07);
   }
   .prose-sr .mermaid-diagram > div,
   .prose-read .mermaid-diagram > div {
     display: flex;
-    inline-size: max-content;
-    min-inline-size: 100%;
+    inline-size: 100%;
     justify-content: center;
   }
   .prose-sr .mermaid-diagram svg,
   .prose-read .mermaid-diagram svg {
     display: block;
-    max-inline-size: none;
+    inline-size: 100% !important;
+    max-inline-size: 100% !important;
     block-size: auto;
+    margin-inline: auto;
   }
   .prose-sr .mermaid-diagram-loading,
   .prose-read .mermaid-diagram-loading {

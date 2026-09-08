@@ -53,10 +53,12 @@ Write a detailed, faithful walkthrough of THIS part as Markdown:
   beginning with ` ```mermaid ` and a simple `flowchart LR` or `flowchart TD`.
   Keep node IDs short, put human-readable labels in quoted brackets such as
   `A["Meeting transcript"]`, and keep each edge on its own line. Use an
-  `accTitle:` line for accessibility. Never draw boxes, arrows, or tables with
-  ASCII characters in a plain code fence. For genuinely tabular comparisons,
-  use a standard Markdown table instead. If neither format can express the
-  source cleanly, explain it in prose.
+  `accTitle:` line for accessibility. Keep the layout compact enough to fit in
+  one viewport: group related stages into labeled subgraphs and avoid a single
+  uninterrupted row or column longer than four nodes. Never draw boxes, arrows,
+  or tables with ASCII characters in a plain code fence. For genuinely tabular
+  comparisons, use a standard Markdown table instead. If neither format can
+  express the source cleanly, explain it in prose.
 - Weave in memorable verbatim quotes inline using "quotation marks".
 - IMPORTANT: Put a [HH:MM:SS] timestamp ONLY on the section headings. Do NOT add
   timestamps inside the prose sentences or bullets — the prose must read cleanly
