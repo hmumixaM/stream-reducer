@@ -89,6 +89,19 @@ export function CollectionDetail() {
         }
       />
 
+      {data.cover_url ? (
+        <div className="mb-6 aspect-[3/1] overflow-hidden rounded-xl border bg-muted">
+          <img
+            src={data.cover_url}
+            alt={`${data.title} conference`}
+            width={1200}
+            height={400}
+            fetchPriority="high"
+            className="h-full w-full object-cover"
+          />
+        </div>
+      ) : null}
+
       <ChipRow>
         {data.sections.map((section) => (
           <FilterChip

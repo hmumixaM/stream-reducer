@@ -39,10 +39,10 @@ export function Collections() {
                 className="group flex h-full flex-col overflow-hidden"
               >
                 <div className="aspect-video overflow-hidden bg-muted">
-                  {collection.thumbnail ? (
+                  {collection.cover_url || collection.thumbnail ? (
                     <img
-                      src={collection.thumbnail}
-                      alt=""
+                      src={collection.cover_url || collection.thumbnail || ""}
+                      alt={`${collection.title} conference`}
                       width={640}
                       height={360}
                       decoding="async"

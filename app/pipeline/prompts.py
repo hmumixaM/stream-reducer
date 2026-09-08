@@ -49,6 +49,11 @@ Write a detailed, faithful walkthrough of THIS part as Markdown:
   and the way it is discussed (stories, jokes, debates, emotional beats).
 - After the prose, optionally add `- ` bullets for extra concrete data points,
   lists, or facts that deserve to stand alone.
+- When a visual architecture or flow is important, you may reproduce it as a
+  fenced monospace text diagram. Keep every line within 72 characters, use
+  aligned boxes and connectors, and shorten labels instead of breaking a node
+  across unrelated lines. If a clean diagram is not possible, explain it in
+  prose instead.
 - Weave in memorable verbatim quotes inline using "quotation marks".
 - IMPORTANT: Put a [HH:MM:SS] timestamp ONLY on the section headings. Do NOT add
   timestamps inside the prose sentences or bullets — the prose must read cleanly

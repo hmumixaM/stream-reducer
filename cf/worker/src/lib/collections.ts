@@ -25,6 +25,7 @@ export interface CollectionManifest {
   title: string;
   description: string;
   source_url: string;
+  cover_url?: string;
   auto_translate_langs?: string[];
   sections: CollectionManifestSection[];
 }
@@ -75,12 +76,13 @@ async function upsertHierarchy(
   const collection = await first<{ id: number }>(
     env.DB.prepare(
       `INSERT INTO collection
-         (slug, title, description, source_url, auto_translate_langs)
-       VALUES (?, ?, ?, ?, ?)
+         (slug, title, description, source_url, cover_url, auto_translate_langs)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(slug) DO UPDATE SET
          title = excluded.title,
          description = excluded.description,
          source_url = excluded.source_url,
+         cover_url = excluded.cover_url,
          auto_translate_langs = excluded.auto_translate_langs,
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
        RETURNING id`,
@@ -89,6 +91,7 @@ async function upsertHierarchy(
       manifest.title,
       manifest.description,
       manifest.source_url,
+      manifest.cover_url ?? "",
       JSON.stringify(manifest.auto_translate_langs ?? []),
     ),
   );

@@ -279,6 +279,7 @@ export interface CollectionRead {
   title: string;
   description: string;
   source_url: string;
+  cover_url?: string | null;
   item_count: number;
   ready_count: number;
   section_count: number;

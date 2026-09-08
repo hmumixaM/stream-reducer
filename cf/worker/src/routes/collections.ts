@@ -12,6 +12,7 @@ interface CollectionReadRow {
   title: string;
   description: string;
   source_url: string;
+  cover_url: string;
   item_count: number;
   ready_count: number;
   section_count: number;
@@ -36,7 +37,7 @@ interface TrackRow {
 }
 
 const COLLECTION_SELECT = `
-  SELECT c.id, c.slug, c.title, c.description, c.source_url,
+  SELECT c.id, c.slug, c.title, c.description, c.source_url, c.cover_url,
          (SELECT COUNT(*)
             FROM collection_item ci
             JOIN item i ON i.id = ci.item_id

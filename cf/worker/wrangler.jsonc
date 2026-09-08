@@ -194,7 +194,7 @@
     "TS_EXIT_NODE": "100.77.236.1",
     // Bump to force all container jobs onto fresh instances (new image) after a
     // deploy — avoids long-lived DO instances running a stale container image.
-    "CONTAINER_GEN": "27"
+    "CONTAINER_GEN": "28"
   }
 
   // Secrets (set via `wrangler secret put`):

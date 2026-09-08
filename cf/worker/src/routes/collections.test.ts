@@ -27,6 +27,7 @@ describe("AI4 collection manifest", () => {
     ).toBe(76);
     expect(videos).toHaveLength(422);
     expect(videos.filter((video) => video.memberships.length > 1)).toHaveLength(28);
+    expect(manifest.cover_url).toBe("/collection-covers/ai4-2026.svg");
     expect(manifest.auto_translate_langs).toEqual(["zh"]);
   });
 
@@ -40,6 +41,7 @@ describe("AI4 collection manifest", () => {
     ).toBe(64);
     expect(videos).toHaveLength(356);
     expect(videos.filter((video) => video.memberships.length > 1)).toHaveLength(35);
+    expect(manifest.cover_url).toBe("/collection-covers/ai4-2025.svg");
     expect(manifest.auto_translate_langs).toEqual(["zh"]);
   });
 });
