@@ -204,6 +204,37 @@
     font-variant-ligatures: none;
     tab-size: 2;
   }
+  .prose-sr .mermaid-diagram,
+  .prose-read .mermaid-diagram {
+    max-inline-size: 100%;
+    margin: 1.5rem 0;
+    padding: 1rem;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    border: 1px solid hsl(var(--border));
+    border-radius: 0.75rem;
+    background: hsl(var(--muted) / 0.45);
+    scrollbar-gutter: stable;
+  }
+  .prose-sr .mermaid-diagram > div,
+  .prose-read .mermaid-diagram > div {
+    display: flex;
+    inline-size: max-content;
+    min-inline-size: 100%;
+    justify-content: center;
+  }
+  .prose-sr .mermaid-diagram svg,
+  .prose-read .mermaid-diagram svg {
+    display: block;
+    max-inline-size: none;
+    block-size: auto;
+  }
+  .prose-sr .mermaid-diagram-loading,
+  .prose-read .mermaid-diagram-loading {
+    min-block-size: 8rem;
+    align-items: center;
+    color: hsl(var(--muted-foreground));
+  }
   .prose-read hr {
     border: 0;
     border-top: 1px solid hsl(var(--border));

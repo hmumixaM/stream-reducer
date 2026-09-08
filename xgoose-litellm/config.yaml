@@ -1,0 +1,147 @@
+# LiteLLM proxy — STATELESS gateway in front of the gemini-web2api Workers.
+#
+# Three public models are exposed: `gemini-3.7-flash`,
+# `gemini-3.5-flash`, and `gemini-3.1-pro`.
+#
+#   gemini-3.7-flash:
+#     Primary  : Gemini 3.7 Flash on rightapi.ai /gemini.
+#
+#   gemini-3.5-flash:
+#     Primary  : 3 gemini-web2api Workers (proxy-1/2/3), load-balanced by the
+#                router (simple-shuffle). Each is the free Gemini web backend.
+#     Fallback : Vertex AI (`gemini-3.5-flash-vertex`) — only used when ALL
+#                three primary deployments fail/cooldown.
+#
+#   gemini-3.1-pro (disguised DeepSeek):
+#     Primary  : deepseek-v4-pro on rightapi.ai /deepseek/anthropic.
+#     Fallback : claude-opus-4-7 -> claude-sonnet-4-6 -> deepseek-v4-pro
+#                (all on rightapi.ai /claude-aws except the deepseek leg).
+#
+# All fallback aliases are internal — NOT exposed to clients (the xgoose Worker
+# whitelists only `gemini-3.5-flash` and `gemini-3.1-pro`).
+#
+# No database_url: this proxy holds no per-user state. It computes a *synthetic*
+# USD cost per request from the per-token prices below; the xgoose Worker reads
+# that from the streamed `usage` frame and enforces the $5/day budget in D1.
+#
+# Secrets are injected from the environment (see src/index.ts + wrangler
+# secrets): GEMINI_PROXY_KEY (shared proxy secret), VERTEX_CREDENTIALS (the
+# Vertex ADC JSON, as a string), RIGHTCODE_API_KEY, LITELLM_MASTER_KEY.
+
+model_list:
+  # --- Primary summary model: RightCode Gemini ---
+  - model_name: gemini-3.7-flash
+    litellm_params:
+      model: openai/gemini-3.7-flash
+      api_base: https://www.rightapi.ai/gemini/v1
+      api_key: os.environ/RIGHTCODE_API_KEY
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000002
+
+  # --- Primary: 3 load-balanced gemini-web2api proxies (same alias) ---
+  - model_name: gemini-3.5-flash
+    litellm_params:
+      model: openai/gemini-3.5-flash
+      api_base: https://xgoose-gemini-proxy-1.max-678.workers.dev/v1
+      api_key: os.environ/GEMINI_PROXY_KEY
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000002
+
+  - model_name: gemini-3.5-flash
+    litellm_params:
+      model: openai/gemini-3.5-flash
+      api_base: https://xgoose-gemini-proxy-2.max-678.workers.dev/v1
+      api_key: os.environ/GEMINI_PROXY_KEY
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000002
+
+  - model_name: gemini-3.5-flash
+    litellm_params:
+      model: openai/gemini-3.5-flash
+      api_base: https://xgoose-gemini-proxy-3.max-678.workers.dev/v1
+      api_key: os.environ/GEMINI_PROXY_KEY
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000002
+
+  # --- Fallback: Vertex AI (internal alias, not client-facing) ---
+  - model_name: gemini-3.5-flash-vertex
+    litellm_params:
+      model: vertex_ai/gemini-3.5-flash
+      vertex_project: "x-p-x-shared-ai-services-988d"
+      vertex_location: "global"
+      vertex_credentials: os.environ/VERTEX_CREDENTIALS
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000002
+
+  # --- DISGUISED: DeepSeek exposed under the `gemini-3.1-pro` alias ---
+  # Anthropic-compatible upstream (rightapi.ai /deepseek/anthropic channel). The
+  # public name is intentionally `gemini-3.1-pro` so the real model is not
+  # visible to clients (anti-abuse).
+  - model_name: gemini-3.1-pro
+    litellm_params:
+      model: anthropic/deepseek-v4-pro
+      api_key: os.environ/ANTHROPIC_PROXY_KEY
+      api_base: https://www.rightapi.ai/deepseek/anthropic
+      input_cost_per_token: 0.0000005
+      output_cost_per_token: 0.0000015
+
+  # --- Fallbacks for gemini-3.1-pro (internal aliases, NOT client-facing) ---
+  # Ordered chain, tried only when the primary claude-opus-4-8 deployment fails
+  # or cools down (e.g. rightapi.ai "no active Kiro accounts available"). Claude
+  # tiers stay on the same /claude-aws channel; deepseek-v4-pro is the official
+  # /deepseek/anthropic channel as the last resort. All use ANTHROPIC_PROXY_KEY.
+  - model_name: gemini-3.1-pro-opus47
+    litellm_params:
+      model: anthropic/claude-opus-4-7
+      api_key: os.environ/ANTHROPIC_PROXY_KEY
+      api_base: https://www.rightapi.ai/claude-aws
+      input_cost_per_token: 0.000015
+      output_cost_per_token: 0.000075
+
+  - model_name: gemini-3.1-pro-sonnet46
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_PROXY_KEY
+      api_base: https://www.rightapi.ai/claude-aws
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+
+  - model_name: gemini-3.1-pro-deepseek
+    litellm_params:
+      model: anthropic/deepseek-v4-pro
+      api_key: os.environ/ANTHROPIC_PROXY_KEY
+      api_base: https://www.rightapi.ai/deepseek/anthropic
+      input_cost_per_token: 0.0000005
+      output_cost_per_token: 0.0000015
+
+litellm_settings:
+  # Silently drop OpenAI params the upstream doesn't understand instead of 400.
+  drop_params: true
+  # Retry the same model group's other deployments before giving up.
+  num_retries: 2
+  request_timeout: 120
+  # When the whole gemini-3.5-flash group is exhausted, fail over to Vertex.
+  # RightCode Gemini falls back to the load-balanced 3.5 group.
+  # gemini-3.1-pro (DeepSeek) falls back opus-4-7 -> sonnet-4-6 -> deepseek.
+  fallbacks:
+    [
+      { "gemini-3.7-flash": ["gemini-3.5-flash"] },
+      { "gemini-3.5-flash": ["gemini-3.5-flash-vertex"] },
+      {
+        "gemini-3.1-pro":
+          [
+            "gemini-3.1-pro-opus47",
+            "gemini-3.1-pro-sonnet46",
+            "gemini-3.1-pro-deepseek",
+          ],
+      },
+    ]
+
+router_settings:
+  routing_strategy: simple-shuffle
+  # Pull a deployment out of rotation after 2 fails, for 30s.
+  allowed_fails: 2
+  cooldown_time: 30
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

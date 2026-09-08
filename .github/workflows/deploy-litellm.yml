@@ -1,0 +1,39 @@
+name: Deploy LiteLLM to Cloudflare
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "xgoose-litellm/**"
+      - ".github/workflows/deploy-litellm.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-litellm
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: xgoose-litellm
+        run: npm ci
+
+      - name: Type-check
+        working-directory: xgoose-litellm
+        run: npx tsc --noEmit
+
+      - name: Deploy Worker + container
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: xgoose-litellm
+          command: deploy

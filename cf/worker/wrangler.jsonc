@@ -107,12 +107,10 @@
         // "Maximum number of running container instances exceeded". (Capacity
         // errors are also self-healed now: the consumer re-queues the item
         // instead of failing it.)
-        // Summarization fans each item out into several sequential LLM calls.
-        // Six jobs produced 30+ simultaneous proxy requests during the AI4
-        // import, after which the proxy returned empty responses and Workers
-        // repeatedly hit their invocation limit. Keep this conservative: two
-        // jobs still drain continuously without overwhelming the shared proxy.
-        "max_concurrency": 2,
+        // Temporary AI4 backlog burst: RightCode's gemini-3.7-flash route can
+        // sustain the fan-out from six concurrent summarization jobs. Reduce
+        // this to 2 again after the conference backlog has drained.
+        "max_concurrency": 6,
         // The consumer gives up on the fifth content failure. Queue redelivery
         // must allow it to reach that terminal decision; three retries stopped
         // one attempt early and left items stranded in "summarizing".
@@ -197,7 +195,7 @@
     "TS_EXIT_NODE": "100.77.236.1",
     // Bump to force all container jobs onto fresh instances (new image) after a
     // deploy — avoids long-lived DO instances running a stale container image.
-    "CONTAINER_GEN": "28"
+    "CONTAINER_GEN": "29"
   }
 
   // Secrets (set via `wrangler secret put`):

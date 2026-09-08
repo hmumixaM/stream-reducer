@@ -11,7 +11,7 @@
     {
       "slug": "ai-transformation",
       "title": "AI Transformation",
-      "source_url": "https://videos.ai4.io/2026/",
+      "source_url": "https://videos.ai4.io/2026/ai-transformation/",
       "tracks": [
         {
           "title": "AI Agents: Applications & Use Cases Track",
@@ -276,7 +276,7 @@
             },
             {
               "youtube_id": "UX0yVExlo_Q",
-              "title": "The Million-Dollar Pilot Trap: Why 89% of AI Agents Never Scale With NiCE"
+              "title": "The Million-Dollar Pilot Trap: Why 89% of AI Agents Never Scale With NiCE"
             },
             {
               "youtube_id": "2rGbkmlRoxs",
@@ -448,7 +448,40 @@
         },
         {
           "title": "Enterprise Unlocks: Upskilling in the AI Era Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "6Cbbuut4vI0",
+              "title": "Moving Beyond Completion to Capability: Proving AI Upskilling Actually Works"
+            },
+            {
+              "youtube_id": "jiCfGTEY53g",
+              "title": "Beyond Adoption: Building AI Judgment in the Flow of Work With Nebius Academy"
+            },
+            {
+              "youtube_id": "4S3U_mQMTOQ",
+              "title": "Human Advantage: Building an AI-Ready Workforce Together With The California State University"
+            },
+            {
+              "youtube_id": "V7WpDqWrZ4w",
+              "title": "The Talent Blueprint: Architecting the Future Workforce"
+            },
+            {
+              "youtube_id": "dn75IsD4gD8",
+              "title": "Fireside Chat with Steve Preston, Goodwill with Thirty Minute Mentors and Goodwill Industries"
+            },
+            {
+              "youtube_id": "ozUKqNIBtXE",
+              "title": "Beyond Usage: A Leader's Playbook for an AI-Fluent Workforce with Strauss Group and EmbraceAI Global"
+            },
+            {
+              "youtube_id": "bH3qLyFXS2w",
+              "title": "The Training Fallacy:"
+            },
+            {
+              "youtube_id": "MwTTF9qjnns",
+              "title": "From 20 to 2,000: How Cox Built an AI-Capable Workforce With Cox Communications"
+            }
+          ]
         },
         {
           "title": "Generative AI: Applications & Use Cases Track",
@@ -1695,7 +1728,7 @@
             },
             {
               "youtube_id": "e0_CQUnkNH0",
-              "title": "The Death of the App: Zero-App Interfaces & the Rise of AI-Orchestrated Mobility Experiences"
+              "title": "The Death of the App: Zero-App Interfaces & the Rise of AI-Orchestrated Mobility Experiences"
             },
             {
               "youtube_id": "iJ3xEwtU83M",
@@ -2054,6 +2087,10 @@
             {
               "youtube_id": "KRFsHDplaEE",
               "title": "Defining Success Metrics across Generative and Agentic Experiences with Amazon"
+            },
+            {
+              "youtube_id": "tv3a8lvAZa8",
+              "title": "Product Managing AI Products"
             }
           ]
         },
@@ -2085,7 +2122,56 @@
         },
         {
           "title": "Software Engineering Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "ai5GyxE5_nU",
+              "title": "Autonomous Infrastructure: Building AI Agents for Global-Scale Capacity Efficiency With Meta"
+            },
+            {
+              "youtube_id": "4PUVyAtO4T8",
+              "title": "Beyond the IDE: Agent-Based Engineering 101 With Renaissance Benefits"
+            },
+            {
+              "youtube_id": "gmOXbNJiqpY",
+              "title": "Building Self-Evaluating OpenAI Agents for Profiles & Documents with Panasonic Avionics Corporation"
+            },
+            {
+              "youtube_id": "GdZ4BCQF4xY",
+              "title": "Operational AI Is The New Competitive Advantage With QualityAI"
+            },
+            {
+              "youtube_id": "k10A-wAmng4",
+              "title": "The AI-Native SDLC: How AI Is Rewriting Software Engineering With Johnson Control Fire Solutions"
+            },
+            {
+              "youtube_id": "pBSEfsJLaMQ",
+              "title": "Friends Don't Let AI Code in the Dark: Fixing the Token Burning Chaos of Agentic UI"
+            },
+            {
+              "youtube_id": "3j8SqeGj-lI",
+              "title": "Buy the Hands, Own the Conscience: Governing AI Agents That Ship Enterprise Software"
+            },
+            {
+              "youtube_id": "aON2GZ6soIo",
+              "title": "Code Quality, Security, and Culture in the AI Coding Era"
+            },
+            {
+              "youtube_id": "kD9tcO6mz9g",
+              "title": "AI as Your Pair Programmer: How Developers Are Collaborating with Code Models"
+            },
+            {
+              "youtube_id": "CUafSVWhi6U",
+              "title": "The Enterprise AI Operating Model: An Executive Playbook for Agentic AI Transformation"
+            },
+            {
+              "youtube_id": "4ywGlu4JKa4",
+              "title": "The Missing Half of AI Coding With Checksum"
+            },
+            {
+              "youtube_id": "ldJkWYN2g1A",
+              "title": "The Context Layer: Why Enterprise AI Needs Its Own Operating System"
+            }
+          ]
         }
       ]
     },
@@ -2096,55 +2182,592 @@
       "tracks": [
         {
           "title": "#AIFails Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "bm-DW7vo2sk",
+              "title": "Great (or Otherwise Memorable) Vendor Partnerships in 2026 With Airbnb, Inc."
+            },
+            {
+              "youtube_id": "pucUyA42ZbQ",
+              "title": "Learning Fast from AI Missteps: What Actually Worked in the Real World With Cushman & Wakefield"
+            }
+          ]
         },
         {
           "title": "AI For SMBs Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "XQ2H5EAsatY",
+              "title": "Main Street Meets Machine: How AI Is Scaling Across America's SMB Sector"
+            },
+            {
+              "youtube_id": "fW0-hckKB4U",
+              "title": "Small Company, Smart Tools: How SMBs Are Winning with AI"
+            },
+            {
+              "youtube_id": "8aCXoSXbJqc",
+              "title": "The Unfair Advantage: Why a 2 Person Team Can Now Outmarket a 2,000 Person Brand With Usepomo AI"
+            },
+            {
+              "youtube_id": "jAO7jheIl0k",
+              "title": "Hard-Fought Lessons from a Year of Scaling AI in an SMB With MXD Process"
+            }
+          ]
         },
         {
           "title": "AI Policy Summit Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "2YaENIzEe-E",
+              "title": "AI on the Ballot with The University of Texas School of Law and Porter Group LLC"
+            },
+            {
+              "youtube_id": "_dOke8n4xHM",
+              "title": "AI Policy to Drive Progress"
+            },
+            {
+              "youtube_id": "kTRg8A6lcZU",
+              "title": "AI Under Trump: Deregulation, Preemption & the New Federal AI"
+            },
+            {
+              "youtube_id": "cXaz0YSuKFg",
+              "title": "Federal vs. State: AGs, Governors & Congress on Who Should Govern AI"
+            },
+            {
+              "youtube_id": "hgAcbSQiVSU",
+              "title": "AI, National Security & Geopolitical Competition with AI For Good Impact and Tiedrich Global"
+            },
+            {
+              "youtube_id": "IpEJYaWy-oM",
+              "title": "The Governance Imperative for Artificial Intelligence With Stanford Law School"
+            },
+            {
+              "youtube_id": "wEymOOayGPI",
+              "title": "From Policy to Practice: A Blueprint for Responsible AI Leadership With University of Michigan"
+            }
+          ]
         },
         {
           "title": "AI Safety & Alignment Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "ivrWVKwuJWY",
+              "title": "Will AI Empower or Disempower Humanity? With Mila"
+            },
+            {
+              "youtube_id": "CPdl_mBqCBU",
+              "title": "Making AI Alignment A Reality"
+            },
+            {
+              "youtube_id": "N_EsP-CCBF8",
+              "title": "AI, Mental Health, and Human Connection: Adam Mendler and Dr. Joseph Lee, Hazelden Betty Ford"
+            },
+            {
+              "youtube_id": "da3ocZD08dA",
+              "title": "5 Reasons Why AI Governance Fails With Virtue Consultants"
+            },
+            {
+              "youtube_id": "vVItjQWDk5Y",
+              "title": "Presentation by Emmett Shear, Softmax"
+            },
+            {
+              "youtube_id": "iyrrI86EYlY",
+              "title": "AI Harm Is Everyone's Business: Why Every Industry Needs to Understand Where Its Responsibility"
+            },
+            {
+              "youtube_id": "gxCIfynoPT0",
+              "title": "Dignity by Design: AI and the Duty of Care With Rutgers University"
+            }
+          ]
         },
         {
           "title": "AI Startups & VCs Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "ONd4veLQ_Io",
+              "title": "AI Agents That Operate Infrastructure - Lessons from a Tier 1 bank deployment With NetOrca"
+            },
+            {
+              "youtube_id": "Yp765nMfykc",
+              "title": "Dark Factories Ship Slop: Scale Human + AI Craft with Lights On With Lit Factory"
+            },
+            {
+              "youtube_id": "4nuwkVWTvpM",
+              "title": "Agents Need White-Box Instruments, Not Judges With Faberlens Inc"
+            },
+            {
+              "youtube_id": "2i_W6NyZFIc",
+              "title": "AI Disruption in IT Service Management, the Future of IT Ops in an AI Agent World With Helios Core"
+            },
+            {
+              "youtube_id": "Hzo2T1ijZc4",
+              "title": "Beneath the Surface: AI Powered Robotics for Sustainable Deep-Sea Operations With MOBY Robotics"
+            },
+            {
+              "youtube_id": "6jYv47iAQis",
+              "title": "Building Autonomous Growth Agents: Lessons from an ex-DeepMind GenAI Lead"
+            },
+            {
+              "youtube_id": "LN_xY92LLmE",
+              "title": "Democratising AI for the Enterprise With Fabrion"
+            },
+            {
+              "youtube_id": "RYGRK6CaUtY",
+              "title": "Everyone Is Building AI. Who is Rebuilding Their Business? The Three Waves of AI Transformation"
+            },
+            {
+              "youtube_id": "TnQ2J6dgdsI",
+              "title": "Fluence GPU Cluster Auctions: Solving the Pricing Problem With Fluence"
+            },
+            {
+              "youtube_id": "0TQCvLKx7yc",
+              "title": "Harden: The End-to-End Security Platform for AI Agents in an Era of AI-Powered Attacks With Harden"
+            },
+            {
+              "youtube_id": "YC3SffZJEBg",
+              "title": "Presentation by AIAR"
+            },
+            {
+              "youtube_id": "4YaSTTXQX-Q",
+              "title": "Real World AI for Field Sales Teams With Myko AI"
+            },
+            {
+              "youtube_id": "9PO5W3GDP-8",
+              "title": "TekFlix: How AI Turns Data Into Cinematic Stories With Anshar Labs"
+            },
+            {
+              "youtube_id": "lY_INKUbEb8",
+              "title": "The Augmentation Revolution: Why the Future of AI Is Human With HOLOVOX"
+            },
+            {
+              "youtube_id": "4ub9YJuNXlY",
+              "title": "The History of Insurance and the Coming Age of Humanoid Robots With Clanker Labs"
+            },
+            {
+              "youtube_id": "f1sGCFM5-bA",
+              "title": "TraceRoot - open-source observability and self-improving layer for AI agents. With TraceRoot.AI"
+            },
+            {
+              "youtube_id": "c39bjpPOW_Q",
+              "title": "Using Your Existing Agents to Train Custom Models for a Fraction of a Cost of Frontier Models"
+            },
+            {
+              "youtube_id": "bLEmxD8c8v4",
+              "title": "We Passed the Audit. We Failed the Agent Red Team. The Gap Killing AI Programs in Regulated"
+            },
+            {
+              "youtube_id": "pUhorWbLpnY",
+              "title": "How to Build & Ship Self-Healing Integrations Without the iPaaS Overhead With Refold"
+            },
+            {
+              "youtube_id": "hF4PGJMTV7w",
+              "title": "Decision Intelligence - Analytics to Action With Ignite AI LLC"
+            },
+            {
+              "youtube_id": "Lj-Ngz1acsk",
+              "title": "The Control Tower for AI at Work: Seeing the Work Nobody Can Currently See With Oximy"
+            },
+            {
+              "youtube_id": "pOzCDOCP4Gs",
+              "title": "Beyond the Black Box: Interpretability as AI Security's Missing Layer With Starseer"
+            },
+            {
+              "youtube_id": "wELQAh5drzE",
+              "title": "Autonomous Commerce Has Arrived With Autolane"
+            },
+            {
+              "youtube_id": "5eb9lsBUL9I",
+              "title": "Computer Vision Is a Lifecycle Problem, Not a Model Problem With IRIS"
+            },
+            {
+              "youtube_id": "TRvbBGAAvZc",
+              "title": "When Your AI Talks to Your Customers: Making Agent Answers Trustworthy Enough to Ship With Xorq Labs"
+            },
+            {
+              "youtube_id": "gfi-T0VMmW4",
+              "title": "Make Your Website the Source, not the Search Result. With eSEOspace"
+            },
+            {
+              "youtube_id": "kcHdwpeTwLI",
+              "title": "Beyond the Model: Building the Conditions for Enterprise Intelligence With Hapax"
+            },
+            {
+              "youtube_id": "GfLKCNLPahA",
+              "title": "FInOps for AI & AI for FinOps With Finomics"
+            },
+            {
+              "youtube_id": "YJ2lfebqWso",
+              "title": "What Comes After the Copilot? With Lotus Petal"
+            },
+            {
+              "youtube_id": "Lw3pBNxlLHU",
+              "title": "Reflex: Vibe Code Production-grade Apps in Python"
+            },
+            {
+              "youtube_id": "SNrfmon1dnE",
+              "title": "AI and Managed Services: Future Models of Symbiosis with AI"
+            },
+            {
+              "youtube_id": "q-yIVW_b-0k",
+              "title": "CIG: Complete, Instant, Governed Context for Enterprise AI With Euno"
+            },
+            {
+              "youtube_id": "BUz3UlJKdps",
+              "title": "Presentation by Veilion"
+            },
+            {
+              "youtube_id": "nqv-1YorfYE",
+              "title": "Closing the"
+            },
+            {
+              "youtube_id": "6oZz193iCCY",
+              "title": "Breaking AI Agents: What Offensive Security Revealed About the Future of Enterprise Defense"
+            },
+            {
+              "youtube_id": "R1A5cdPM9Uo",
+              "title": "Zero Hallucination Stack: Architecture for AI You Can Trust With PitCrew Agents"
+            },
+            {
+              "youtube_id": "OEKHdDqSJ1U",
+              "title": "Where AI Is Headed"
+            },
+            {
+              "youtube_id": "rJt6WCICPjI",
+              "title": "How AI Startups and VCs are Building the Future of Industry"
+            },
+            {
+              "youtube_id": "I4ra18Ku9NQ",
+              "title": "Investigative AI: Building Agents That Show Their Work with Clustral AI"
+            },
+            {
+              "youtube_id": "GNi9Hf9nmUo",
+              "title": "ON.AI - Faster Jobs. Same GPUs. More Revenue with OptimalNets"
+            },
+            {
+              "youtube_id": "PIopKTVGwoU",
+              "title": "Turning a 20M-MAU Company into Agent-Native With GNTC"
+            },
+            {
+              "youtube_id": "C4WMCV5e94k",
+              "title": "Beyond the LLM: AI That Understands Before It Speaks With DrunR"
+            },
+            {
+              "youtube_id": "1eWQ666_vNQ",
+              "title": "Stop Hiring: Build an AI Workforce Instead With Deploy AI Bots"
+            },
+            {
+              "youtube_id": "q70RdMbaAko",
+              "title": "Mind the Slop: Scaling Performance Creative Without Losing Your Brand With Tactimetry"
+            },
+            {
+              "youtube_id": "cNXBNkq0IgI",
+              "title": "Why Your AI Keeps Hallucinating: The Architecture Problem Nobody's Solving With ICDU.ai"
+            }
+          ]
         },
         {
           "title": "Beginner? Start Here Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "MPo95xg67-k",
+              "title": "From Pilot to Profit: A Chief Commercial Officer's Take On What AI Looks Like When It Works"
+            },
+            {
+              "youtube_id": "MZRAqkLEgmA",
+              "title": "Where Do Most Organizations and People Go Wrong With AI, What Are the Most Common Mistakes, and"
+            },
+            {
+              "youtube_id": "edhD8orkPOk",
+              "title": "Presentation by John Thompson, University of Michigan With University of Michigan"
+            },
+            {
+              "youtube_id": "aLZB6T7T0zA",
+              "title": "High-Value Use Cases You Can Deploy Quickly"
+            },
+            {
+              "youtube_id": "r1Z4yXY8eXs",
+              "title": "AI for Beginners: 0-1"
+            },
+            {
+              "youtube_id": "qyrYmq0zu08",
+              "title": "I Hired 150 AI Agents to Run My Life With Complete Workflow"
+            }
+          ]
         },
         {
           "title": "CSU Applied AI Research Conference",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "N8_cPkXcAiI",
+              "title": "Panel 3 - 2: AI-Driven Person Detection for Maritime Search and Rescue: The Value of Product-Based"
+            },
+            {
+              "youtube_id": "oWVYCJ3ICTY",
+              "title": "Panel 5-2 AI Policy Implementation Higher Education: A Case Study Organizational Change Tennessee"
+            },
+            {
+              "youtube_id": "-ylzCcnatI4",
+              "title": "Panel 7 - 4: Design for an Interactive Software Artificial Intelligence Lab for Test Driven Design"
+            },
+            {
+              "youtube_id": "VeMqaQ3lIDI",
+              "title": "Panel 1 - 3: Evaluating Hallucination in Retrieval-Augmented Generation for High-Stakes Healthcare"
+            },
+            {
+              "youtube_id": "MV7V_rk7XQo",
+              "title": "Panel 3 - 3: Experimental Evaluation of Infrastructure-Assisted AI for Occluded Driving Scenarios"
+            },
+            {
+              "youtube_id": "tYxeBijkeRs",
+              "title": "Panel 7 - 2: Explaining is Harder Than Predicting: Evaluating Multimodal LLMs in ICL"
+            },
+            {
+              "youtube_id": "qivYz1lEuJE",
+              "title": "Panel 5 - 1: From AI Adoption to AI Readiness: A Framework for Governance, Ethics, and Workforce"
+            },
+            {
+              "youtube_id": "Pa7NIssoQMU",
+              "title": "Panel 3 - 1: From Educational Malpractice to Hirable by Graduation: Kasparov's Law and an OODA Loop"
+            },
+            {
+              "youtube_id": "ItMW9xIIpqU",
+              "title": "Panel 5 - 4: From Fear to Fluency: AI Literacy Interventions as Workforce Readiness"
+            },
+            {
+              "youtube_id": "J4Q4sOQ7Uqk",
+              "title": "Panel 5 - 3: Leading Human-Centered AI Adoption: From Awareness to the Human Edge"
+            },
+            {
+              "youtube_id": "Do_E3KX8QGM",
+              "title": "Panel 7 - 3: When AI Tutors Get Engineering Wrong: Student Verification of Chatbot Solutions in RL"
+            },
+            {
+              "youtube_id": "nRiA9vPdTpY",
+              "title": "Panel 1 - 1: Tomorrow’s Cyber Risks Today"
+            },
+            {
+              "youtube_id": "TrMRwyf-I3c",
+              "title": "Panel 3 - 4: When Everyone Has AI: Turning Embedded AI into Competitive Advantage"
+            },
+            {
+              "youtube_id": "wRqp3ZMj-8w",
+              "title": "Panel 7 - 1: Where AI Belongs: Protecting Craft and Discovery While Teaching Generative AI in Design"
+            },
+            {
+              "youtube_id": "d1V7xWoxwQo",
+              "title": "Panel 1 - 4: Validation Methodologies of Generative AI Responses"
+            },
+            {
+              "youtube_id": "BRxOWFs2IC0",
+              "title": "Panel 4 - 2: Discourse Analysis of Legislative Bill Discussions"
+            },
+            {
+              "youtube_id": "T5l2YvqPQX0",
+              "title": "Panel 4 - 3: Detection of Self-Introductions in Legislative Testimony"
+            },
+            {
+              "youtube_id": "iVjtWO7CxZw",
+              "title": "Panel 6 - 3: Educating for Agency and Embodied Understanding in the Age of AI"
+            },
+            {
+              "youtube_id": "1ewjHdg5Y2g",
+              "title": "Panel 8 - 1: Customer Love in the Age of AI: Frontline Service Relationships and Brand Equity*"
+            },
+            {
+              "youtube_id": "-Rpu7N_nK74",
+              "title": "Panel 6 - 4: Brain Health in the Age of AI: Reclaiming Your Agency"
+            },
+            {
+              "youtube_id": "b9l7ylt3ps0",
+              "title": "Panel 8 - 4: Discover: A Retrieval-Augmented AI Chatbot for Trusted Mental Health Resource"
+            },
+            {
+              "youtube_id": "S_mbNTfnS-U",
+              "title": "Panel 4 - 4: From AI-Generated Environmental Intelligence to Human-Centered Spatial Storytelling"
+            },
+            {
+              "youtube_id": "Eu_LK49dhq4",
+              "title": "Panel 4 - 1: Algorithmic Campaigning: A Case Study of California's 2026 Gubernatorial Race"
+            },
+            {
+              "youtube_id": "PuGpoOQb9n4",
+              "title": "Panel 6 - 1: Personalized, Powerful, and Equitable: The Role of AI in Workforce Retraining and"
+            },
+            {
+              "youtube_id": "aHzvRsjh2fs",
+              "title": "Panel 2 - 1: Jesse AI: Community-Centered Pilot Evaluation of an AI Chatbot for Substance Use"
+            },
+            {
+              "youtube_id": "uVy59r_e7Bg",
+              "title": "Panel 2 - 2: Non-Language Is Language: Designing Communicative AI for Populations Whose Language"
+            },
+            {
+              "youtube_id": "WKsLCei61hY",
+              "title": "Panel 8 - 2: Exploring AI Technologies in Unmanned Stores: Consumer Psychological Responses and"
+            },
+            {
+              "youtube_id": "IlKi9r5V7KU",
+              "title": "Panel 6 - 2: Green-Curious Investing and GenAI: A Field Experiment"
+            },
+            {
+              "youtube_id": "v4I_pj_zaeY",
+              "title": "Panel 8 - 3: Governance Before Automation: A Practice-Based Framework for AI Adoption in"
+            },
+            {
+              "youtube_id": "A_t7Qc3PlEo",
+              "title": "Panel 2 - 4: What is possible for AI going forward - opportunities for including the next"
+            }
+          ]
         },
         {
           "title": "Emerging Parallel Technologies Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "d3FThrXyXhw",
+              "title": "From Hype to Real Utility : Making Quantum Useful for AI Today With Quantum Computing Inc."
+            },
+            {
+              "youtube_id": "BqaH9gAhJ3g",
+              "title": "The Intersection of Blockchain and AI With FICO"
+            },
+            {
+              "youtube_id": "69UjyGsCC-s",
+              "title": "Dawn of a New Era: What Happens When Your Mind Connects to a Computer? with Noland Arbaugh LLC"
+            },
+            {
+              "youtube_id": "7ejoDa3u8pw",
+              "title": "The Rise of AI in Film Production: How Machine Learning is Changing Storytelling With UC Berkeley"
+            }
+          ]
         },
         {
           "title": "Google Cloud Programming Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "jtwTWVmOA_Q",
+              "title": "Vibe-Code an App on Multimodal Analytics [HANDS ON; LAPTOP REQUIRED] With Google Cloud"
+            },
+            {
+              "youtube_id": "CE8-ZMzlY3k",
+              "title": "Transforming Multimodal Data into Enterprise AI Agents with BigQuery and Gemini [HANDS ON; LAPTOP"
+            },
+            {
+              "youtube_id": "IcNJa6U5FlM",
+              "title": "Spec-Driven Development with Antigravity CLI - Structured Agent Workflows with Skills and MCP"
+            },
+            {
+              "youtube_id": "bmpGoCDvcOA",
+              "title": "Scaling Agents through Agent Engineering [HANDS ON; LAPTOP REQUIRED] With Google Cloud"
+            },
+            {
+              "youtube_id": "fIGc63DOYfA",
+              "title": "Agent Building on Google Cloud With Google Cloud"
+            },
+            {
+              "youtube_id": "CVx1a-5fPoA",
+              "title": "A2UI: Build Dynamic Apps with Generative UI With Google Cloud"
+            },
+            {
+              "youtube_id": "OOMEVQCUX5Q",
+              "title": "The Enterprise AI Imperative - Scaling Agents for Transformational Value With Google Cloud"
+            },
+            {
+              "youtube_id": "iptVTpWWcI8",
+              "title": "From Prototype to Production: Production Ready Agents on Google Cloud"
+            },
+            {
+              "youtube_id": "N6-WBqYQWMs",
+              "title": "Build Intelligent Agents with Telemetry and Sessions With Google"
+            }
+          ]
         },
         {
           "title": "Inclusive AI Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "EFRMrRpYP9Q",
+              "title": "Human‑Centered Design for Responsible AI"
+            },
+            {
+              "youtube_id": "N9hjdCIVXgc",
+              "title": "Representation Matters: Building Inclusive Teams and Ethical Systems"
+            },
+            {
+              "youtube_id": "bkKik4u5EN4",
+              "title": "The Room Was Built Without Us. Here's How We Change That With eXp Realty"
+            }
+          ]
         },
         {
           "title": "Secret Content Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "4srrBJ_qt4U",
+              "title": "Something From Nothing: The Hidden Origin of Every New Idea with Vector Pulse"
+            },
+            {
+              "youtube_id": "4FoUiWt8Cm8",
+              "title": "Unleashing Canine Superpowers - Cancer Screening That Doesn't Feel Like a Chore With Dognosis"
+            },
+            {
+              "youtube_id": "49VC0ofQaO4",
+              "title": "The Architecture of Motion in Motion: How to Harness Physical AI for Next-Era Human-Aware"
+            }
+          ]
         },
         {
           "title": "Social Impact of AI Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "CldB-5PuFH4",
+              "title": "The Hater's Guide To The AI Bubble With EZPR"
+            },
+            {
+              "youtube_id": "SDN30Ijxxeo",
+              "title": "LOV Where You Work AI Tool"
+            },
+            {
+              "youtube_id": "i-YZnU0zMRE",
+              "title": "Where AI Money Actually Flows With Smart Venture Media"
+            },
+            {
+              "youtube_id": "We9POs5uaho",
+              "title": "The Attribution Revolution: Artists, AI, and the Future of Getting Paid"
+            },
+            {
+              "youtube_id": "i5X3WRuhN_Y",
+              "title": "The Future of Hollywood: AI That Empowers Creators with Flawless and Variety"
+            },
+            {
+              "youtube_id": "CvHKbdFiUns",
+              "title": "The Economic Impact of AI: Jobs, Productivity, and Future Economies"
+            },
+            {
+              "youtube_id": "bUjEy6vE3jo",
+              "title": "Fireside Chat with Andrew Yang, Noble Mobile and Jacob Bogage, Reuters"
+            },
+            {
+              "youtube_id": "zzGvFhsayVc",
+              "title": "When Intelligence Becomes Cheap: The Economic Consequences of Transformative AI"
+            },
+            {
+              "youtube_id": "j4OduqrrSFo",
+              "title": "AI and the Automated Abundance Economy With Zoltan Istvan"
+            },
+            {
+              "youtube_id": "57obkqdD2RM",
+              "title": "Know and Grow the ROI of AI: From Enterprise Transformation to Business Value With Workhelix"
+            }
+          ]
         },
         {
           "title": "The Ai4 Lens Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "DRKW9zjtxRs",
+              "title": "Fireside Chat with Amir Alpert, Dognosis"
+            }
+          ]
         }
       ]
     },
@@ -2155,51 +2778,399 @@
       "tracks": [
         {
           "title": "Agentic Ops & Platforms [Technical]",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "Ok8BV5Gj128",
+              "title": "Under the Hood: A Unified ML Framework Driving AI Experiences in Mercedes-Benz Vehicles"
+            },
+            {
+              "youtube_id": "8AMeE1BfgeI",
+              "title": "Scaling AI Systems with Modern AIOps Platforms"
+            },
+            {
+              "youtube_id": "9C2iDUh8PWk",
+              "title": "From Reality to Scale: Agentic AI Operations & Platforms for Industrial Outcomes with Siemens  DI"
+            },
+            {
+              "youtube_id": "mFB21_l8rag",
+              "title": "From Demo to Millions: The Observability Loop Behind Lenskart's Voice, Video & AR Agents with GeoIQ"
+            },
+            {
+              "youtube_id": "LxQAGe25QJw",
+              "title": "The AI Operating Model: From Intent to Execution With Kraft Heinz"
+            },
+            {
+              "youtube_id": "P-0eEUm-jd0",
+              "title": "A New System of Trust: The Control Plane for Agentic Systems With Fiddler AI"
+            },
+            {
+              "youtube_id": "vjy3spGIJB8",
+              "title": "Agentic Ops for the Secure Agentic Enterprise: Safe, Observable Agents with HPE and NVIDIA"
+            }
+          ]
         },
         {
           "title": "AI Agents Track [Technical]",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "23T-THc_pDE",
+              "title": "Scalable Agent Alignment with GRPO: Methods, Reward Design and Training Dynamics With Vanguard Group"
+            },
+            {
+              "youtube_id": "wJrKm_Rz75Y",
+              "title": "Multi-Agent Orchestration with Elastic Workflows and Agent Builder With Elasticsearch"
+            },
+            {
+              "youtube_id": "qDc5H2PO07I",
+              "title": "Winning the AI Agents Edge Race With Columbia University"
+            },
+            {
+              "youtube_id": "k5tTZwvMPos",
+              "title": "Powering Agents with Search: Creating Interactive Vector Pipelines with SQL With Materialize"
+            },
+            {
+              "youtube_id": "Tu5-9fGz1nQ",
+              "title": "AI Agents You Can Actually Trust: Platform Best Practices for Safe AI with Red Hat"
+            },
+            {
+              "youtube_id": "DzzfIsl-Ids",
+              "title": "Flying High with AI Agents in Operation at United: Kushal Pasari, United Airlines"
+            },
+            {
+              "youtube_id": "uxbO-VxKtAU",
+              "title": "Why AI Agents Act on the Wrong Context With Tacnode"
+            },
+            {
+              "youtube_id": "7oOjxkOEzKY",
+              "title": "HIve: A Governed Agentic Workflow Platform for Healthcare With Exact Sciences Corp"
+            },
+            {
+              "youtube_id": "Jh2_xYVk1jY",
+              "title": "Confidently Wrong: Building Validation and Trust for Your AI Agents With TestMu AI"
+            },
+            {
+              "youtube_id": "zxQRuDs-gkU",
+              "title": "AI-Driven Platform Engineering With Philo"
+            },
+            {
+              "youtube_id": "Vo6NGRCxPWU",
+              "title": "Building Reliable AI Agents in Production With Block Inc"
+            },
+            {
+              "youtube_id": "5uO3r0Z76Ew",
+              "title": "Complex SOPs, Brittle Agents: Evaluating AI Agents in Real-World Automations With Amazon"
+            },
+            {
+              "youtube_id": "o2wMJRLAQlc",
+              "title": "PRAXIST: The World's First Autonomous Research System Delivering Validated, Enterprise-Ready Results"
+            },
+            {
+              "youtube_id": "sGtlR5UGqzA",
+              "title": "The Agentic Stack: Why Enterprise Software Needs a New Foundation, Not a New Feature With IFS Loops"
+            },
+            {
+              "youtube_id": "fV044e3-QdU",
+              "title": "Deploying AI Agents for the Real World"
+            },
+            {
+              "youtube_id": "DvU6JVlQF0o",
+              "title": "The Brain of the Agent — Architectures and Training for Intelligent AI Systems"
+            },
+            {
+              "youtube_id": "yTTNXxuxJ1s",
+              "title": "RAG is a Flashlight. Your AI Agent Needs a Map With Arch"
+            },
+            {
+              "youtube_id": "PE6XNvO3tNA",
+              "title": "The Loop, Not the Launch: Building Agents That Get Better With You with ElevenLabs"
+            },
+            {
+              "youtube_id": "tRu6xQ9_bAo",
+              "title": "I Couldn't Buy It So I Built It: Citizen Developers Building AI Applications with Coinbase"
+            },
+            {
+              "youtube_id": "qrh14eMvOjo",
+              "title": "Presentation by Impart Security"
+            },
+            {
+              "youtube_id": "0aOhTixTq1A",
+              "title": "RAG is a Flashlight. Your AI Agent Needs a Map. - Graph Theory as an AI Agent's Superpower With Arch"
+            },
+            {
+              "youtube_id": "noVd6-bMcF4",
+              "title": "Do your AI Agents dream of vibe coded sheep? Managing durable agent memories With Google"
+            },
+            {
+              "youtube_id": "Twct4OtyuZ4",
+              "title": "COCO: An Agentic AI Assistant for Marketing Analytics With Pfizer"
+            }
+          ]
         },
         {
           "title": "AI Research Summit [Technical]",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "aG8foA_qXgY",
+              "title": "Networked Intelligence: Scaling Human-AI Networks with Active Context Graphs With PNNL"
+            },
+            {
+              "youtube_id": "WlZdiBcAzs4",
+              "title": "The SQL Layer for Physical and Visual AI With KAUST & CreativAI"
+            },
+            {
+              "youtube_id": "_1H-yR25BO0",
+              "title": "The Greatest Astronomy and Astrophysics Discovery Machine Ever Built: The NSF-DOE Vera C. Rubin"
+            },
+            {
+              "youtube_id": "rVAFn58qo-0",
+              "title": "Neural Scaling Universality: Emergent Power Laws Obey Robust Exponents With  MIT"
+            },
+            {
+              "youtube_id": "IMLhEbZZWz8",
+              "title": "AGI and the NYT Crosswords With The New York Times"
+            },
+            {
+              "youtube_id": "6D3RLbcTQJU",
+              "title": "Learning the Regulatory Code of Alzheimer's Genomes, Towfique Raj, Icahn School of Medicine"
+            },
+            {
+              "youtube_id": "525TPTSqliI",
+              "title": "Beneficial AGI: The Path the Frontier Labs Are Missing With SingularityNET and BGI Labs"
+            },
+            {
+              "youtube_id": "V-9TscGJj-Y",
+              "title": "How Not to Blow Up: Training a 400B MoE to 17T Tokens Without Loss Spikes - Presentation by Lucas"
+            },
+            {
+              "youtube_id": "LscxCxPMaBY",
+              "title": "Securing World Models & Digital Twins: The Next Critical Attack Surface for Operations"
+            },
+            {
+              "youtube_id": "A1FLWhmEJeM",
+              "title": "Presentation by Che Guan, Alliance Bernstein"
+            },
+            {
+              "youtube_id": "aHmUu3MgXTg",
+              "title": "Robust AI Security and Alignment: A Sisyphean Endeavor? With NIST"
+            },
+            {
+              "youtube_id": "brj0GjA84y0",
+              "title": "Sovereign Language Models (SLMs & LLMs) in Production with The Vanguard Group"
+            },
+            {
+              "youtube_id": "n3OYFFujUgg",
+              "title": "The State of AI Research - Breakthroughs, Gaps, and the Road Ahead"
+            },
+            {
+              "youtube_id": "W-6bXvmG0ao",
+              "title": "Shortcutting Time and Depth in Diffusion Models for Faster Agentic Applications with Panasonic"
+            },
+            {
+              "youtube_id": "gVTYfI4pOSg",
+              "title": "Artificial Hivemind: The Open-Ended Homogeneity of Language Models (and Beyond)"
+            },
+            {
+              "youtube_id": "HVgC05wHGCw",
+              "title": "Who Watches the Agents? Building Gen AI Evaluation Suites for Complex Architectures With Google"
+            },
+            {
+              "youtube_id": "aj5hkhuF3eg",
+              "title": "How to Build a Virtual Human for Drug Discovery With Synthesize Bio"
+            }
+          ]
         },
         {
           "title": "Coding Assistants & Vibe Coding [Technical] Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "d3OFzqKAbSM",
+              "title": "From Vibe Coding to Production: What It Takes to Scale AI Coding Assistants Across the Enterprise"
+            },
+            {
+              "youtube_id": "kL6o44eBxOc",
+              "title": "The Rise of AI Coding Assistants"
+            },
+            {
+              "youtube_id": "Evc_8RBzkh0",
+              "title": "Cheap to Write, Expensive to Trust: Architecting Production Systems with LLMs With Meta"
+            },
+            {
+              "youtube_id": "vWdwtvP0lbk",
+              "title": "AI Agents In Production Infrastructure: What The Industry Learned The Hard Way with JP Morgan Chase"
+            }
+          ]
         },
         {
           "title": "Edge AI & Tiny ML [Technical] Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "rAa01VqZW6A",
+              "title": "Your AI Is on the Street Now: Adversarial Threats to Edge AI Systems in Physical Environments"
+            },
+            {
+              "youtube_id": "ZALwExaIVBs",
+              "title": "Generative AI for Federated Learning: Improving Privacy & Performance With Oregon State University"
+            }
+          ]
         },
         {
           "title": "Evaluation, Observability, & Interpretability [Technical] Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "y_FAUWYALd8",
+              "title": "Solve the AI Trust Gap with Agent Observability With Cisco"
+            },
+            {
+              "youtube_id": "r8sSROyPndQ",
+              "title": "Keeping Models Honest: AI Observability for Scalable, Reliable Systems"
+            },
+            {
+              "youtube_id": "Cq6CuBTwikw",
+              "title": "TAMING STOCHASTICITY: Evaluations & Observability at Scale With Vanguard"
+            },
+            {
+              "youtube_id": "yOQUFKJ0x6w",
+              "title": "Fast, Safe, and Cheap:  Making Good AI Design Decisions With Cox Automotive"
+            }
+          ]
         },
         {
           "title": "Generative AI [Technical] Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "pVPVzVlLxEs",
+              "title": "The Dumbest Questions People Still Ask About Securing AI With  Gray Swan"
+            },
+            {
+              "youtube_id": "hV0RNjnWLYA",
+              "title": "The Semantic ID Layer : Rebuilding RecSys With Meta"
+            },
+            {
+              "youtube_id": "Quz16KujtZI",
+              "title": "Generative AI for Grocery E-Commerce With Instacart"
+            },
+            {
+              "youtube_id": "FS64MoF9jlk",
+              "title": "How Generative Models Are Built and Deployed"
+            },
+            {
+              "youtube_id": "sk2GpHa3c1g",
+              "title": "Customizing Intelligence: Fine-Tuning and Prompt Engineering for Real-World Impact"
+            },
+            {
+              "youtube_id": "LnRXxsviw7A",
+              "title": "Deploying GenAI Safely at Scale With New York Life"
+            },
+            {
+              "youtube_id": "bOXl5_n9ICM",
+              "title": "Agents in the Wild: What It Takes to Build Reliable Agentic AI With Amazon Nova"
+            }
+          ]
         },
         {
           "title": "Multimodal AI [Technical] Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "RiNp_Vx44H8",
+              "title": "AI for Hardware Development With Amazon Robotics"
+            },
+            {
+              "youtube_id": "TvxYZhG1iTk",
+              "title": "From Specialized Capabilities to Composable Intelligence: Architecting Scalable, Multimodal AI for"
+            },
+            {
+              "youtube_id": "sSgOf1Vys9I",
+              "title": "Scaling Holistic Predictive Intelligence Pipelines with the Split-Brain Spiderweb Architecture"
+            },
+            {
+              "youtube_id": "hiUbHN7VNTA",
+              "title": "From Tools to Teammates: Physical AI and Shared Autonomy for Flexible Generalist Robots"
+            },
+            {
+              "youtube_id": "8qApsMR7cDU",
+              "title": "Presentation by Divya Choudhary, X, The Moonshot Factory"
+            }
+          ]
         },
         {
           "title": "Quantum AI [Technical] Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "djCZTOUUkcc",
+              "title": "From Quantum Picturalism to Quantum NLP: Interpretable, Scalable, and Exponential Advantage"
+            },
+            {
+              "youtube_id": "-cZ1lkUJL6Y",
+              "title": "Protecting Enterprise AI Data in the Post-Quantum Era With Visa Inc"
+            }
+          ]
         },
         {
           "title": "Recommendation & Ranking Systems [Technical] Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "Kgp27I4VNYw",
+              "title": "Joint LLM-Infused Embeddings for Explainable Financial Recommendations at Scale"
+            },
+            {
+              "youtube_id": "KMHuxIZGTlg",
+              "title": "Adaptive Recommendations at Scale Using AI With Zocdoc (ex-Netflix, Walmart, Twitter)"
+            },
+            {
+              "youtube_id": "IzmgXhrAwcM",
+              "title": "Solving Product Matching with AI: Query Understanding, Hybrid Retrieval, and Multi-Stage Ranking"
+            }
+          ]
         },
         {
           "title": "Synthetic Data & Data Generation [Technical] Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "s6lAx_yiwII",
+              "title": "Can Synthetic Data Replace Real Data?"
+            },
+            {
+              "youtube_id": "G0xBkNl211w",
+              "title": "Teaching Models to Imagine: Trustworthy Simulation for Sequential Data with Amazon"
+            },
+            {
+              "youtube_id": "gOGoV4jJEIQ",
+              "title": "Failure-Driven Data Engines: Model Errors and Synthetic Generation with Toyota Research Institute"
+            },
+            {
+              "youtube_id": "THHxbNNVkTQ",
+              "title": "Synthetic by Design: Privacy-First Data Engineering for Scalable, High-Fidelity AI Training"
+            }
+          ]
         },
         {
           "title": "Vision, Spatial, & World Models [Technical] Track",
-          "items": []
+          "items": [
+            {
+              "youtube_id": "atS6iuvPB44",
+              "title": "How a Conference Room Broke Our Computer Vision Assumptions With SlidesLive"
+            },
+            {
+              "youtube_id": "EO0P8a0GZwE",
+              "title": "Closing the Sim2Real Gap with Living Drone Imagery With Spexi"
+            },
+            {
+              "youtube_id": "FHkrDkn6HS0",
+              "title": "The Role of World Models: Teaching AI to See, Move, and Plan"
+            },
+            {
+              "youtube_id": "SJti4SleADE",
+              "title": "The State of Computer Vision: Tracking, Detection, and Understanding in 2026"
+            },
+            {
+              "youtube_id": "SmDB2LdX15Q",
+              "title": "Navigating Scaling and Long Tail: VLAs, Data Generation, and Mapping Approaches in Autonomy"
+            },
+            {
+              "youtube_id": "wd-BFrxtFSM",
+              "title": "Beyond the Screen: Engineering AI Models for the Real World With Niantic Spatial And The BBC"
+            }
+          ]
         }
       ]
     }

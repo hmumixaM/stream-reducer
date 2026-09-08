@@ -49,11 +49,14 @@ Write a detailed, faithful walkthrough of THIS part as Markdown:
   and the way it is discussed (stories, jokes, debates, emotional beats).
 - After the prose, optionally add `- ` bullets for extra concrete data points,
   lists, or facts that deserve to stand alone.
-- When a visual architecture or flow is important, you may reproduce it as a
-  fenced monospace text diagram. Keep every line within 72 characters, use
-  aligned boxes and connectors, and shorten labels instead of breaking a node
-  across unrelated lines. If a clean diagram is not possible, explain it in
-  prose instead.
+- When a visual architecture or flow is important, use a fenced Mermaid diagram
+  beginning with ` ```mermaid ` and a simple `flowchart LR` or `flowchart TD`.
+  Keep node IDs short, put human-readable labels in quoted brackets such as
+  `A["Meeting transcript"]`, and keep each edge on its own line. Use an
+  `accTitle:` line for accessibility. Never draw boxes, arrows, or tables with
+  ASCII characters in a plain code fence. For genuinely tabular comparisons,
+  use a standard Markdown table instead. If neither format can express the
+  source cleanly, explain it in prose.
 - Weave in memorable verbatim quotes inline using "quotation marks".
 - IMPORTANT: Put a [HH:MM:SS] timestamp ONLY on the section headings. Do NOT add
   timestamps inside the prose sentences or bullets — the prose must read cleanly

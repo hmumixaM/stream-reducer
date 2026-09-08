@@ -11,7 +11,7 @@
     {
       "slug": "ai-transformation",
       "title": "AI Transformation",
-      "source_url": "https://videos.ai4.io/2025/",
+      "source_url": "https://videos.ai4.io/2025/ai-transformation/",
       "tracks": [
         {
           "title": "AI Agents: Applications & Use Cases Track",
@@ -668,10 +668,6 @@
       "source_url": "https://videos.ai4.io/2025/general-sessions/",
       "tracks": [
         {
-          "title": "Ai4 Video Portal",
-          "items": []
-        },
-        {
           "title": "Keynote Track",
           "items": [
             {
@@ -804,10 +800,6 @@
       "title": "Industry Tracks",
       "source_url": "https://videos.ai4.io/2025/industry-tracks/",
       "tracks": [
-        {
-          "title": "Ai4 Video Portal",
-          "items": []
-        },
         {
           "title": "Education Track",
           "items": [
@@ -1212,10 +1204,6 @@
       "source_url": "https://videos.ai4.io/2025/job-function/",
       "tracks": [
         {
-          "title": "Ai4 Video Portal",
-          "items": []
-        },
-        {
           "title": "AI Governance Track",
           "items": [
             {
@@ -1595,10 +1583,6 @@
       "source_url": "https://videos.ai4.io/2025/social-impact/",
       "tracks": [
         {
-          "title": "Ai4 Video Portal",
-          "items": []
-        },
-        {
           "title": "AI Ethics, Safety & Alignment Track",
           "items": [
             {
@@ -1848,10 +1832,6 @@
       "title": "Summits",
       "source_url": "https://videos.ai4.io/2025/summits/",
       "tracks": [
-        {
-          "title": "Ai4 Video Portal",
-          "items": []
-        },
         {
           "title": "AI Policy Summit Track",
           "items": [
@@ -2262,10 +2242,6 @@
       "title": "Technical Tracks",
       "source_url": "https://videos.ai4.io/2025/technical-tracks/",
       "tracks": [
-        {
-          "title": "Ai4 Video Portal",
-          "items": []
-        },
         {
           "title": "AI Agents Track [Technical]",
           "items": [

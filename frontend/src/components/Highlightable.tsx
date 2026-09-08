@@ -1,13 +1,16 @@
 import {
+  Children,
+  isValidElement,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ComponentPropsWithoutRef,
   type ReactNode,
 } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -15,6 +18,7 @@ import "katex/dist/katex.min.css";
 import { Highlighter, Trash2, Check } from "lucide-react";
 import type { Highlight, HighlightSource, NewHighlight } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { MermaidDiagram } from "@/components/MermaidDiagram";
 
 // Tailwind needs the class strings to appear literally so they survive the JIT
 // scan; keep the full classes (not interpolated) in this map.
@@ -57,11 +61,29 @@ function collectTextNodes(root: HTMLElement): Text[] {
   const nodes: Text[] = [];
   let node = walker.nextNode() as Text | null;
   while (node) {
-    if (!node.parentElement?.closest("mark[data-hl], .katex-mathml")) nodes.push(node);
+    if (!node.parentElement?.closest("mark[data-hl], .katex-mathml, .mermaid-diagram")) {
+      nodes.push(node);
+    }
     node = walker.nextNode() as Text | null;
   }
   return nodes;
 }
+
+function MarkdownPre({ children, ...props }: ComponentPropsWithoutRef<"pre">) {
+  const child = Children.toArray(children)[0];
+  if (
+    isValidElement<{ className?: string; children?: ReactNode }>(child) &&
+    child.props.className?.split(" ").includes("language-mermaid")
+  ) {
+    const source = Children.toArray(child.props.children).join("").replace(/\n$/, "");
+    return <MermaidDiagram source={source} />;
+  }
+  return <pre {...props}>{children}</pre>;
+}
+
+const MARKDOWN_COMPONENTS = {
+  pre: MarkdownPre,
+} satisfies Components;
 
 function markFor(hl: Highlight, onClick: (id: number, el: HTMLElement) => void): HTMLElement {
   const mark = document.createElement("mark");
@@ -167,7 +189,11 @@ export function HighlightableMarkdown({
   // remark-math + rehype-katex: $inline$ / $$block$$ LaTeX.
   const rendered = useMemo(
     () => (
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={MARKDOWN_COMPONENTS}
+      >
         {markdown}
       </ReactMarkdown>
     ),

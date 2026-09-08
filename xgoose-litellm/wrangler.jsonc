@@ -1,0 +1,47 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "xgoose-litellm",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-23",
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true
+    }
+  },
+  "containers": [
+    {
+      "class_name": "LiteLLMContainer",
+      "image": "./Dockerfile",
+      "instance_type": "standard-1",
+      "max_instances": 6
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "LITELLM",
+        "class_name": "LiteLLMContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["LiteLLMContainer"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "xgoose-prod",
+      "database_id": "53570b91-0d31-4a0d-9671-f91ea6a09811"
+    }
+  ],
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA"
+  },
+  "vars": {
+    "GEMINI_PROXY_BASE": "https://xgoose-gemini-proxy.max-678.workers.dev/v1"
+  }
+}
