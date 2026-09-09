@@ -230,9 +230,19 @@
   .prose-read .mermaid-diagram svg {
     display: block;
     inline-size: 100% !important;
-    max-inline-size: 100% !important;
+    /* Keep Mermaid's intrinsic max-width so narrow/vertical diagrams are not
+       enlarged to the full reading column. Wide diagrams still shrink to fit. */
+    max-inline-size: 100%;
     block-size: auto;
     margin-inline: auto;
+  }
+  .prose-sr .mermaid-diagram :is(.nodeLabel, .edgeLabel, .cluster-label),
+  .prose-read .mermaid-diagram :is(.nodeLabel, .edgeLabel, .cluster-label) {
+    color: #312e81 !important;
+    fill: #312e81 !important;
+    font-family: ui-sans-serif, system-ui, sans-serif !important;
+    font-size: 1rem !important;
+    line-height: 1.35;
   }
   .prose-sr .mermaid-diagram-loading,
   .prose-read .mermaid-diagram-loading {
