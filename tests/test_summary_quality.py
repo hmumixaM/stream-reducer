@@ -16,19 +16,24 @@ def test_rejects_short_nonempty_map_response() -> None:
     assert "chars" in issue
 
 
-def test_rejects_map_response_that_only_covers_beginning() -> None:
+def test_rejects_substantial_but_disproportionately_short_response() -> None:
+    notes = "### [00:00] Introduction\n" + "Opening material. " * 60
+    issue = map_notes_issue(notes, _source())
+    assert issue is not None
+    assert "chars" in issue
+
+
+def test_accepts_long_map_response_without_a_late_heading() -> None:
     notes = (
         "### [00:00] Introduction\n"
         + "Detailed opening discussion. " * 80
         + "\n### [01:00] First idea\n"
         + "More detail. " * 80
     )
-    issue = map_notes_issue(notes, _source())
-    assert issue is not None
-    assert "latest heading" in issue
+    assert map_notes_issue(notes, _source()) is None
 
 
-def test_accepts_map_response_covering_late_source_topics() -> None:
+def test_accepts_map_response_with_multiple_source_topics() -> None:
     notes = (
         "### [00:00] Introduction\n"
         + "Detailed opening discussion. " * 80

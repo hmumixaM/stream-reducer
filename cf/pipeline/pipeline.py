@@ -50,7 +50,7 @@ import llm
 logger = logging.getLogger("pipeline")
 
 # Tunables (env-overridable).
-SUMMARY_CHUNK_CHARS = int(os.environ.get("SUMMARY_CHUNK_CHARS", "20000"))
+SUMMARY_CHUNK_CHARS = int(os.environ.get("SUMMARY_CHUNK_CHARS", "12000"))
 SUMMARY_MAP_MAX_TOKENS = int(os.environ.get("SUMMARY_MAP_MAX_TOKENS", "8000"))
 SUMMARY_REDUCE_MAX_TOKENS = int(os.environ.get("SUMMARY_REDUCE_MAX_TOKENS", "16000"))
 SUMMARY_SECTION_SOURCE_CHARS = int(os.environ.get("SUMMARY_SECTION_SOURCE_CHARS", "50000"))
@@ -848,7 +848,8 @@ def summarize(item: ItemView, transcript: dict, stages: list[Stage], target_lang
                 )
             except httpx.HTTPError as exc:
                 raise RuntimeError(
-                    f"summary map chunk {i}/{len(chunks)} failed quality or transport checks"
+                    f"summary map chunk {i}/{len(chunks)} failed quality or "
+                    f"transport checks: {exc}"
                 ) from exc
             st.request_count += 1
             st.total_tokens += res.total_tokens

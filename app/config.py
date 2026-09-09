@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     # final reduce. Keeps long-transcript summarization fast and cheap.
     summary_map_model: str = "gemini-3.5-flash"
     # Smaller chunks => more detail budget per section in the walkthrough.
-    summary_chunk_chars: int = 20000
+    summary_chunk_chars: int = 12000
     # Generous output budgets so the detailed walkthrough is not truncated.
     summary_map_max_tokens: int = 8000
     summary_reduce_max_tokens: int = 16000
