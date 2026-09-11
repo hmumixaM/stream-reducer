@@ -9,6 +9,13 @@ let initialized = false;
 let nextDiagramId = 0;
 let renderQueue = Promise.resolve();
 
+function normalizeMermaidSource(source: string): string {
+  // Mermaid's accessibility description directive is `accDescr`. Some LLMs
+  // emit the more natural-looking `accDescription`, which otherwise makes the
+  // entire diagram fail to parse.
+  return source.replace(/^(\s*)accDescription:/gim, "$1accDescr:");
+}
+
 async function renderDiagram(source: string): Promise<string> {
   const { default: mermaid } = await import("mermaid");
   if (!initialized) {
@@ -65,7 +72,10 @@ async function renderDiagram(source: string): Promise<string> {
   renderQueue = renderQueue
     .catch(() => undefined)
     .then(async () => {
-      const result = await mermaid.render(`mermaid-${nextDiagramId++}`, source);
+      const result = await mermaid.render(
+        `mermaid-${nextDiagramId++}`,
+        normalizeMermaidSource(source),
+      );
       svg = result.svg;
     });
   await renderQueue;
