@@ -17,7 +17,6 @@ import { loadBiliAuth } from "../lib/biliAuth";
 import { readJson } from "../lib/request";
 import { channelLinkRoutes } from "./adminChannelLink";
 import { adminLlmRoutes } from "./adminLlm";
-import { adminCollectionRoutes } from "./adminCollections";
 import {
   groupSelectedResolvedFollows,
   mergeFollowsIntoChannel,
@@ -32,7 +31,6 @@ export const adminRoutes = new Hono<AppContext>();
 adminRoutes.use("*", requireAdmin);
 adminRoutes.route("/", channelLinkRoutes);
 adminRoutes.route("/", adminLlmRoutes);
-adminRoutes.route("/", adminCollectionRoutes);
 
 interface AdminUserRow {
   id: number;

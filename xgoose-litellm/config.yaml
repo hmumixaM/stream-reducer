@@ -1,10 +1,10 @@
 # LiteLLM proxy — STATELESS gateway in front of the gemini-web2api Workers.
 #
-# Three public models are exposed: `gemini-3.7-flash`,
-# `gemini-3.5-flash`, and `gemini-3.1-pro`.
+# Four public models are exposed: `gemini-3.8-flash`,
+# `gemini-3.7-flash`, `gemini-3.5-flash`, and `gemini-3.1-pro`.
 #
-#   gemini-3.7-flash:
-#     Primary  : Gemini 3.7 Flash on rightapi.ai /gemini.
+#   gemini-3.8-flash / gemini-3.7-flash:
+#     Primary  : Corresponding Gemini model on rightapi.ai /gemini.
 #
 #   gemini-3.5-flash:
 #     Primary  : 3 gemini-web2api Workers (proxy-1/2/3), load-balanced by the
@@ -30,6 +30,14 @@
 
 model_list:
   # --- Primary summary model: RightCode Gemini ---
+  - model_name: gemini-3.8-flash
+    litellm_params:
+      model: openai/gemini-3.8-flash
+      api_base: https://www.rightapi.ai/gemini/v1
+      api_key: os.environ/RIGHTCODE_API_KEY
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000002
+
   - model_name: gemini-3.7-flash
     litellm_params:
       model: openai/gemini-3.7-flash
@@ -125,6 +133,7 @@ litellm_settings:
   # gemini-3.1-pro (DeepSeek) falls back opus-4-7 -> sonnet-4-6 -> deepseek.
   fallbacks:
     [
+      { "gemini-3.8-flash": ["gemini-3.7-flash"] },
       { "gemini-3.7-flash": ["gemini-3.5-flash"] },
       { "gemini-3.5-flash": ["gemini-3.5-flash-vertex"] },
       {

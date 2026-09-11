@@ -107,10 +107,7 @@
         // "Maximum number of running container instances exceeded". (Capacity
         // errors are also self-healed now: the consumer re-queues the item
         // instead of failing it.)
-        // Temporary AI4 backlog burst: RightCode's gemini-3.7-flash route can
-        // sustain the fan-out from twelve concurrent summarization jobs. Reduce
-        // this to 2 again after the conference backlog has drained.
-        "max_concurrency": 12,
+        "max_concurrency": 2,
         // The consumer gives up on the fifth content failure. Queue redelivery
         // must allow it to reach that terminal decision; three retries stopped
         // one attempt early and left items stranded in "summarizing".
@@ -137,15 +134,15 @@
       // repeatedly restarting a ~30-minute basic run (these items had 6–8
       // failed attempts each).
       "instance_type": "standard-2",
-      // Total container slots, sized as queue max_concurrency (12) + FEED_SHARDS
-      // (3) + the aux singletons (bili-refresh / meta-* / proxy-check) + spare.
+      // Total container slots cover queue concurrency + FEED_SHARDS (3) + the
+      // auxiliary singletons (bili-refresh / meta-* / proxy-check) + spare.
       // At 10 the pool had no spare: a summarize retry burst filled all six job
       // slots and the feed shards then lost every slot, so healthy channels
       // polled into "no Container instance available"/"suddenly disconnected"
       // for over an hour. Instances are billed only while running and the
       // account ceiling is far higher (6 TiB / 1,500 vCPU concurrent), so the
       // headroom is free unless it is actually used.
-      "max_instances": 24
+      "max_instances": 16
     }
   ],
 
@@ -174,10 +171,10 @@
     // through RightCode instead of the failure-prone Gemini web reverse proxy.
     // Verify the live route with `GET /api/admin/llm-check`.
     "LLM_BASE_URL": "https://xgoose-litellm.max-678.workers.dev/v1",
-    "LLM_MODEL": "gemini-3.7-flash",
-    // Keep the older route as a last-resort fallback for transient RightCode
+    "LLM_MODEL": "gemini-3.8-flash",
+    // Keep the previous RightCode route as a fallback for transient 3.8
     // failures. Empty/diagnostic responses are rejected by cf/pipeline/llm.py.
-    "LLM_MODEL_FALLBACK": "gemini-3.5-flash",
+    "LLM_MODEL_FALLBACK": "gemini-3.7-flash",
     "LLM_MODEL_INFOGRAPHIC": "gpt-image-2-vip",
     "STT_MODEL": "openai/whisper-large-v3-turbo",
     "EMBEDDING_DIM": "1024",
@@ -195,7 +192,7 @@
     "TS_EXIT_NODE": "100.77.236.1",
     // Bump to force all container jobs onto fresh instances (new image) after a
     // deploy — avoids long-lived DO instances running a stale container image.
-    "CONTAINER_GEN": "33"
+    "CONTAINER_GEN": "34"
   }
 
   // Secrets (set via `wrangler secret put`):

@@ -17,7 +17,7 @@ def map_notes_issue(notes: str, source_chunk: str) -> str | None:
     false failures even when the prose covers the conclusion.
     """
 
-    minimum_chars = max(400, min(3000, int(len(source_chunk) * 0.15)))
+    minimum_chars = max(150, min(3000, int(len(source_chunk) * 0.15)))
     if len(notes.strip()) < minimum_chars:
         return f"only {len(notes.strip())} chars; expected at least {minimum_chars}"
 

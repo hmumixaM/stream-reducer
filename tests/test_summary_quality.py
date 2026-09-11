@@ -23,6 +23,12 @@ def test_rejects_substantial_but_disproportionately_short_response() -> None:
     assert "chars" in issue
 
 
+def test_accepts_concise_notes_for_a_short_final_chunk() -> None:
+    source = "[12:00] " + "brief closing source material " * 25
+    notes = "### [12:00] Conclusion\n" + "Concise closing detail. " * 7
+    assert map_notes_issue(notes, source) is None
+
+
 def test_accepts_long_map_response_without_a_late_heading() -> None:
     notes = (
         "### [00:00] Introduction\n"
