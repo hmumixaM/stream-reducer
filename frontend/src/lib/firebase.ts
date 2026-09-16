@@ -5,7 +5,12 @@
 // Initialization is best-effort and guarded for the browser: a monitoring
 // failure must never break the app, so errors are swallowed.
 import { initializeApp } from "firebase/app";
-import { getAnalytics, isSupported as analyticsSupported } from "firebase/analytics";
+import {
+  getAnalytics,
+  isSupported as analyticsSupported,
+  logEvent,
+  type Analytics,
+} from "firebase/analytics";
 import { getPerformance } from "firebase/performance";
 
 const firebaseConfig = {
@@ -29,12 +34,31 @@ try {
 
 // Google Analytics: only where the SDK is supported (needs a browser with
 // cookies/IndexedDB; skipped in unsupported contexts).
-async function initializeAnalytics(): Promise<void> {
+async function initializeAnalytics(): Promise<Analytics | null> {
   try {
-    if (await analyticsSupported()) getAnalytics(firebaseApp);
+    if (await analyticsSupported()) return getAnalytics(firebaseApp);
+  } catch {
+    // ignore — monitoring is non-critical
+  }
+  return null;
+}
+
+const analyticsReady = initializeAnalytics();
+
+// SPA article routes learn their title after the item request completes. Emit a
+// page view at that point so GA4 records the article title instead of the
+// generic title from index.html.
+export async function trackPageView(pageTitle: string, pageLocation: string): Promise<void> {
+  try {
+    const analytics = await analyticsReady;
+    if (!analytics) return;
+    const url = new URL(pageLocation);
+    logEvent(analytics, "page_view", {
+      page_title: pageTitle,
+      page_location: pageLocation,
+      page_path: `${url.pathname}${url.search}`,
+    });
   } catch {
     // ignore — monitoring is non-critical
   }
 }
-
-void initializeAnalytics();

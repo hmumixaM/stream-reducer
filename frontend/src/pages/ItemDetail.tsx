@@ -70,6 +70,23 @@ export function ItemDetail() {
     refetchInterval: (q) =>
       q.state.data && ["done", "error"].includes(q.state.data.status) ? false : 3000,
   });
+  const articleTitle = item.data?.title?.trim() || item.data?.source_url;
+
+  useEffect(() => {
+    if (!articleTitle) return;
+
+    document.title = articleTitle;
+    const pageLocation = window.location.href;
+    let active = true;
+    void import("@/lib/firebase").then(({ trackPageView }) => {
+      if (active) void trackPageView(articleTitle, pageLocation);
+    });
+
+    return () => {
+      active = false;
+      if (document.title === articleTitle) document.title = "stream-reduce";
+    };
+  }, [articleTitle]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["item", itemId] });
