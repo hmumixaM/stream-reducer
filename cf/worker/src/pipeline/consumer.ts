@@ -67,23 +67,22 @@ function staleCutoff(): string {
 }
 
 // SQL predicate (and its bind params) for an item that can be claimed: a fresh
-// 'queued' item, or one orphaned in-progress past the cutoff and under the
-// reclaim cap.
+// 'queued' item, a retry waiting in an in-progress state with no active lease,
+// or one orphaned past the cutoff and under the reclaim cap.
 function claimableClause(): string {
   const ph = IN_PROGRESS.map(() => "?").join(",");
-  return `(status = 'queued' OR (status IN (${ph}) AND started_at < ? AND retry_count < ${MAX_RECLAIM}))`;
+  return `(status = 'queued' OR (status IN (${ph}) AND (
+    (started_at IS NULL AND retry_count < ${MAX_RETRIES})
+    OR (started_at < ? AND retry_count < ${MAX_RECLAIM})
+  )))`;
 }
 function claimableBinds(cutoff: string): unknown[] {
   return [...IN_PROGRESS, cutoff];
 }
 
-// An item orphaned in-progress past the stale cutoff that has ALSO exhausted
-// its automatic reclaims is, by definition, no longer claimable (see
-// claimableClause) — without this it would sit in 'summarizing'/'fetching'
-// forever. This happens when the queue consumer is hard-killed (e.g.
-// exceededCpu) before its catch block can record an error. Flip such items to a
-// terminal, user-visible 'error' so they surface in the queue as failed (and
-// can be retried) instead of hanging silently.
+// An in-progress item that has exhausted its retries/reclaims is, by definition,
+// no longer claimable (see claimableClause). Flip it to a terminal, user-visible
+// error instead of leaving it hanging silently.
 export async function failStrandedItems(env: Env): Promise<void> {
   const ph = IN_PROGRESS.map(() => "?").join(",");
   const cutoff = staleCutoff();
@@ -92,7 +91,10 @@ export async function failStrandedItems(env: Env): Promise<void> {
        error = 'pipeline worker was killed before completing (CPU/time limit) and exhausted automatic reclaims — retry to reprocess',
        completed_at = ?, progress_stage = NULL, progress_pct = NULL,
        progress_detail = NULL, progress_updated_at = NULL
-     WHERE status IN (${ph}) AND started_at < ? AND retry_count >= ${MAX_RECLAIM}
+     WHERE status IN (${ph}) AND (
+       (started_at IS NULL AND retry_count >= ${MAX_RETRIES})
+       OR (started_at < ? AND retry_count >= ${MAX_RECLAIM})
+     )
      RETURNING id`,
   )
     .bind(isoNow(), ...IN_PROGRESS, cutoff)
