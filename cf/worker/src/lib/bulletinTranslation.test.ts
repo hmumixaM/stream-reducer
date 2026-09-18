@@ -68,6 +68,8 @@ describe('complete Chinese bulletin',()=>{
     const legacy={...source,structured:JSON.stringify({walkthrough:'The speakers advocate a hybrid approach.'})};
     const result=await translateBulletinEdition(setup({status:'queued',bulletin:'[]'},legacy).env,1);
     expect(result.bulletin[0].timestamp).toBeNull();
-    expect(JSON.parse(fetch.mock.calls[0][1].body).messages[1].content).toContain('The speakers advocate a hybrid approach.');
+    const request=JSON.parse(fetch.mock.calls[0][1].body);
+    expect(request.messages[1].content).toContain('The speakers advocate a hybrid approach.');
+    expect(request.max_tokens).toBe(12_000);
   });
 });
