@@ -3,7 +3,9 @@
   "name": "stream-reduce",
   "main": "src/index.ts",
   "compatibility_date": "2025-05-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // Short bulletin/reading-summary calls reach our LLM proxy Worker directly.
+  // Same-account Worker fetches need public routing instead of origin bypass.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 
   // Built React SPA (frontend `npm run build` -> ../../frontend/dist).
   // The Worker serves these as static assets and falls back to index.html
