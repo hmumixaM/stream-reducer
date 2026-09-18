@@ -388,6 +388,7 @@ export interface ResearchBrief {
   item_id: number;
   title: string;
   summary: string;
+  bulletin: string[];
   key_points: string[];
   brief_type: string;
   matched_text: string;

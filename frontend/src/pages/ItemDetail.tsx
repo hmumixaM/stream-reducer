@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   RefreshCw,
   Trash2,
@@ -16,6 +18,7 @@ import {
   Languages,
   Sparkles,
   Image as ImageIcon,
+  FileDown,
 } from "lucide-react";
 import {
   api,
@@ -25,6 +28,8 @@ import {
   type Highlight,
   type NewHighlight,
   type Infographic,
+  type ItemDetail as ItemDetailData,
+  type Summary,
 } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
 import { useMe } from "@/lib/auth";
@@ -166,7 +171,8 @@ export function ItemDetail() {
       : { to: "/browse", label: "Browse" };
 
   return (
-    <div className={readMode ? "mx-auto max-w-3xl" : ""}>
+    <>
+    <div className={cn("screen-only", readMode ? "mx-auto max-w-3xl" : "")}>
       <BackLink to={backTo.to} label={backTo.label} />
 
       <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -215,6 +221,9 @@ export function ItemDetail() {
               <ExternalLink className="h-4 w-4" /> <span className="hidden sm:inline">Source</span>
             </Button>
           </a>
+          <Button variant="outline" size="sm" onClick={() => window.print()} title="Save this summary as a PDF">
+            <FileDown className="h-4 w-4" /> <span className="hidden sm:inline">Export PDF</span>
+          </Button>
           <Button 
             variant={readMode ? "default" : "outline"} 
             size="sm" 
@@ -291,6 +300,12 @@ export function ItemDetail() {
             <SummaryView
               itemId={itemId}
               summaryMarkdown={d.summary.markdown}
+              structured={d.summary.structured}
+              headline={d.headline}
+              subhead={d.subhead}
+              itemTitle={d.title || d.source_url}
+              sourceUrl={d.source_url}
+              publishedAt={d.published_at}
               translations={d.translations ?? []}
               readMode={readMode}
               canEdit={canEdit}
@@ -413,6 +428,8 @@ export function ItemDetail() {
 
       {["done", "error"].includes(d.status) && <RelatedArticles itemId={itemId} />}
     </div>
+    <PrintSummary item={d} summary={d.summary} />
+    </>
   );
 }
 
@@ -432,6 +449,55 @@ function shownotesToText(raw: string): string {
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function summaryBulletin(structured: Record<string, unknown>): string[] {
+  const bulletin = Array.isArray(structured.bulletin) ? structured.bulletin : [];
+  const raw = bulletin.length > 0 ? bulletin : (Array.isArray(structured.key_points) ? structured.key_points : []);
+  return raw
+    .map((entry) => {
+      if (typeof entry === "string") return entry.trim();
+      if (entry && typeof entry === "object" && "text" in entry) return String(entry.text ?? "").trim();
+      return "";
+    })
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
+function printDetailedMarkdown(markdown: string, structured: Record<string, unknown>, hasBulletin: boolean): string {
+  const hidden = new Set<string>();
+  if (typeof structured.tldr === "string" && structured.tldr.trim()) hidden.add("TL;DR");
+  if (hasBulletin) hidden.add("Bulletin");
+  return markdown
+    .split(/(?=^##\s)/m)
+    .filter((section) => {
+      const heading = section.match(/^##\s+(.+?)\s*$/m)?.[1]?.trim();
+      return !heading || !hidden.has(heading);
+    })
+    .join("")
+    .trim();
+}
+
+function PrintSummary({ item, summary }: { item: ItemDetailData; summary: Summary | null | undefined }) {
+  if (!summary) return null;
+  const structured = summary.structured ?? {};
+  const bulletin = summaryBulletin(structured);
+  const detailedMarkdown = printDetailedMarkdown(summary.markdown, structured, bulletin.length > 0);
+  return (
+    <article className="print-summary">
+      <p className="print-kicker">STREAM-REDUCE · BULLETIN</p>
+      <h1>{item.headline || item.title || item.source_url}</h1>
+      {item.subhead && <p className="print-dek">{item.subhead}</p>}
+      <p className="print-meta">{item.author || "Unknown source"}{item.published_at ? ` · ${formatDate(item.published_at)}` : ""}</p>
+      {typeof structured.tldr === "string" && structured.tldr && <p className="print-lead">{structured.tldr}</p>}
+      {bulletin.length > 0 && <ul className="print-bulletin">{bulletin.map((point) => <li key={point}>{point}</li>)}</ul>}
+      {detailedMarkdown && <div className="print-detailed">
+        <h2>Detailed brief</h2>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{detailedMarkdown}</ReactMarkdown>
+      </div>}
+      <p className="print-source">Source: {item.source_url}</p>
+    </article>
+  );
 }
 
 // The original podcast/show notes (chapters, references), shown above the AI
@@ -466,6 +532,12 @@ function ShowNotesView({ description, readMode }: { description: string; readMod
 function SummaryView({
   itemId,
   summaryMarkdown,
+  structured,
+  headline,
+  subhead,
+  itemTitle,
+  sourceUrl,
+  publishedAt,
   translations,
   readMode,
   canEdit,
@@ -477,6 +549,12 @@ function SummaryView({
 }: {
   itemId: number;
   summaryMarkdown: string;
+  structured: Record<string, unknown>;
+  headline?: string | null;
+  subhead?: string | null;
+  itemTitle: string;
+  sourceUrl: string;
+  publishedAt?: string | null;
   translations: { lang: string; status: string }[];
   readMode: boolean;
   canEdit: boolean;
@@ -487,6 +565,7 @@ function SummaryView({
   onDelete: (id: number) => void;
 }) {
   const [lang, setLang] = useState<string | null>(null);
+  const [summaryMode, setSummaryMode] = useState<"bulletin" | "detailed">("bulletin");
   const [pick, setPick] = useState("");
   const qc = useQueryClient();
   const mdClass = readMode ? "prose-read max-w-none" : "prose-sr max-w-none text-sm";
@@ -527,9 +606,39 @@ function SummaryView({
     }
   };
 
+  const bulletin = summaryBulletin(structured);
+  const tldr = typeof structured.tldr === "string" ? structured.tldr : "";
+  const displayHeadline = headline || itemTitle;
+
   return (
-    <Card className={readMode ? "border-none bg-transparent shadow-none" : "p-6"}>
-      <div className="mb-4 flex flex-wrap items-center gap-1.5 border-b border-border pb-3">
+    <Card className={cn("summary-paper", readMode ? "border-none bg-transparent shadow-none" : "p-6")}>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+        <div className="min-w-0">
+          <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+            {summaryMode === "bulletin" ? "Bulletin" : "Full brief"}
+            {publishedAt && <span className="font-normal tracking-normal">· {formatDate(publishedAt)}</span>}
+          </div>
+          <h2 className="font-serif text-2xl font-semibold leading-tight tracking-tight">{displayHeadline}</h2>
+          {subhead && <p className="mt-2 max-w-2xl font-serif text-base italic leading-6 text-muted-foreground">{subhead}</p>}
+        </div>
+        <div className="flex shrink-0 rounded-full border border-border p-0.5 text-xs">
+          <button type="button" onClick={() => setSummaryMode("bulletin")} className={cn("rounded-full px-3 py-1.5 transition-colors", summaryMode === "bulletin" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>Bulletin</button>
+          <button type="button" onClick={() => setSummaryMode("detailed")} className={cn("rounded-full px-3 py-1.5 transition-colors", summaryMode === "detailed" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>Detailed</button>
+        </div>
+      </div>
+      {summaryMode === "bulletin" && (
+        <div className="mb-6 space-y-4">
+          {tldr && <p className="max-w-3xl font-serif text-lg leading-8 text-foreground/90">{tldr}</p>}
+          {bulletin.length > 0 ? (
+            <ul className="space-y-3 border-l border-primary/40 pl-5">
+              {bulletin.map((point) => <li key={point} className="relative font-serif text-base leading-7 text-foreground/90 before:absolute before:-left-[1.35rem] before:top-[0.75rem] before:h-1.5 before:w-1.5 before:rounded-full before:bg-primary/70">{point}</li>)}
+            </ul>
+          ) : <p className="text-sm text-muted-foreground">Switch to Detailed to read the full brief.</p>}
+          <a href={sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">Read original source <ExternalLink className="h-3 w-3" /></a>
+        </div>
+      )}
+      {summaryMode === "detailed" && <div className="mb-4 flex flex-wrap items-center gap-1.5 border-b border-border pb-3">
         <Languages className="mr-1 h-4 w-4 text-muted-foreground" />
         <LangChip label="Original" active={lang === null} onClick={() => setLang(null)} />
         {available.map((t) => (
@@ -560,9 +669,9 @@ function SummaryView({
         {!authed && remaining.length > 0 && (
           <span className="ml-auto text-xs text-muted-foreground">Sign in to request a translation</span>
         )}
-      </div>
+      </div>}
 
-      {lang === null ? (
+      {summaryMode === "detailed" && lang === null ? (
         <HighlightableMarkdown
           markdown={summaryMarkdown}
           highlights={summaryHighlights}
@@ -573,7 +682,7 @@ function SummaryView({
           onDelete={onDelete}
           className={mdClass}
         />
-      ) : translation.data?.status === "done" ? (
+      ) : summaryMode === "detailed" && translation.data?.status === "done" ? (
         <HighlightableMarkdown
           markdown={translation.data.markdown}
           highlights={[]}
@@ -584,7 +693,7 @@ function SummaryView({
           onDelete={() => {}}
           className={mdClass}
         />
-      ) : translation.data?.status === "error" ? (
+      ) : summaryMode === "detailed" && translation.data?.status === "error" ? (
         <div className="space-y-3 text-sm text-danger">
           <p>Translation failed.{translation.data.error ? ` ${translation.data.error}` : ""}</p>
           {authed && (
@@ -593,11 +702,11 @@ function SummaryView({
             </Button>
           )}
         </div>
-      ) : (
+      ) : summaryMode === "detailed" ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner /> Translating to {labelFor(lang!)}… generated once and shared with everyone. This can take a minute.
         </div>
-      )}
+      ) : null}
     </Card>
   );
 }

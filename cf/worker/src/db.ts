@@ -136,6 +136,7 @@ export interface ResearchBriefRow {
   brief_type: string;
   title: string;
   summary: string;
+  bulletin: string;
   key_points: string;
   matched_text: string;
   created_at: string;

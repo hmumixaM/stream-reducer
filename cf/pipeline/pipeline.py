@@ -60,7 +60,7 @@ SUMMARY_HEADLINE_MAX_TOKENS = int(os.environ.get("SUMMARY_HEADLINE_MAX_TOKENS", 
 TRANSCRIBE_CHUNK_SECONDS = int(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "300"))
 EMBED_CHUNK_CHARS = int(os.environ.get("EMBED_CHUNK_CHARS", "1500"))
 MEDIA_MAX_BYTES = int(os.environ.get("MEDIA_MAX_BYTES", str(25 * 1024 * 1024)))
-PROMPT_VERSION = os.environ.get("SUMMARY_PROMPT_VERSION", "v2")
+PROMPT_VERSION = os.environ.get("SUMMARY_PROMPT_VERSION", "v3-bulletin")
 # Max danmaku (Bilibili bullet-comments) rendered into the mood-summary prompt.
 DANMAKU_MAX_PROMPT_ITEMS = int(os.environ.get("DANMAKU_MAX_PROMPT_ITEMS", "3000"))
 # Generous budget: gemini-flash spends tokens on thinking, and a tight cap left
@@ -295,6 +295,19 @@ def render_markdown(item: ItemView, structured: dict) -> str:
         lines += ["## TL;DR", structured["tldr"], ""]
     if structured.get("atmosphere"):
         lines += ["## Atmosphere & style", structured["atmosphere"], ""]
+    bulletin = structured.get("bulletin")
+    if isinstance(bulletin, list) and bulletin:
+        lines += ["## Bulletin"]
+        for bullet in bulletin:
+            if isinstance(bullet, dict):
+                text = str(bullet.get("text") or "").strip()
+                link = timestamp_link(item, bullet.get("timestamp")) if bullet.get("timestamp") is not None else ""
+            else:
+                text = str(bullet).strip()
+                link = ""
+            if text:
+                lines.append(f"- {link + ' ' if link else ''}{text}")
+        lines.append("")
     for kp in structured.get("key_points") or []:
         if lines and lines[-1] != "## Key takeaways":
             if "## Key takeaways" not in lines:
@@ -465,6 +478,13 @@ def _chunk_for_embed(transcript: dict | None, structured: dict, markdown: str) -
             chunks.append({"source": "summary", "field": field_name, "chunk_index": idx,
                            "text": val.strip(), "start_s": None, "end_s": None, "char_start": None,
                            "char_end": None, "content_hash": _hash(val)})
+            idx += 1
+    for bullet in structured.get("bulletin") or []:
+        text = (bullet.get("text") if isinstance(bullet, dict) else str(bullet)) or ""
+        if text.strip():
+            chunks.append({"source": "summary", "field": "bulletin", "chunk_index": idx,
+                           "text": text.strip(), "start_s": None, "end_s": None, "char_start": None,
+                           "char_end": None, "content_hash": _hash(text)})
             idx += 1
     for kp in structured.get("key_points") or []:
         text = (kp.get("text") if isinstance(kp, dict) else str(kp)) or ""
@@ -643,6 +663,14 @@ def _structured_to_source_notes(structured: dict) -> str:
         value = structured.get(key)
         if isinstance(value, str) and value.strip():
             lines += [f"## {heading}", value.strip(), ""]
+    bulletin = structured.get("bulletin") if isinstance(structured.get("bulletin"), list) else []
+    if bulletin:
+        lines.append("## Bulletin")
+        for bullet in bulletin:
+            text = bullet.get("text") if isinstance(bullet, dict) else str(bullet)
+            if text:
+                lines.append(f"- {text}")
+        lines.append("")
     key_points = structured.get("key_points") if isinstance(structured.get("key_points"), list) else []
     if key_points:
         lines.append("## Key points")
@@ -732,6 +760,7 @@ def _generate_structured_sections(
             "background": overview.get("background") or existing.get("background", ""),
             "tldr": overview.get("tldr") or existing.get("tldr", ""),
             "atmosphere": overview.get("atmosphere") or existing.get("atmosphere", ""),
+            "bulletin": key_points.get("bulletin") or existing.get("bulletin", []),
             "key_points": key_points.get("key_points") or existing.get("key_points", []),
             "quotes": quotes_entities.get("quotes") or existing.get("quotes", []),
             "entities": quotes_entities.get("entities") or existing.get("entities", []),

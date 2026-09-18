@@ -164,7 +164,7 @@ def _parse_json(text: str) -> dict:
 
 
 _REDUCE_FALLBACK = {
-    "background": "", "tldr": "", "atmosphere": "",
+    "background": "", "tldr": "", "atmosphere": "", "bulletin": [],
     "key_points": [], "quotes": [], "entities": [],
 }
 
@@ -405,6 +405,19 @@ def render_markdown(item: Item, structured: dict) -> str:
     if atmosphere:
         lines.append("## Atmosphere & style")
         lines.append(atmosphere)
+        lines.append("")
+
+    bulletin = structured.get("bulletin") or []
+    if bulletin:
+        lines.append("## Bulletin")
+        for bullet in bulletin:
+            if isinstance(bullet, dict):
+                text = str(bullet.get("text") or "").strip()
+                link = timestamp_link(item, bullet.get("timestamp")) if bullet.get("timestamp") is not None else ""
+            else:
+                text, link = str(bullet).strip(), ""
+            if text:
+                lines.append(f"- {link + ' ' if link else ''}{text}")
         lines.append("")
 
     danmaku = structured.get("danmaku")

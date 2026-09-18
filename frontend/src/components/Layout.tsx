@@ -48,10 +48,10 @@ const NAV: {
   end?: boolean;
   admin?: boolean;
 }[] = [
-  { to: "/", label: "Timeline", icon: Clock, section: "main", end: true },
-  { to: "/research", label: "Research", icon: Radar, section: "main" },
-  { to: "/subscriptions", label: "Channels", icon: Rss, section: "main" },
-  { to: "/library", label: "Saved", icon: Bookmark, section: "main" },
+  { to: "/", label: "Feed", icon: Clock, section: "main", end: true },
+  { to: "/research", label: "Agents", icon: Radar, section: "main" },
+  { to: "/subscriptions", label: "Sources", icon: Rss, section: "main" },
+  { to: "/library", label: "Knowledge base", icon: Bookmark, section: "main" },
   { to: "/browse", label: "Browse", icon: Compass, section: "discover" },
   { to: "/collections", label: "Collections", icon: FolderKanban, section: "discover" },
   { to: "/search", label: "Search", icon: SearchIcon, section: "discover" },

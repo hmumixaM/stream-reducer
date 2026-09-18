@@ -44,11 +44,11 @@ function DossierMention({ brief }: { brief: ResearchBrief }) {
         <span>{brief.item_published_at ? formatDate(brief.item_published_at) : "Recent"}</span>
         <span>{brief.brief_type}</span>
       </div>
-      <h2 className="text-base font-semibold">{brief.title}</h2>
-      <p className="mt-2 text-sm leading-6 text-foreground/90">{brief.summary}</p>
-      {brief.key_points.length > 0 && (
+      <h2 className="font-serif text-xl font-semibold tracking-tight">{brief.title}</h2>
+      <p className="mt-2 border-l-2 border-primary/50 pl-3 font-serif text-base italic leading-6 text-foreground/80">{brief.summary}</p>
+      {(brief.bulletin.length > 0 ? brief.bulletin : brief.key_points).length > 0 && (
         <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
-          {brief.key_points.slice(0, 4).map((point) => <li key={point} className="flex gap-2"><span aria-hidden="true">•</span><span>{point}</span></li>)}
+          {(brief.bulletin.length > 0 ? brief.bulletin : brief.key_points).slice(0, 5).map((point) => <li key={point} className="flex gap-2"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-primary/60" aria-hidden="true" /><span>{point}</span></li>)}
         </ul>
       )}
       {brief.source_url && <a href={brief.source_url} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-1 text-xs text-primary hover:underline">Open source <ExternalLink className="h-3 w-3" /></a>}

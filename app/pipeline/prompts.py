@@ -142,10 +142,15 @@ Extract the most important cross-cutting takeaways.
 
 Return STRICT JSON with this exact shape:
 {{
+  "bulletin": [{{"text": "...", "timestamp": <seconds as number or null>}}],
   "key_points": [{{"text": "...", "timestamp": <seconds as number or null>}}]
 }}
 
 Rules:
+- `bulletin`: write 3-5 concise, source-grounded items in the style of a
+  morning research bulletin. Each item carries one concrete development,
+  claim, implication, or useful number. Keep each to one or two sentences so
+  a reader can understand the signal without opening the full walkthrough.
 - Include 8-20 key points.
 - Each key point should be a big idea, argument, conclusion, or important factual claim, NOT a full replay of every detail.
 - Prefer timestamps where the underlying point begins or is most directly supported.
@@ -245,6 +250,7 @@ Return STRICT JSON with this exact shape:
   "background": "1-3 sentences: who published/submitted it (uploader/author/channel), the platform, when, and what the page description says it is about. Use the page background above.",
   "tldr": "3-5 sentence high-level overview of the content itself.",
   "atmosphere": "2-4 sentences describing the overall tone, mood, narrative style, the speaker/host dynamics, the emotional arc, and what it actually FEELS like to watch or listen. Be specific and evocative but strictly faithful.",
+  "bulletin": [{{"text": "concise source-grounded bulletin item", "timestamp": <seconds or null>}}],
   "key_points": [{{"text": "...", "timestamp": <seconds as number or null>}}],
   "quotes": [{{"text": "notable verbatim quote", "timestamp": <seconds or null>, "speaker": "name or null"}}],
   "entities": ["people, products, companies, works mentioned"]
@@ -253,6 +259,9 @@ Return STRICT JSON with this exact shape:
 Rules:
 - `background` MUST state who submitted/published the content and summarize the page description.
 - `atmosphere` must describe the FEEL and vibe, not just restate facts.
+- `bulletin`: include 3-5 concise, high-signal items suitable for a feed card.
+  Each item states a development, claim, consequence, or concrete detail in one
+  or two sentences. Keep it skimmable and strictly grounded in the walkthrough.
 - `key_points`: 8-20 of the most important cross-cutting takeaways (the big ideas
   and conclusions), NOT a full replay of every detail.
 - `quotes`: include the most striking 8-15 verbatim quotes from the walkthrough.

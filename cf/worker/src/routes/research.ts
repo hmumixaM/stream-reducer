@@ -52,6 +52,19 @@ function keyPoints(structured: Record<string, unknown>): string[] {
     .slice(0, 6);
 }
 
+function bulletinItems(structured: Record<string, unknown>): string[] {
+  const raw = structured.bulletin;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((point) => {
+      if (typeof point === "string") return point.trim();
+      if (point && typeof point === "object" && "text" in point) return String(point.text ?? "").trim();
+      return "";
+    })
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
 function itemText(item: ResearchItem, structured: Record<string, unknown>): string {
   const fields = [
     item.title,
@@ -62,6 +75,7 @@ function itemText(item: ResearchItem, structured: Record<string, unknown>): stri
     item.summary_markdown,
     structured.tldr,
     structured.background,
+    ...bulletinItems(structured),
     ...keyPoints(structured),
   ];
   return fields.filter((field): field is string => typeof field === "string").join("\n").toLocaleLowerCase();
@@ -79,10 +93,10 @@ function matches(text: string, label: string): boolean {
   return terms.length > 0 && terms.filter((term) => text.includes(term)).length >= Math.max(1, Math.ceil(terms.length / 2));
 }
 
-function briefSummary(item: ResearchItem, structured: Record<string, unknown>): { summary: string; points: string[] } {
+function briefSummary(item: ResearchItem, structured: Record<string, unknown>): { summary: string; bulletin: string[]; points: string[] } {
   const tldr = typeof structured.tldr === "string" ? structured.tldr.trim() : "";
   const summary = tldr || item.summary_markdown?.split("\n").map((line) => line.trim()).find(Boolean) || item.description || "New source captured in your coverage universe.";
-  return { summary: summary.slice(0, 1200), points: keyPoints(structured) };
+  return { summary: summary.slice(0, 1200), bulletin: bulletinItems(structured), points: keyPoints(structured) };
 }
 
 function askSource(row: ResearchItem): AskSource {
@@ -118,7 +132,7 @@ function extractiveAnswer(question: string, items: ResearchItem[]): { answer: st
   }
   const passages = ranked.map(({ item, structured }) => {
     const summary = briefSummary(item, structured);
-    return `${item.title || item.source_url}: ${summary.summary}`;
+    return `${item.title || item.source_url}: ${summary.bulletin.join(" ") || summary.summary}`;
   });
   const answer = `Based on ${ranked.length} matching source${ranked.length === 1 ? "" : "s"}:\n\n${passages.join("\n\n")}`;
   return { answer: answer.slice(0, 6000), sources: ranked.map(({ item }) => askSource(item)) };
@@ -130,7 +144,7 @@ async function answerWithModel(env: Env, question: string, items: ResearchItem[]
   if (!ranked.length || !env.LLM_BASE_URL || !env.GEMINI_API_KEY) return fallback;
   const context = ranked.map(({ item, structured }, index) => {
     const summary = briefSummary(item, structured);
-    return `[${index + 1}] ${item.title || item.source_url}\nURL: ${item.source_url}\nSummary: ${summary.summary}\nKey points: ${summary.points.join("; ")}`;
+    return `[${index + 1}] ${item.title || item.source_url}\nURL: ${item.source_url}\nBulletin: ${summary.bulletin.join("; ") || summary.summary}\nKey points: ${summary.points.join("; ")}`;
   }).join("\n\n");
   try {
     const response = await fetch(`${env.LLM_BASE_URL.replace(/\/$/, "")}/chat/completions`, {
@@ -223,8 +237,8 @@ async function insertBrief(
   const rendered = briefSummary(item, structured);
   await env.DB.prepare(
     `INSERT INTO research_brief
-       (user_id, agent_id, coverage_id, item_id, brief_type, title, summary, key_points, matched_text)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (user_id, agent_id, coverage_id, item_id, brief_type, title, summary, bulletin, key_points, matched_text)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     userId,
     agentId,
@@ -233,6 +247,7 @@ async function insertBrief(
     input.type,
     item.title || item.source_url,
     rendered.summary,
+    JSON.stringify(rendered.bulletin),
     JSON.stringify(rendered.points),
     input.label,
   ).run();
@@ -307,6 +322,17 @@ function serializeAgent(row: ResearchAgentRow) {
 }
 
 function serializeBrief(row: ResearchBriefRow & { item_title?: string | null; source_url?: string | null; item_published_at?: string | null; agent_name?: string | null; coverage_label?: string | null }) {
+  let bulletin: string[] = [];
+  try {
+    const parsed = JSON.parse(row.bulletin || "[]") as unknown;
+    if (Array.isArray(parsed)) {
+      bulletin = parsed.map((point) => {
+        if (typeof point === "string") return point.trim();
+        if (point && typeof point === "object" && "text" in point) return String(point.text ?? "").trim();
+        return "";
+      }).filter(Boolean).slice(0, 5);
+    }
+  } catch { /* keep an empty list for an old/corrupt row */ }
   let points: string[] = [];
   try {
     const parsed = JSON.parse(row.key_points || "[]") as unknown;
@@ -317,6 +343,7 @@ function serializeBrief(row: ResearchBriefRow & { item_title?: string | null; so
     item_id: row.item_id,
     title: row.title,
     summary: row.summary,
+    bulletin,
     key_points: points,
     brief_type: row.brief_type,
     matched_text: row.matched_text,

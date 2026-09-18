@@ -6,22 +6,22 @@
   :root {
     /* Cards are pure white, so the page sits slightly cooler/darker than them —
        otherwise every card edge disappears into the background in light mode. */
-    --background: 240 20% 97%;
-    --foreground: 240 10% 10%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 10%;
+    --background: 42 30% 95%;
+    --foreground: 30 12% 13%;
+    --card: 42 33% 98%;
+    --card-foreground: 30 12% 13%;
     /* Panels nested INSIDE a card (poll health, note rows). Distinct from
        --muted, which is also used for image placeholders and code blocks. */
-    --card-muted: 240 20% 97%;
-    --muted: 240 5% 92%;
-    --muted-foreground: 240 5% 42%;
-    --primary: 250 85% 60%;
+    --card-muted: 42 22% 92%;
+    --muted: 38 14% 89%;
+    --muted-foreground: 30 8% 42%;
+    --primary: 12 34% 48%;
     --primary-foreground: 0 0% 100%;
-    --accent: 240 5% 94%;
-    --accent-foreground: 240 10% 10%;
-    --border: 240 8% 87%;
-    --input: 240 8% 87%;
-    --ring: 250 85% 60%;
+    --accent: 38 22% 90%;
+    --accent-foreground: 30 12% 13%;
+    --border: 32 16% 82%;
+    --input: 32 16% 82%;
+    --ring: 12 34% 48%;
     /* Semantic status colors. Tuned per theme because the raw Tailwind palette
        shades used before (text-red-400 etc.) fail contrast on a white page. */
     --success: 152 60% 34%;
@@ -30,20 +30,20 @@
   }
 
   .dark {
-    --background: 240 10% 4%;
+    --background: 30 10% 6%;
     --foreground: 0 0% 95%;
-    --card: 240 10% 8%;
+    --card: 30 10% 9%;
     --card-foreground: 0 0% 95%;
-    --card-muted: 240 10% 11%;
-    --muted: 240 10% 13%;
-    --muted-foreground: 240 5% 65%;
-    --primary: 250 90% 70%;
+    --card-muted: 30 9% 12%;
+    --muted: 30 9% 14%;
+    --muted-foreground: 30 5% 65%;
+    --primary: 12 48% 66%;
     --primary-foreground: 0 0% 100%;
-    --accent: 240 10% 15%;
+    --accent: 30 9% 16%;
     --accent-foreground: 0 0% 95%;
-    --border: 240 8% 17%;
-    --input: 240 8% 17%;
-    --ring: 250 90% 70%;
+    --border: 30 8% 20%;
+    --input: 30 8% 20%;
+    --ring: 12 48% 66%;
     --success: 152 60% 62%;
     --warning: 38 92% 62%;
     --danger: 0 84% 68%;
@@ -66,6 +66,36 @@
 }
 
 @layer components {
+  .summary-paper {
+    background:
+      radial-gradient(circle at 100% 0%, hsl(var(--primary) / 0.05), transparent 30%),
+      hsl(var(--card));
+  }
+
+  .print-summary { display: none; }
+
+  @media print {
+    @page { size: A4; margin: 18mm 16mm 20mm; }
+    body { background: #fff; color: #1f1d1a; font-family: Georgia, "Times New Roman", serif; }
+    .screen-only, aside, header, nav { display: none !important; }
+    .print-summary { display: block; max-width: 760px; margin: 0 auto; font-family: Georgia, "Times New Roman", serif; }
+    .print-summary h1 { margin: 0 0 8pt; font-size: 25pt; line-height: 1.08; letter-spacing: -0.02em; }
+    .print-kicker { margin: 0 0 14pt; color: #8d5f50; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 8pt; font-weight: 700; letter-spacing: .18em; }
+    .print-dek { margin: 0 0 8pt; color: #625c55; font-size: 13pt; font-style: italic; line-height: 1.4; }
+    .print-meta { margin: 0 0 20pt; color: #857d75; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 8.5pt; }
+    .print-lead { margin: 0 0 14pt; font-size: 13pt; line-height: 1.55; }
+    .print-bulletin { margin: 0 0 20pt; padding: 12pt 16pt 12pt 28pt; border-left: 2pt solid #b78778; background: #f7f3ed; font-size: 11pt; line-height: 1.5; }
+    .print-bulletin li { margin: 0 0 7pt; }
+    .print-bulletin li:last-child { margin-bottom: 0; }
+    .print-detailed { border-top: 1pt solid #ddd4c8; padding-top: 16pt; font-size: 10.5pt; line-height: 1.55; }
+    .print-detailed h2 { margin: 18pt 0 6pt; font-size: 14pt; }
+    .print-detailed h3 { margin: 14pt 0 5pt; font-size: 11.5pt; }
+    .print-detailed p { margin: 0 0 8pt; }
+    .print-detailed ul, .print-detailed ol { margin: 5pt 0 10pt; padding-left: 18pt; }
+    .print-detailed blockquote { margin: 8pt 0; border-left: 2pt solid #b78778; padding-left: 10pt; color: #625c55; font-style: italic; }
+    .print-source { margin-top: 22pt; border-top: 1pt solid #ddd4c8; padding-top: 8pt; color: #857d75; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 8pt; overflow-wrap: anywhere; }
+  }
+
   /* KaTeX renders a visually-hidden MathML copy of every formula for screen
      readers; exclude it from text selection so highlighting a formula captures
      only the visible math (otherwise the quote doubles each token, e.g. "𝑇 T"). */
