@@ -56,6 +56,7 @@ describe("reading edition", () => {
     expect(result.content?.sections.map((section) => section.timestamp)).toEqual([90, null]);
     const request = JSON.parse(fetch.mock.calls[0][1].body);
     expect(request.model).toBe("configured-model");
+    expect(request.response_format).toEqual({ type: "json_object" });
     expect(request.messages[0].content).toContain("SAME language");
     expect(writes.every((sql) => !sql.includes("UPDATE summary "))).toBe(true);
     expect(getRow()?.status).toBe("done");
