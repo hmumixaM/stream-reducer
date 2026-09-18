@@ -56,12 +56,12 @@ export function BulletinDetail() {
   const points = item.bulletin.length > 0 ? item.bulletin : item.key_points;
   return (
     <div className="bulletin-detail mx-auto max-w-6xl">
-      <BackLink to="/bulletin" label="Bulletin" />
+      <div className="screen-only"><BackLink to="/bulletin" label="Bulletin" /></div>
       <PageHeader
         title={item.title}
         subtitle={`${item.author || "Source summary"} · ${item.published_at ? formatDate(item.published_at) : "Recent"}`}
         badges={<Badge className="bg-accent text-accent-foreground">Detailed summary</Badge>}
-        actions={<Button variant="outline" onClick={() => window.print()}><FileDown className="h-4 w-4" /> Export PDF</Button>}
+        actions={<Button className="screen-only" variant="outline" onClick={() => window.print()}><FileDown className="h-4 w-4" /> Export PDF</Button>}
       />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
