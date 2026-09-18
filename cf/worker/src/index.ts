@@ -20,6 +20,7 @@ import { collectionRoutes } from "./routes/collections";
 import { mcpHandler } from "./routes/mcp";
 import { generateResearchForAllUsers, researchRoutes } from "./routes/research";
 import { bulletinRoutes } from "./routes/bulletin";
+import { wakeBulletinWorkers } from "./lib/bulletin";
 import { handleMessage, failStrandedItems } from "./pipeline/consumer";
 import { pollDueSubscriptions } from "./pipeline/subscriptions";
 import { refreshBilibiliCookie } from "./lib/biliRefresh";
@@ -96,6 +97,7 @@ export default {
 
   // Cron: poll subscriptions (every 15m) + nightly graph rebuild (04:00 UTC).
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    await wakeBulletinWorkers(env);
     if (controller.cron === "0 4 * * *") {
       await env.PIPELINE.send({ kind: "graph_build", force: false });
       // Defense-in-depth GC of expired/orphaned OAuth tokens, grants, clients.

@@ -5,6 +5,7 @@ import { isoNow, sha256 } from "./crypto";
 export interface BulletinTranslationRow {
   bulletin: string; headline: string; subhead: string; tldr: string;
   status: string; source_hash: string; updated_at: string;
+  attempts?: number;
 }
 export interface BulletinSource {
   id: number; title: string | null; headline: string | null; subhead: string | null;
@@ -32,14 +33,16 @@ export function readBulletinTranslation(row: BulletinTranslationRow | null) {
 }
 
 /** Translate only the headline, standfirst, overview and short points. */
-export async function translateBulletinEdition(env: Env, itemId: number, lang = "zh") {
+export async function translateBulletinEdition(env: Env, itemId: number, lang = "zh", onClaim?: () => void) {
   if (lang !== "zh") throw new Error("Unsupported bulletin language");
   const source = await first<BulletinSource>(env.DB.prepare(
     `SELECT i.id,i.title,i.headline,i.subhead,s.structured,s.markdown FROM item i
      JOIN summary s ON s.item_id=i.id WHERE i.id=? AND i.status='done'`,
   ).bind(itemId));
   if (!source) throw new Error("Source summary is not ready");
-  const structured = JSON.parse(source.structured || "{}");
+  let structured: Record<string, unknown> = {};
+  try { structured = JSON.parse(source.structured || "{}"); } catch { /* Fall back to archived Markdown. */ }
+  if (!structured || typeof structured !== "object") structured = {};
   const points = localizedPoints(structured.bulletin).length ? localizedPoints(structured.bulletin) : localizedPoints(structured.key_points);
   const brief = { headline: source.headline || source.title || "", subhead: source.subhead || "", tldr: clean(structured.tldr) || clean(structured.background), bulletin: points };
   const hash = await sha256(JSON.stringify(brief));
@@ -48,11 +51,14 @@ export async function translateBulletinEdition(env: Env, itemId: number, lang = 
   if (cached.status === "processing" || (cached.status === "done" && row?.source_hash === hash)) return cached;
   const lease = isoNow();
   const claim = await env.DB.prepare(
-    `INSERT INTO bulletin_translation(item_id,lang,status,source_hash,updated_at) VALUES(?,?,'processing',?,?)
-     ON CONFLICT(item_id,lang) DO UPDATE SET status='processing',source_hash=excluded.source_hash,error=NULL,updated_at=excluded.updated_at
-     WHERE bulletin_translation.status!='processing' OR bulletin_translation.updated_at<?`,
-  ).bind(itemId, lang, hash, lease, new Date(Date.now() - 120_000).toISOString()).run();
+    `INSERT INTO bulletin_translation(item_id,lang,status,source_hash,updated_at,attempts) VALUES(?,?,'processing',?,?,1)
+     ON CONFLICT(item_id,lang) DO UPDATE SET status='processing',source_hash=excluded.source_hash,error=NULL,updated_at=excluded.updated_at,
+       attempts=bulletin_translation.attempts+1,next_attempt_at=NULL
+     WHERE bulletin_translation.updated_at=? AND bulletin_translation.status=?
+       AND (bulletin_translation.status!='processing' OR bulletin_translation.updated_at<?)`,
+  ).bind(itemId, lang, hash, lease, row?.updated_at || "", row?.status || "", new Date(Date.now() - 120_000).toISOString()).run();
   if (!claim.meta.changes) return readBulletinTranslation(await first<BulletinTranslationRow>(env.DB.prepare("SELECT * FROM bulletin_translation WHERE item_id=? AND lang=?").bind(itemId, lang)));
+  onClaim?.();
   try {
     const preservePoints = cached.bulletin.length > 0 && (!row?.source_hash || row.source_hash === hash);
     // Some older summaries contain only long notes. Prefer their already
@@ -81,8 +87,9 @@ export async function translateBulletinEdition(env: Env, itemId: number, lang = 
     ).bind(headline, subhead, tldr, JSON.stringify(bulletin), isoNow(), itemId, lang, hash, lease).run();
     return { status: "done", headline, subhead, tldr, bulletin, complete: true };
   } catch (error) {
-    await env.DB.prepare("UPDATE bulletin_translation SET status='error',error=?,updated_at=? WHERE item_id=? AND lang=? AND updated_at=?")
-      .bind(String(error).slice(0, 500), isoNow(), itemId, lang, lease).run();
+    const retryAt = new Date(Date.now() + 60_000 * Math.min(5, (row?.attempts ?? 0) + 1)).toISOString();
+    await env.DB.prepare("UPDATE bulletin_translation SET status='error',error=?,updated_at=?,next_attempt_at=? WHERE item_id=? AND lang=? AND updated_at=?")
+      .bind(String(error).slice(0, 500), isoNow(), retryAt, itemId, lang, lease).run();
     throw error;
   }
 }

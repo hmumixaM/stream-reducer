@@ -13,7 +13,7 @@ import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
 import { isTransientCapacity } from "./transient";
 import { enqueuePreferredBulletinTranslation } from "../lib/bulletin";
-import { translateBulletinEdition } from "../lib/bulletinTranslation";
+import { processNextBulletin } from "../lib/bulletinScheduler";
 import { generateReadingSummary, type ReadingSource } from "../lib/readingSummary";
 
 export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAttempt = 1): Promise<void> {
@@ -34,8 +34,11 @@ export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAtte
     case "translate":
       return translateItem(env, msg.item_id, msg.lang);
     case "bulletin_translate":
-      await translateBulletinEdition(env, msg.item_id, msg.lang);
+      // Legacy messages already have durable D1 rows. The independent bulletin
+      // workers and cron pump drain those rows in publication order.
       return;
+    case "bulletin_drain":
+      return processNextBulletin(env);
     case "reading_summary": {
       const source = await first<ReadingSource>(env.DB.prepare(
         `SELECT i.id, i.title, i.author, i.source_url, s.structured AS summary_structured, s.markdown AS summary_markdown

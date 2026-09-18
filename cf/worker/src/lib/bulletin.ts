@@ -45,23 +45,22 @@ export async function enqueueBulletinTranslations(
     await env.DB.batch(pending.map((id) => env.DB.prepare(
       `INSERT INTO bulletin_translation (item_id, lang, bulletin, status, error, updated_at)
        VALUES (?, ?, '[]', 'queued', NULL, ?)
-       ON CONFLICT(item_id, lang) DO UPDATE SET status='queued', error=NULL, updated_at=excluded.updated_at
+       ON CONFLICT(item_id, lang) DO UPDATE SET status='queued', error=NULL, attempts=0, next_attempt_at=NULL, updated_at=excluded.updated_at
        WHERE bulletin_translation.status = 'error' OR (bulletin_translation.status='done' AND (bulletin_translation.headline='' OR bulletin_translation.tldr=''))`,
     ).bind(id, lang, isoNow())));
-    try {
-      await env.PIPELINE.sendBatch(pending.map((id) => ({
-        body: { kind: "bulletin_translate" as const, item_id: id, lang },
-      })));
-      enqueued += pending.length;
-    } catch (error) {
-      await env.DB.batch(pending.map((id) => env.DB.prepare(
-        `UPDATE bulletin_translation SET status='error', error=?, updated_at=?
-           WHERE item_id=? AND lang=? AND status='queued'`,
-      ).bind(String(error).slice(0, 2000), isoNow(), id, lang)));
-      throw error;
-    }
+    enqueued += pending.length;
   }
+  // Queue messages are wake-ups, not the ordering authority. Persist all work
+  // first; consumers select the newest eligible source from D1 on every claim.
+  // A failed send leaves durable queued rows for the cron safety pump.
+  if (ids.length) await wakeBulletinWorkers(env, Math.min(enqueued || 1, 6));
   return enqueued;
+}
+
+export async function wakeBulletinWorkers(env: Env, count = 6) {
+  await env.BULLETIN_JOBS.sendBatch(Array.from({ length: count }, () => ({
+    body: { kind: "bulletin_drain" as const },
+  })));
 }
 
 export async function enqueueBulletinTranslation(env: Env, itemId: number, lang: string): Promise<number> {

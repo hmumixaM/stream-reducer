@@ -26,7 +26,7 @@ async function backfillBulletins(c: Parameters<typeof requireAuth>[0], lang: str
        FROM item i
        JOIN summary s ON s.item_id = i.id
       WHERE i.status = 'done'
-      ORDER BY i.id`,
+      ORDER BY COALESCE(julianday(i.published_at),julianday(i.created_at),0) DESC, i.id DESC`,
   ));
   return enqueueBulletinTranslations(c.env, rows.map((row) => row.id), lang);
 }

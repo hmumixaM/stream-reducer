@@ -34,6 +34,10 @@ export function BulletinDetail() {
   const me = useMe();
   const zh = me.data?.user?.preferred_language === "zh";
   const [params, setParams] = useSearchParams();
+  const collection = params.get("collection");
+  const returnParams = new URLSearchParams({ view: "bulletin" });
+  for (const key of ["section", "track_id"]) if (params.get(key)) returnParams.set(key, params.get(key)!);
+  const backTo = collection ? `/collections/${encodeURIComponent(collection)}?${returnParams}` : "/bulletin";
   const selected = params.get("view");
   const view: View = selected === "notes" || selected === "sources" ? selected : "summary";
   const [printFull, setPrintFull] = useState(false);
@@ -99,7 +103,7 @@ export function BulletinDetail() {
   return <div className="reading-edition mx-auto max-w-6xl">
     <div className="reader-screen screen-only">
       <div className="mb-7 flex flex-wrap items-center justify-between gap-3">
-        <Link to="/bulletin" className="desk-utility"><ArrowLeft size={15} />{zh ? "返回 Bulletin" : "Back to Bulletin"}</Link>
+        <Link to={backTo} className="desk-utility"><ArrowLeft size={15} />{collection ? (zh ? "返回 Collection 简报" : "Back to collection") : (zh ? "返回 Bulletin" : "Back to Bulletin")}</Link>
         <div className="flex items-center gap-2"><Select value={printFull ? "full" : "summary"} onChange={(event) => setPrintFull(event.target.value === "full")} aria-label={zh ? "PDF 内容" : "PDF contents"} className="w-auto bg-transparent text-xs"><option value="summary">{zh ? "简报 + 精炼概括" : "Bulletin + summary"}</option><option value="full">{zh ? "包含完整逐段内容" : "Include deep dive"}</option></Select><Button variant="outline" aria-label={zh ? "导出 PDF" : "Export PDF"} disabled={printing || (zh && !item.bulletin_intro_ready) || (!summary && !printFull)} onClick={exportPdf}>{printing ? <RefreshCw size={14} className="animate-spin" /> : <FileDown size={14} />}<span className="hidden sm:inline">{zh ? "导出 PDF" : "Export PDF"}</span></Button></div>
       </div>
       {printError && <p role="alert" className="mb-4 text-sm text-muted-foreground">{zh ? "完整内容尚未加载完毕，请稍后重试导出。" : "The full edition is still loading. Please try exporting again in a moment."}</p>}

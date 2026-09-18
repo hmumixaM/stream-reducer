@@ -94,8 +94,18 @@
 
   // --- Queues: pipeline jobs (ingest/transcribe/summarize/embed) ---
   "queues": {
-    "producers": [{ "binding": "PIPELINE", "queue": "stream-reduce-pipeline" }],
+    "producers": [
+      { "binding": "PIPELINE", "queue": "stream-reduce-pipeline" },
+      { "binding": "BULLETIN_JOBS", "queue": "stream-reduce-bulletins" }
+    ],
     "consumers": [
+      {
+        "queue": "stream-reduce-bulletins",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_concurrency": 6,
+        "max_retries": 3
+      },
       {
         "queue": "stream-reduce-pipeline",
         "max_batch_size": 1,

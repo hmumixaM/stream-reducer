@@ -21,6 +21,7 @@ export interface Env {
 
   // Queue + container
   PIPELINE: Queue<PipelineMessage>;
+  BULLETIN_JOBS: Queue<PipelineMessage>;
   PIPELINE_CONTAINER: DurableObjectNamespace<PipelineContainer>;
 
   // Email (magic link)
@@ -95,6 +96,7 @@ export type PipelineMessage =
   | { kind: "infographic"; item_id: number }
   | { kind: "translate"; item_id: number; lang: string }
   | { kind: "bulletin_translate"; item_id: number; lang: string }
+  | { kind: "bulletin_drain" }
   | { kind: "reading_summary"; item_id: number }
   | { kind: "poll"; subscription_id: number }
   | { kind: "graph_build"; force?: boolean };

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   useInfiniteQuery,
   useMutation,
@@ -16,7 +16,8 @@ import {
 import { api, type CollectionTrack, type Item } from "@/lib/api";
 import { useMe } from "@/lib/auth";
 import { PLATFORM_LABELS, PlatformBadge, StatusBadge } from "@/components/badges";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, Select } from "@/components/ui";
+import { CollectionBulletins } from "@/components/CollectionBulletins";
 import {
   ChipRow,
   EmptyState,
@@ -34,9 +35,19 @@ const PAGE_SIZE = 60;
 
 export function CollectionDetail() {
   const { slug = "" } = useParams();
-  const [selectedSection, setSelectedSection] = useState("");
+  const [params, setParams] = useSearchParams();
+  const bulletinView = params.get("view") !== "videos";
+  const selectedSection = params.get("section") || "";
+  const selectedTrack = params.get("track_id") || "";
+  const setFilter = (name: string, value: string) => setParams((previous) => {
+    const next = new URLSearchParams(previous);
+    if (value) next.set(name, value); else next.delete(name);
+    if (name === "section") next.delete("track_id");
+    return next;
+  }, { replace: true });
   const queryClient = useQueryClient();
   const me = useMe();
+  const zh = me.data?.user?.preferred_language === "zh";
   const collection = useQuery({
     queryKey: ["collection", slug],
     queryFn: () => api.getCollection(slug),
@@ -70,13 +81,14 @@ export function CollectionDetail() {
   const data = collection.data;
   const activeSection =
     data.sections.find((section) => section.slug === selectedSection) ??
-    data.sections[0];
+    (bulletinView ? undefined : data.sections[0]);
+  const tracks = activeSection ? activeSection.tracks : data.sections.flatMap((section) => section.tracks);
 
   return (
-    <div>
+    <div className={bulletinView ? "bulletin-desk mx-auto max-w-5xl pb-14" : ""}>
       <PageHeader
         title={data.title}
-        subtitle={`${data.description} ${data.ready_count} of ${data.item_count} videos summarized.`}
+        subtitle={zh ? `${data.description} 共 ${data.item_count} 个视频，${data.ready_count} 篇概括可读。` : `${data.description} ${data.ready_count} of ${data.item_count} videos summarized.`}
         backTo="/collections"
         backLabel="Collections"
         actions={
@@ -89,7 +101,15 @@ export function CollectionDetail() {
         }
       />
 
-      {data.cover_url ? (
+      <div className="desk-toolbar mb-5">
+        <div className="flex gap-1" role="group" aria-label={zh ? "Collection 视图" : "Collection view"}>
+          <button className={`desk-tab ${bulletinView ? "is-active" : ""}`} aria-pressed={bulletinView} onClick={() => setFilter("view", "bulletin")}>{zh ? "简报" : "Bulletin"}</button>
+          <button className={`desk-tab ${!bulletinView ? "is-active" : ""}`} aria-pressed={!bulletinView} onClick={() => setFilter("view", "videos")}>{zh ? "视频目录" : "Video directory"}</button>
+        </div>
+        {bulletinView && <p className="text-xs text-muted-foreground">{zh ? "从新到旧 · 简报与精炼概括" : "Newest first · Bulletins & summaries"}</p>}
+      </div>
+
+      {!bulletinView && data.cover_url ? (
         <div className="mb-6 aspect-[3/1] overflow-hidden rounded-xl border bg-muted">
           <img
             src={data.cover_url}
@@ -103,17 +123,27 @@ export function CollectionDetail() {
       ) : null}
 
       <ChipRow>
+        {bulletinView && <FilterChip label={zh ? "全部分类" : "All categories"} active={!activeSection} onClick={() => setFilter("section", "")} />}
         {data.sections.map((section) => (
           <FilterChip
             key={section.id}
             label={`${section.title} (${section.item_count})`}
             active={activeSection?.id === section.id}
-            onClick={() => setSelectedSection(section.slug)}
+            onClick={() => setFilter("section", section.slug)}
           />
         ))}
       </ChipRow>
 
-      {activeSection ? (
+      {bulletinView ? <>
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">{zh ? "先读概览与要点，再展开精炼概括。" : "Start with the overview and key ideas, then read deeper."}</p>
+          <Select value={selectedTrack} onChange={(event) => setFilter("track_id", event.target.value)} aria-label={zh ? "专题" : "Track"} className="w-full bg-transparent sm:w-auto sm:max-w-xs">
+            <option value="">{zh ? "全部专题" : "All tracks"}</option>
+            {tracks.map((track) => <option key={track.id} value={track.id}>{track.title}</option>)}
+          </Select>
+        </div>
+        <CollectionBulletins slug={slug} section={activeSection?.slug || ""} trackId={selectedTrack} />
+      </> : activeSection ? (
         <section aria-labelledby={`collection-section-${activeSection.id}`}>
           <div className="mb-4">
             <h2

@@ -933,6 +933,11 @@ export const api = {
   listCollections: () => req<CollectionRead[]>("/api/collections"),
   getCollection: (slug: string) =>
     req<CollectionDetail>(`/api/collections/${encodeURIComponent(slug)}`),
+  listCollectionBulletins: (slug: string, params: { cursor?: string; section?: string; track_id?: string } = {}) => {
+    const sp = new URLSearchParams({ limit: "24" });
+    for (const [key, value] of Object.entries(params)) if (value) sp.set(key, value);
+    return req<BulletinFeed>(`/api/collections/${encodeURIComponent(slug)}/bulletin?${sp}`);
+  },
   listCollectionTrackItems: (
     slug: string,
     trackId: number,

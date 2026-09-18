@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUpRight, Check, Clock3, ExternalLink, Newspaper, RefreshCw, Search, Settings2 } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Check, Newspaper, RefreshCw, Search, Settings2 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type BulletinCardItem } from "@/lib/api";
 import { useMe } from "@/lib/auth";
 import { dateLabel } from "@/lib/bulletin";
 import { supportsInfiniteScroll, useInfiniteScroll } from "@/lib/useInfiniteScroll";
-import { cn, formatLength } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { Button, Input, Select } from "@/components/ui";
+import { BulletinCard } from "@/components/BulletinCard";
 import { EmptyState, ErrorState } from "@/components/shell";
 
 export function Bulletin() {
@@ -92,21 +93,5 @@ export function Bulletin() {
         </div>
       )}
     </div>
-  );
-}
-
-function BulletinCard({ item, zh }: { item: BulletinCardItem; zh: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-  const points = expanded ? item.bulletin_points : item.bulletin_points.slice(0, 3);
-  const pending = zh && item.localization_status !== "done";
-  return (
-    <article className="desk-story">
-      <div className="desk-story-meta"><span className="font-medium text-foreground/80">{item.author || item.platform}</span><span>·</span><span>{item.platform.replace(/_/g, " ")}</span>{item.duration_s ? <span className="ml-auto inline-flex items-center gap-1.5"><Clock3 size={12} />{formatLength(item.duration_s)}</span> : null}</div>
-      <Link to={`/bulletin/${item.id}`} className="desk-story-title"><h2>{item.title}</h2></Link>
-      {pending && <p className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">{item.localization_status === "queued" || item.localization_status === "processing" ? <><RefreshCw size={11} className="animate-spin" />中文简报准备中</> : <Link to={`/bulletin/${item.id}`} className="hover:underline">中文概览待补齐 · 打开阅读页即可生成</Link>}</p>}
-      {points.length ? <ul className="desk-story-points" lang={item.bulletin_language === "zh" ? "zh-CN" : undefined}>{points.map((point, i) => <li key={i}>{point.text}</li>)}</ul> : <p className="mt-4 text-sm leading-7 text-foreground/85">{item.summary}</p>}
-      {item.bulletin_points.length > 3 && <button onClick={() => setExpanded(!expanded)} className="mt-3 text-xs text-muted-foreground hover:text-primary" aria-expanded={expanded}>{expanded ? (zh ? "收起要点" : "Fewer points") : (zh ? `再看 ${item.bulletin_points.length - 3} 条要点` : `${item.bulletin_points.length - 3} more points`)}</button>}
-      <div className="desk-story-footer"><Link to={`/bulletin/${item.id}`} className="inline-flex items-center gap-2 font-medium text-primary">{zh ? "阅读精炼概括" : "Read the summary"}<ArrowUpRight size={14} /></Link><a href={item.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"><ExternalLink size={12} />{zh ? "原始来源" : "Original source"}</a></div>
-    </article>
   );
 }

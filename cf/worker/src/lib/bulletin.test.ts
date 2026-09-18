@@ -18,10 +18,10 @@ describe("Chinese bulletin backfill", () => {
         prepare() { return { bind() { return this; }, async all() { return { results: existing }; } }; },
         batch,
       },
-      PIPELINE: { sendBatch },
+      BULLETIN_JOBS: { sendBatch },
     } as unknown as Env;
     expect(await enqueueBulletinTranslations(env, [1, 2, 3, 4, 5, 6, 1], "zh")).toBe(3);
-    expect(sendBatch).toHaveBeenCalledWith([1, 5, 6].map((item_id) => ({ body: { kind: "bulletin_translate", item_id, lang: "zh" } })));
+    expect(sendBatch).toHaveBeenCalledWith(Array.from({ length: 3 }, () => ({ body: { kind: "bulletin_drain" } })));
     expect(batch.mock.calls[0][0]).toHaveLength(3);
   });
 });

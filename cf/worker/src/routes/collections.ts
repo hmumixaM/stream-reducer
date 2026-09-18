@@ -3,6 +3,7 @@ import type { AppContext } from "../auth";
 import { resolveUser } from "../auth";
 import { all, first, type ItemRow } from "../db";
 import { toItemRead } from "../lib/serialize";
+import { serializeBulletin, type BulletinRow, bulletinMetadata, bulletinSortDate, shortSummarySql } from "../lib/bulletinPresentation";
 
 export const collectionRoutes = new Hono<AppContext>();
 
@@ -133,6 +134,54 @@ collectionRoutes.get("/:slug/tracks/:trackId/items", async (c) => {
       ),
     ),
   );
+});
+
+// One source can appear in several tracks. EXISTS keeps the reading feed unique
+// while retaining section/track filters and stable newest-first pagination.
+collectionRoutes.get("/:slug/bulletin", async (c) => {
+  const collection = await first<{ id: number }>(c.env.DB.prepare(
+    "SELECT id FROM collection WHERE slug=? AND is_public=1",
+  ).bind(c.req.param("slug")));
+  if (!collection) return c.json({ error: "collection not found" }, 404);
+  const params = c.req.query();
+  const limit = boundedInt(params.limit, 24, 1, 60);
+  const user = await resolveUser(c.env, c);
+  const binds: unknown[] = [user?.id ?? -1, collection.id];
+  let filters = "";
+  if (params.section || params.track_id) {
+    filters += ` AND EXISTS (SELECT 1 FROM collection_track_item cti
+      JOIN collection_track ct ON ct.id=cti.track_id
+      JOIN collection_section cs ON cs.id=ct.section_id
+      WHERE cti.item_id=i.id AND cs.collection_id=ci.collection_id`;
+    if (params.section) { filters += " AND cs.slug=?"; binds.push(params.section); }
+    if (params.track_id) {
+      const track = Number(params.track_id);
+      if (!Number.isInteger(track) || track <= 0) return c.json({ error: "Invalid track" }, 400);
+      filters += " AND ct.id=?"; binds.push(track);
+    }
+    filters += ")";
+  }
+  if (params.cursor) {
+    let cursor: unknown;
+    try { cursor = JSON.parse(atob(params.cursor)); } catch { return c.json({ error: "Invalid cursor" }, 400); }
+    if (!Array.isArray(cursor) || cursor.length !== 2 || !cursor.every(Number.isFinite) || !Number.isInteger(cursor[1])) return c.json({ error: "Invalid cursor" }, 400);
+    filters += ` AND (${bulletinSortDate} < ? OR (${bulletinSortDate} = ? AND i.id < ?))`;
+    binds.push(cursor[0], cursor[0], cursor[1]);
+  }
+  const rows = await all<BulletinRow>(c.env.DB.prepare(`
+    SELECT ${bulletinMetadata}, ${shortSummarySql} AS summary_structured
+    FROM collection_item ci JOIN item i ON i.id=ci.item_id JOIN summary s ON s.item_id=i.id
+    LEFT JOIN user_item ui ON ui.item_id=i.id AND ui.user_id=?
+    LEFT JOIN bulletin_translation bt ON bt.item_id=i.id AND bt.lang='zh'
+    WHERE ci.collection_id=? AND i.status='done' ${filters}
+    ORDER BY ${bulletinSortDate} DESC, i.id DESC LIMIT ?
+  `).bind(...binds, limit + 1));
+  const page = rows.slice(0, limit), last = page.at(-1);
+  return c.json({
+    items: page.map((row) => serializeBulletin(row, user?.preferred_language || "auto")),
+    next_cursor: rows.length > limit && last ? btoa(JSON.stringify([last.sort_date, last.id])) : null,
+    next_offset: null,
+  });
 });
 
 collectionRoutes.get("/:slug", async (c) => {
