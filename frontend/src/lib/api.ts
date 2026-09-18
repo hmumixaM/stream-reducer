@@ -417,6 +417,38 @@ export interface ResearchBriefDetail {
   summary: { markdown: string; structured: JsonObject } | null;
 }
 
+export interface BulletinQuote {
+  text: string;
+  speaker: string;
+  timestamp: number | null;
+}
+
+export interface BulletinItem {
+  id: number;
+  title: string;
+  source_title: string;
+  subhead: string | null;
+  author: string | null;
+  source_url: string;
+  published_at: string | null;
+  created_at: string;
+  markdown: string;
+  tldr: string;
+  summary: string;
+  bulletin: string[];
+  key_points: string[];
+  background: string;
+  atmosphere: string;
+  walkthrough: string;
+  quotes: BulletinQuote[];
+  entities: string[];
+}
+
+export interface BulletinFeed {
+  items: BulletinItem[];
+  next_offset: number | null;
+}
+
 export interface ResearchSource {
   item_id: number;
   title: string;
@@ -1065,6 +1097,9 @@ export const api = {
   listResearchBriefs: (limit = 40) =>
     req<ResearchBrief[]>(`/api/research/feed?limit=${Math.min(Math.max(limit, 1), 100)}`),
   getResearchBrief: (id: number) => req<ResearchBriefDetail>(`/api/research/briefs/${id}`),
+  listBulletins: (limit = 60, offset = 0) =>
+    req<BulletinFeed>(`/api/bulletin/feed?limit=${Math.min(Math.max(limit, 1), 100)}&offset=${Math.max(offset, 0)}`),
+  getBulletin: (id: number) => req<BulletinItem>(`/api/bulletin/${id}`),
   runResearch: () =>
     req<{ ok: boolean; created: number; generated_at: string }>("/api/research/run", { method: "POST" }),
   askResearch: (question: string) =>

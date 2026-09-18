@@ -80,6 +80,13 @@
       hsl(var(--card));
   }
 
+  .bulletin-detail .bulletin-hero {
+    background:
+      radial-gradient(circle at 100% 0%, hsl(var(--primary) / 0.09), transparent 36%),
+      radial-gradient(circle at 0% 100%, hsl(var(--accent) / 0.65), transparent 42%),
+      hsl(var(--card));
+  }
+
   @media print {
     @page { size: A4; margin: 18mm 16mm 20mm; }
     body { background: #fff; color: #1f1d1a; font-family: Georgia, "Times New Roman", serif; }
@@ -100,6 +107,9 @@
     .print-detailed ul, .print-detailed ol { margin: 5pt 0 10pt; padding-left: 18pt; }
     .print-detailed blockquote { margin: 8pt 0; border-left: 2pt solid #b78778; padding-left: 10pt; color: #625c55; font-style: italic; }
     .print-source { margin-top: 22pt; border-top: 1pt solid #ddd4c8; padding-top: 8pt; color: #857d75; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 8pt; overflow-wrap: anywhere; }
+    .bulletin-detail { max-width: 760px; }
+    .bulletin-detail .bulletin-hero { background: #f7f3ed; }
+    .bulletin-detail .prose-sr { font-size: 10.5pt; line-height: 1.55; }
   }
 
   /* KaTeX renders a visually-hidden MathML copy of every formula for screen

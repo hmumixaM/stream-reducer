@@ -21,6 +21,7 @@ import {
   LogOut,
   Shield,
   Radar,
+  Newspaper,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/auth";
@@ -49,6 +50,7 @@ const NAV: {
   admin?: boolean;
 }[] = [
   { to: "/", label: "Feed", icon: Clock, section: "main", end: true },
+  { to: "/bulletin", label: "Bulletin", icon: Newspaper, section: "main" },
   { to: "/research", label: "Agents", icon: Radar, section: "main" },
   { to: "/subscriptions", label: "Sources", icon: Rss, section: "main" },
   { to: "/library", label: "Knowledge base", icon: Bookmark, section: "main" },

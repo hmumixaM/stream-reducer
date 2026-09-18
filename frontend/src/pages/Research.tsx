@@ -8,6 +8,7 @@ import {
   Sparkles,
   Trash2,
   ChevronRight,
+  Newspaper,
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type ResearchAgent, type ResearchAsk, type ResearchBrief } from "@/lib/api";
@@ -58,10 +59,15 @@ export function Research() {
         title="Research"
         subtitle="A focused layer over your channels: track names and themes, then review sourced briefs as they appear."
         actions={
-          <Button onClick={() => run.mutate()} disabled={run.isPending} title="Build briefs from recent summaries">
-            {run.isPending ? <Spinner /> : <Play className="h-4 w-4" />}
-            Run research
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/bulletin">
+              <Button variant="outline"><Newspaper className="h-4 w-4" /> Bulletin</Button>
+            </Link>
+            <Button onClick={() => run.mutate()} disabled={run.isPending} title="Build briefs from recent summaries">
+              {run.isPending ? <Spinner /> : <Play className="h-4 w-4" />}
+              Run research
+            </Button>
+          </div>
         }
       />
 
