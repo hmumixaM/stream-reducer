@@ -5,6 +5,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api, type BulletinCardItem } from "@/lib/api";
 import { useMe } from "@/lib/auth";
 import { dateLabel } from "@/lib/bulletin";
+import { supportsInfiniteScroll, useInfiniteScroll } from "@/lib/useInfiniteScroll";
 import { cn, formatLength } from "@/lib/utils";
 import { Button, Input, Select } from "@/components/ui";
 import { EmptyState, ErrorState } from "@/components/shell";
@@ -32,6 +33,12 @@ export function Bulletin() {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => page.next_cursor ?? undefined,
     refetchInterval: (query) => query.state.data?.pages.some((page) => page.items.some((item) => item.localization_status === "queued" || item.localization_status === "processing")) ? 30_000 : false,
+  });
+  const loadMoreRef = useInfiniteScroll({
+    hasNextPage: Boolean(feed.hasNextPage),
+    isFetchingNextPage: feed.isFetchingNextPage,
+    fetchNextPage: () => feed.fetchNextPage({ cancelRefetch: false }),
+    disabled: feed.isFetching || feed.isError,
   });
   const items = useMemo(() => [...new Map((feed.data?.pages.flatMap((page) => page.items) || []).map((item) => [item.id, item])).values()], [feed.data]);
   const groups = useMemo(() => {
@@ -70,8 +77,18 @@ export function Bulletin() {
       {feed.isLoading ? <div aria-label={zh ? "加载简报" : "Loading bulletins"} className="space-y-5 py-6">{[0, 1, 2].map((key) => <div key={key} className="h-56 animate-pulse rounded-xl bg-muted/40" />)}</div> : feed.isError && !items.length ? <ErrorState message={zh ? "简报加载失败，请重试。" : "Bulletins could not be loaded."} onRetry={() => feed.refetch()} /> : !items.length ? <EmptyState icon={<Newspaper size={22} />} title={q || platform || saved ? (zh ? "没有匹配的简报" : "No matching bulletins") : (zh ? "第一份简报，从关注一个来源开始" : "Your first bulletin starts with a source")} description={zh ? "关注频道或把内容加入知识库，处理完成后会出现在这里。" : "Follow a channel or save a source. Its bulletin appears here once the summary is ready."} action={<Link to="/subscriptions"><Button variant="outline">{zh ? "浏览来源" : "Explore sources"}<ArrowUpRight size={14} /></Button></Link>} /> : (
         <div className="pt-3">
           {groups.map(([date, entries]) => <section key={date} className="desk-day"><div className="desk-day-label"><span>{date}</span><span className="text-muted-foreground/60">{entries.length} {zh ? "篇" : "stories"}</span></div><div className="desk-timeline">{entries.map((item) => <BulletinCard key={item.id} item={item} zh={zh} />)}</div></section>)}
-          {feed.isError && <ErrorState compact message={zh ? "未能加载更多内容，已加载的简报仍可阅读。" : "More bulletins could not be loaded. Your current stories are still available."} onRetry={() => feed.fetchNextPage()} />}
-          {feed.hasNextPage ? <div className="mt-8 flex justify-center"><Button variant="outline" onClick={() => feed.fetchNextPage()} disabled={feed.isFetchingNextPage}>{feed.isFetchingNextPage ? <RefreshCw size={14} className="animate-spin" /> : <ArrowDown size={14} />}{zh ? "更早的简报" : "Earlier bulletins"}</Button></div> : <p className="desk-end"><Check size={14} />{zh ? "已读到这份信息流的起点" : "You’ve reached the beginning"}</p>}
+          {feed.isError && <ErrorState compact message={zh ? "未能加载更多内容，已加载的简报仍可阅读。" : "More bulletins could not be loaded. Your current stories are still available."} onRetry={() => feed.isFetchNextPageError ? feed.fetchNextPage({ cancelRefetch: false }) : feed.refetch()} />}
+          {feed.hasNextPage ? (
+            <div ref={loadMoreRef} className="mt-8 flex min-h-12 items-center justify-center" role="status" aria-live="polite">
+              {!feed.isError && (feed.isFetchingNextPage ? (
+                <p className="inline-flex items-center gap-2 text-xs text-muted-foreground"><RefreshCw size={14} className="animate-spin" />{zh ? "正在加载更早的简报…" : "Loading earlier bulletins…"}</p>
+              ) : !supportsInfiniteScroll ? (
+                <Button variant="outline" onClick={() => feed.fetchNextPage({ cancelRefetch: false })} disabled={feed.isFetching}><ArrowDown size={14} />{zh ? "更早的简报" : "Earlier bulletins"}</Button>
+              ) : (
+                <p className="text-xs text-muted-foreground">{zh ? "继续向下滚动，加载更早的简报" : "Scroll to load earlier bulletins"}</p>
+              ))}
+            </div>
+          ) : !feed.isError && <p className="desk-end"><Check size={14} />{zh ? "已读到这份信息流的起点" : "You’ve reached the beginning"}</p>}
         </div>
       )}
     </div>
