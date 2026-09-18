@@ -22,7 +22,7 @@ const named = <T extends string>(
 ): Route => {
   const load = async () => ({ default: (await loader())[name] });
   const route = lazy(load) as Route;
-  route.preload = () => void load();
+  route.preload = () => void load().catch(() => undefined);
   return route;
 };
 
@@ -66,15 +66,33 @@ const queryClient = new QueryClient({
 });
 
 const FullScreenSpinner = () => (
-  <div className="flex min-h-screen items-center justify-center text-muted-foreground">
-    <Spinner /> Loading…
+  <div className="flex min-h-screen flex-col items-center justify-center gap-4 text-muted-foreground" role="status">
+    <span className="text-lg font-semibold text-foreground">stream-reduce</span>
+    <span className="flex items-center gap-2"><Spinner /> 正在连接 · Connecting…</span>
   </div>
 );
+
+function ConnectionProblem({ onRetry }: { onRetry: () => void }) {
+  return <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-center">
+    <h1 className="text-xl font-semibold">暂时连接不上 · Connection interrupted</h1>
+    <p className="text-sm text-muted-foreground">请检查网络后重试，登录状态不会因此被清除。<br />Please check your connection and try again.</p>
+    <Button onClick={onRetry}>重试 / Try again</Button>
+  </div>;
+}
+
+function PageLoadError() {
+  return <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-center">
+    <h1 className="text-xl font-semibold">页面未能加载 · Page could not load</h1>
+    <p className="text-sm text-muted-foreground">页面可能刚刚更新，请重新加载。<br />The page may have been updated. Please reload to continue.</p>
+    <Button onClick={() => window.location.reload()}>重新加载 / Reload</Button>
+  </div>;
+}
 
 // The shell is public: anyone can reach it. Browsing the global catalog and
 // reading an item needs no account; personal pages are wrapped in RequireAuth.
 function RootLayout() {
   const me = useMe();
+  if (!me.data && (me.isError || me.fetchStatus === "paused")) return <ConnectionProblem onRetry={() => { void me.refetch(); }} />;
   if (me.isLoading) return <FullScreenSpinner />;
   return <Layout />;
 }
@@ -160,10 +178,11 @@ function Home() {
 }
 
 const router = createBrowserRouter([
-  { path: "/login", element: <Login /> },
+  { path: "/login", element: <Login />, errorElement: <PageLoadError /> },
   {
     path: "/",
     element: <RootLayout />,
+    errorElement: <PageLoadError />,
     children: [
       { index: true, element: <Home /> },
       // Public, read-only content.
@@ -195,9 +214,18 @@ const router = createBrowserRouter([
   },
 ]);
 
-// Start the landing route's chunk alongside the session request rather than
-// after it. Which one depends on where this visitor last landed.
-(MIRROR ? Library : sessionSnapshot()?.user ? Bulletin : Browse).preload();
+// Fetch the requested route immediately; don't download Browse for every cold
+// visit to a personal page or wait for authentication to discover the chunk.
+const path = window.location.pathname;
+const landing = path.startsWith("/bulletin/") ? BulletinDetail
+  : path === "/bulletin" ? Bulletin
+  : path.startsWith("/items/") ? ItemDetail
+  : path === "/library" ? Library
+  : path === "/browse" ? Browse
+  : path === "/timeline" ? Timeline
+  : path === "/" ? (MIRROR ? Library : sessionSnapshot()?.user ? Bulletin : null)
+  : null;
+landing?.preload();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -209,6 +237,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 
 // Monitoring is not part of the first paint: loading the Firebase SDK eagerly
 // put ~30 kB of gzipped JS ahead of the UI on the critical path.
-const startMonitoring = () => void import("@/lib/firebase");
-if ("requestIdleCallback" in window) requestIdleCallback(startMonitoring);
-else setTimeout(startMonitoring, 2000);
+const startMonitoring = () => void import("@/lib/firebase").catch(() => undefined);
+// An idle CPU can still have a busy network: leave bandwidth for the session,
+// route and first content response before starting nonessential SDK requests.
+setTimeout(() => {
+  if ("requestIdleCallback" in window) requestIdleCallback(startMonitoring);
+  else startMonitoring();
+}, 5000);

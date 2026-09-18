@@ -16,7 +16,7 @@ export function Login() {
     <div className="flex min-h-screen items-center justify-center p-4">
       <Card className="w-full max-w-md p-8">
         <div className="mb-6 flex items-center gap-2">
-          <img src="/logo.png" alt="" className="h-9 w-9 rounded-md" />
+          <img src="/logo-192.png" alt="" className="h-9 w-9 rounded-md" />
           <span className="text-xl font-semibold tracking-tight">stream-reduce</span>
         </div>
 

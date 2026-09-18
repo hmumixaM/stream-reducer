@@ -678,6 +678,7 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
     credentials: "include",
+    signal: AbortSignal.timeout(!options?.method || options.method === "GET" ? 20_000 : 90_000),
     ...options,
   });
   if (res.status === 401) {
@@ -698,13 +699,21 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 async function optionalSession(): Promise<{ user: User | null }> {
-  const res = await fetch("/api/auth/me", {
-    headers: { "Content-Type": "application/json" },
+  const pending = window.__srSessionResponse;
+  delete window.__srSessionResponse;
+  if (MIRROR) return { user: null };
+  const res = await (pending || fetch("/api/auth/me", {
     credentials: "include",
-  });
-  if (res.status === 401) return { user: null };
-  if (!res.ok) return { user: null };
+    signal: AbortSignal.timeout(12_000),
+  }));
+  // The local Python server has no account API; retain its public mode.
+  if (res.status === 401 || res.status === 404) return { user: null };
+  if (!res.ok) throw new Error(`Session request failed: ${res.status}`);
   return res.json() as Promise<{ user: User | null }>;
+}
+
+declare global {
+  interface Window { __srSessionResponse?: Promise<Response> }
 }
 
 export interface ListItemsParams {

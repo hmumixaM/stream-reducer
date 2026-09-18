@@ -200,7 +200,7 @@ export function Layout() {
   const SidebarContent = () => (
     <>
       <div className="mb-6 flex items-center gap-2 px-2">
-        <img src="/logo.png" alt="" className="h-8 w-8 rounded-md" />
+        <img src="/logo-192.png" alt="" className="h-8 w-8 rounded-md" />
         <span className="text-lg font-semibold tracking-tight">stream-reduce</span>
       </div>
       {!MIRROR && authed && (
@@ -278,7 +278,7 @@ export function Layout() {
       {/* Mobile Top Bar */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-card/80 px-4 backdrop-blur md:hidden">
         <div className="flex items-center gap-2">
-          <img src="/logo.png" alt="" className="h-7 w-7 rounded-md" />
+          <img src="/logo-192.png" alt="" className="h-7 w-7 rounded-md" />
           <span className="font-semibold tracking-tight">stream-reduce</span>
         </div>
         <button
