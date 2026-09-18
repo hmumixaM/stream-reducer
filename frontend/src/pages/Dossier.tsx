@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, FolderSearch } from "lucide-react";
+import { ChevronRight, ExternalLink, FolderSearch } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useParams } from "react-router-dom";
 import { api, type ResearchBrief } from "@/lib/api";
 import { Badge, Card } from "@/components/ui";
@@ -39,19 +40,24 @@ export function Dossier() {
 
 function DossierMention({ brief }: { brief: ResearchBrief }) {
   return (
-    <Card className="p-4 sm:p-5">
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span>{brief.item_published_at ? formatDate(brief.item_published_at) : "Recent"}</span>
-        <span>{brief.brief_type}</span>
+    <Card interactive className="p-4 sm:p-5">
+      <Link to={`/research/briefs/${brief.id}`} className="block">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>{brief.item_published_at ? formatDate(brief.item_published_at) : "Recent"}</span>
+          <span>{brief.brief_type}</span>
+        </div>
+        <h2 className="font-serif text-xl font-semibold tracking-tight">{brief.title}</h2>
+        <p className="mt-2 border-l-2 border-primary/50 pl-3 font-serif text-base italic leading-6 text-foreground/80">{brief.summary}</p>
+        {(brief.bulletin.length > 0 ? brief.bulletin : brief.key_points).length > 0 && (
+          <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
+            {(brief.bulletin.length > 0 ? brief.bulletin : brief.key_points).slice(0, 5).map((point) => <li key={point} className="flex gap-2"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-primary/60" aria-hidden="true" /><span>{point}</span></li>)}
+          </ul>
+        )}
+      </Link>
+      <div className="mt-4 flex items-center justify-between text-xs text-primary">
+        <Link to={`/research/briefs/${brief.id}`} className="inline-flex items-center gap-1 hover:underline">Open summary <ChevronRight className="h-3 w-3" /></Link>
+        {brief.source_url && <a href={brief.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">Original source <ExternalLink className="h-3 w-3" /></a>}
       </div>
-      <h2 className="font-serif text-xl font-semibold tracking-tight">{brief.title}</h2>
-      <p className="mt-2 border-l-2 border-primary/50 pl-3 font-serif text-base italic leading-6 text-foreground/80">{brief.summary}</p>
-      {(brief.bulletin.length > 0 ? brief.bulletin : brief.key_points).length > 0 && (
-        <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
-          {(brief.bulletin.length > 0 ? brief.bulletin : brief.key_points).slice(0, 5).map((point) => <li key={point} className="flex gap-2"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-primary/60" aria-hidden="true" /><span>{point}</span></li>)}
-        </ul>
-      )}
-      {brief.source_url && <a href={brief.source_url} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-1 text-xs text-primary hover:underline">Open source <ExternalLink className="h-3 w-3" /></a>}
     </Card>
   );
 }

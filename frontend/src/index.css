@@ -74,6 +74,12 @@
 
   .print-summary { display: none; }
 
+  .research-brief-detail .summary-paper {
+    background:
+      radial-gradient(circle at 100% 0%, hsl(var(--primary) / 0.06), transparent 34%),
+      hsl(var(--card));
+  }
+
   @media print {
     @page { size: A4; margin: 18mm 16mm 20mm; }
     body { background: #fff; color: #1f1d1a; font-family: Georgia, "Times New Roman", serif; }

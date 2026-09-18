@@ -61,6 +61,7 @@ const NAV: {
   { to: "/stats", label: "Stats", icon: BarChart3, section: "system" },
   // Admin-only entries (settings exposes provider endpoint/keys).
   { to: "/admin", label: "Admin", icon: Shield, section: "system", admin: true },
+  { to: "/preferences", label: "Preferences", icon: SettingsIcon, section: "system" },
   { to: "/settings", label: "Settings", icon: SettingsIcon, section: "system", admin: true },
 ];
 

@@ -5,6 +5,7 @@ import { all, first, type ItemRow, type ResearchAgentRow, type ResearchAskRow, t
 import type { Env } from "../env";
 import { isoNow } from "../lib/crypto";
 import { readJson } from "../lib/request";
+import { parseBulletin } from "../lib/bulletin";
 
 export const researchRoutes = new Hono<AppContext>();
 researchRoutes.use("*", requireAuth);
@@ -321,7 +322,7 @@ function serializeAgent(row: ResearchAgentRow) {
   };
 }
 
-function serializeBrief(row: ResearchBriefRow & { item_title?: string | null; source_url?: string | null; item_published_at?: string | null; agent_name?: string | null; coverage_label?: string | null }) {
+function serializeBrief(row: ResearchBriefRow & { item_title?: string | null; source_url?: string | null; item_published_at?: string | null; agent_name?: string | null; coverage_label?: string | null; localized_bulletin?: string | null; localized_bulletin_status?: string | null }, preferredLanguage = "auto") {
   let bulletin: string[] = [];
   try {
     const parsed = JSON.parse(row.bulletin || "[]") as unknown;
@@ -333,6 +334,7 @@ function serializeBrief(row: ResearchBriefRow & { item_title?: string | null; so
       }).filter(Boolean).slice(0, 5);
     }
   } catch { /* keep an empty list for an old/corrupt row */ }
+  if (preferredLanguage === "zh" && row.localized_bulletin_status === "done") bulletin = parseBulletin(row.localized_bulletin);
   let points: string[] = [];
   try {
     const parsed = JSON.parse(row.key_points || "[]") as unknown;
@@ -423,16 +425,57 @@ researchRoutes.get("/feed", async (c) => {
   const limit = Math.min(Math.max(Number(c.req.query("limit") || 40), 1), 100);
   const rows = await all<ResearchBriefRow & { item_title: string | null; source_url: string | null; item_published_at: string | null; agent_name: string | null; coverage_label: string | null }>(c.env.DB.prepare(
     `SELECT b.*, i.title AS item_title, i.source_url, i.published_at AS item_published_at,
+            bt.bulletin AS localized_bulletin, bt.status AS localized_bulletin_status,
             a.name AS agent_name, cv.label AS coverage_label
        FROM research_brief b
        JOIN item i ON i.id = b.item_id
+       LEFT JOIN bulletin_translation bt ON bt.item_id = b.item_id AND bt.lang = 'zh'
        LEFT JOIN research_agent a ON a.id = b.agent_id
        LEFT JOIN research_coverage cv ON cv.id = b.coverage_id
       WHERE b.user_id = ?
       ORDER BY b.created_at DESC
       LIMIT ?`,
   ).bind(userId, limit));
-  return c.json(rows.map(serializeBrief));
+  return c.json(rows.map((row) => serializeBrief(row, c.get("user").preferred_language)));
+});
+
+researchRoutes.get("/briefs/:id", async (c) => {
+  const userId = c.get("user").id;
+  const id = Number(c.req.param("id"));
+  const row = await first<ResearchBriefRow & {
+    item_title: string | null;
+    source_url: string | null;
+    item_published_at: string | null;
+    agent_name: string | null;
+    coverage_label: string | null;
+    localized_bulletin: string | null;
+    localized_bulletin_status: string | null;
+    summary_markdown: string | null;
+    summary_structured: string | null;
+  }>(c.env.DB.prepare(
+    `SELECT b.*, i.title AS item_title, i.source_url, i.published_at AS item_published_at,
+            bt.bulletin AS localized_bulletin, bt.status AS localized_bulletin_status,
+            s.markdown AS summary_markdown, s.structured AS summary_structured,
+            a.name AS agent_name, cv.label AS coverage_label
+       FROM research_brief b
+       JOIN item i ON i.id = b.item_id
+       LEFT JOIN summary s ON s.item_id = b.item_id
+       LEFT JOIN bulletin_translation bt ON bt.item_id = b.item_id AND bt.lang = 'zh'
+       LEFT JOIN research_agent a ON a.id = b.agent_id
+       LEFT JOIN research_coverage cv ON cv.id = b.coverage_id
+      WHERE b.user_id = ? AND b.id = ?
+      LIMIT 1`,
+  ).bind(userId, id));
+  if (!row) return c.json({ error: "brief not found" }, 404);
+  let structured: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(row.summary_structured || "{}") as unknown;
+    if (parsed && typeof parsed === "object") structured = parsed as Record<string, unknown>;
+  } catch { /* return the markdown even if an old structured payload is corrupt */ }
+  return c.json({
+    brief: serializeBrief(row, c.get("user").preferred_language),
+    summary: row.summary_markdown ? { markdown: row.summary_markdown, structured } : null,
+  });
 });
 
 researchRoutes.post("/run", async (c) => {
@@ -492,13 +535,15 @@ researchRoutes.get("/dossiers/:slug", async (c) => {
   if (!coverage) return c.json({ error: "dossier not found" }, 404);
   const rows = await all<ResearchBriefRow & { item_title: string | null; source_url: string | null; item_published_at: string | null; agent_name: string | null; coverage_label: string | null }>(c.env.DB.prepare(
     `SELECT b.*, i.title AS item_title, i.source_url, i.published_at AS item_published_at,
+            bt.bulletin AS localized_bulletin, bt.status AS localized_bulletin_status,
             NULL AS agent_name, cv.label AS coverage_label
        FROM research_brief b
        JOIN item i ON i.id = b.item_id
+       LEFT JOIN bulletin_translation bt ON bt.item_id = b.item_id AND bt.lang = 'zh'
        LEFT JOIN research_coverage cv ON cv.id = b.coverage_id
       WHERE b.user_id = ? AND b.coverage_id = ?
       ORDER BY COALESCE(i.published_at, b.created_at) DESC
       LIMIT 100`,
   ).bind(userId, coverage.id));
-  return c.json({ coverage: serializeCoverage(coverage), mention_count: rows.length, mentions: rows.map(serializeBrief) });
+  return c.json({ coverage: serializeCoverage(coverage), mention_count: rows.length, mentions: rows.map((row) => serializeBrief(row, c.get("user").preferred_language)) });
 });

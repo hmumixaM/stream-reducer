@@ -45,7 +45,9 @@ const ChannelDetail = named(() => import("@/pages/ChannelDetail"), "ChannelDetai
 const Stats = named(() => import("@/pages/Stats"), "Stats");
 const Research = named(() => import("@/pages/Research"), "Research");
 const Dossier = named(() => import("@/pages/Dossier"), "Dossier");
+const ResearchBrief = named(() => import("@/pages/ResearchBrief"), "ResearchBrief");
 const Settings = named(() => import("@/pages/Settings"), "Settings");
+const Preferences = named(() => import("@/pages/Preferences"), "Preferences");
 const Admin = named(() => import("@/pages/Admin"), "Admin");
 
 const queryClient = new QueryClient({
@@ -172,6 +174,7 @@ const router = createBrowserRouter([
       // Personal pages require a session.
       { path: "research", element: <RequireAuth><Research /></RequireAuth> },
       { path: "dossiers/:slug", element: <RequireAuth><Dossier /></RequireAuth> },
+      { path: "research/briefs/:id", element: <RequireAuth><ResearchBrief /></RequireAuth> },
       { path: "library", element: <RequireAuth><Library /></RequireAuth> },
       { path: "search", element: <RequireAuth><Search /></RequireAuth> },
       { path: "graph", element: <RequireAuth><Graph /></RequireAuth> },
@@ -181,6 +184,7 @@ const router = createBrowserRouter([
       { path: "stats", element: <RequireAuth><Stats /></RequireAuth> },
       // Admin-only.
       { path: "settings", element: <RequireAdmin><Settings /></RequireAdmin> },
+      { path: "preferences", element: <RequireAuth><Preferences /></RequireAuth> },
       { path: "admin", element: <RequireAdmin><Admin /></RequireAdmin> },
     ],
   },

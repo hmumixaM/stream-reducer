@@ -1004,6 +1004,57 @@ def regenerate_headline(
     return out
 
 
+def regenerate_bulletin(
+    item: ItemView,
+    existing: dict,
+    stages: list[Stage],
+    target_lang: str,
+) -> dict:
+    """Translate only the feed-ready bulletin while preserving the full summary."""
+    source_items = existing.get("bulletin") if isinstance(existing.get("bulletin"), list) else []
+    if not source_items:
+        source_items = existing.get("key_points") if isinstance(existing.get("key_points"), list) else []
+    source_lines: list[str] = []
+    for entry in source_items[:8]:
+        text = entry.get("text") if isinstance(entry, dict) else str(entry)
+        if text and str(text).strip():
+            source_lines.append(f"- {str(text).strip()}")
+    if not source_lines:
+        source_lines.append("- (No bulletin points are available; infer the highest-signal claims from the detailed summary below.)")
+    source = "\n".join(source_lines)
+    walkthrough = existing.get("walkthrough") if isinstance(existing.get("walkthrough"), str) else ""
+    if walkthrough.strip():
+        source += f"\n\n## Detailed source context\n{walkthrough[:30000]}"
+    lang, _, section_system = _language_setup(source, target_lang)
+    prompt = f"""## Page background
+{_build_context(item)}
+
+## Existing bulletin and source context
+{source}
+
+---
+Translate or rewrite ONLY the feed-ready bulletin. Return STRICT JSON with this exact shape:
+{{
+  "bulletin": [{{"text": "...", "timestamp": <seconds as number or null>}}]
+}}
+
+Rules:
+- Write 3-5 concise, source-grounded bulletin items.
+- Preserve the meaning, numbers, names, and uncertainty of the existing content.
+- Each item should be one or two sentences and useful in a feed timeline.
+- Output all bulletin prose in the requested target language.
+- Do not output key_points, a detailed summary, markdown, or commentary.
+- LANGUAGE: {lang}
+"""
+    with Stage("summarize", provider="gemini", model=os.environ.get("GEMINI_MODEL")) as st:
+        response = _generate_json_section(st, prompt, section_system, {"bulletin": []}, SUMMARY_HEADLINE_MAX_TOKENS * 3)
+    stages.append(st)
+    translated = response.get("bulletin") if isinstance(response.get("bulletin"), list) else []
+    out = dict(existing)
+    out["bulletin"] = translated or existing.get("bulletin", [])
+    return out
+
+
 def _apply_supplied_metadata(item: ItemView, supplied: dict) -> None:
     item.title = supplied.get("title")
     item.author = supplied.get("author")
@@ -1072,10 +1123,12 @@ def run(job: dict, on_progress=None) -> dict:
             "error": None,
         }
 
-    if mode in ("structured_backfill", "headline_backfill"):
+    if mode in ("structured_backfill", "headline_backfill", "bulletin_translate"):
         existing = job.get("summary") or {}
         if mode == "headline_backfill":
             structured = regenerate_headline(item, existing, stages, target_lang=target_lang)
+        elif mode == "bulletin_translate":
+            structured = regenerate_bulletin(item, existing, stages, target_lang=target_lang or "zh")
         else:
             structured = regenerate_structured(item, existing, stages, target_lang=target_lang)
         markdown = render_markdown(item, structured)

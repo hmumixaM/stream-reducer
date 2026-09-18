@@ -8,6 +8,7 @@ import { splitUrls, nonItemUrlError } from "../lib/url";
 import { readJson } from "../lib/request";
 import { includeSummaryDescription } from "../lib/summaryDescription";
 import { isInfographicContentReady } from "../lib/autoInfographic";
+import { parseBulletin } from "../lib/bulletin";
 import {
   LIBRARY_SORT_COLUMNS,
   SORT_COLUMNS,
@@ -318,6 +319,17 @@ itemsRoutes.get("/:id", async (c) => {
         item.source_url,
       )
     : null;
+  if (summaryContent && user?.preferred_language === "zh") {
+    const localized = await first<{ bulletin: string; status: string }>(c.env.DB.prepare(
+      "SELECT bulletin, status FROM bulletin_translation WHERE item_id = ? AND lang = 'zh'",
+    ).bind(id));
+    if (localized?.status === "done") {
+      summaryContent.structured = {
+        ...summaryContent.structured,
+        bulletin: parseBulletin(localized.bulletin),
+      };
+    }
+  }
 
   return c.json({
     ...toItemRead(item, ui, { is_interested: interested != null }),

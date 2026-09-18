@@ -7,6 +7,7 @@ import {
   Radar,
   Sparkles,
   Trash2,
+  ChevronRight,
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type ResearchAgent, type ResearchAsk, type ResearchBrief } from "@/lib/api";
@@ -148,8 +149,11 @@ function BriefFeed({
     );
   }
   return (
-    <div className="space-y-3">
-      {briefs.map((brief) => <BriefCard key={brief.id} brief={brief} />)}
+    <div>
+      <SectionHeader title="Bulletin timeline" subtitle="Short, source-grounded signals. Open any node for the full summary." />
+      <div className="relative space-y-5 before:absolute before:bottom-4 before:left-[0.45rem] before:top-4 before:w-px before:bg-border">
+        {briefs.map((brief) => <BriefCard key={brief.id} brief={brief} />)}
+      </div>
     </div>
   );
 }
@@ -157,26 +161,27 @@ function BriefFeed({
 function BriefCard({ brief }: { brief: ResearchBrief }) {
   const label = brief.coverage_label || brief.agent_name || "Research brief";
   return (
-    <Card className="p-4 sm:p-5">
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <Badge className="bg-accent text-accent-foreground">{brief.brief_type}</Badge>
-        <span>{label}</span>
-        {brief.item_published_at && <span>{formatDate(brief.item_published_at)}</span>}
-        <span className="ml-auto">Filed {formatDate(brief.created_at)}</span>
-      </div>
-      <h2 className="font-serif text-xl font-semibold leading-snug tracking-tight">{brief.title}</h2>
-      <p className="mt-2 border-l-2 border-primary/50 pl-3 font-serif text-base italic leading-6 text-foreground/80">{brief.summary}</p>
-      {(brief.bulletin.length > 0 ? brief.bulletin : brief.key_points).length > 0 && (
-        <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
-          {(brief.bulletin.length > 0 ? brief.bulletin : brief.key_points).slice(0, 5).map((point) => <li key={point} className="flex gap-2"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-primary/60" aria-hidden="true" /><span>{point}</span></li>)}
-        </ul>
-      )}
-      {brief.source_url && (
-        <a href={brief.source_url} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-1 text-xs text-primary hover:underline">
-          Open source <ExternalLink className="h-3 w-3" />
-        </a>
-      )}
-    </Card>
+    <div className="relative pl-6">
+      <span className="absolute left-0 top-5 z-10 h-[0.6rem] w-[0.6rem] rounded-full border-2 border-background bg-primary shadow-sm" aria-hidden="true" />
+      <Card interactive className="p-4 sm:p-5">
+        <Link to={`/research/briefs/${brief.id}`} className="block">
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge className="bg-accent text-accent-foreground">{brief.brief_type}</Badge>
+            <span>{label}</span>
+            {brief.item_published_at && <span>{formatDate(brief.item_published_at)}</span>}
+            <span className="ml-auto">Filed {formatDate(brief.created_at)}</span>
+          </div>
+          <h2 className="font-serif text-xl font-semibold leading-snug tracking-tight">{brief.title}</h2>
+          <p className="mt-2 border-l-2 border-primary/50 pl-3 font-serif text-base italic leading-6 text-foreground/80">{brief.summary}</p>
+          {(brief.bulletin.length > 0 ? brief.bulletin : brief.key_points).length > 0 && (
+            <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
+              {(brief.bulletin.length > 0 ? brief.bulletin : brief.key_points).slice(0, 5).map((point) => <li key={point} className="flex gap-2"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-primary/60" aria-hidden="true" /><span>{point}</span></li>)}
+            </ul>
+          )}
+        </Link>
+        {brief.source_url && <div className="mt-4 flex items-center justify-between text-xs text-primary"><Link to={`/research/briefs/${brief.id}`} className="inline-flex items-center gap-1 hover:underline">Open summary <ChevronRight className="h-3 w-3" /></Link><a href={brief.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">Original source <ExternalLink className="h-3 w-3" /></a></div>}
+      </Card>
+    </div>
   );
 }
 

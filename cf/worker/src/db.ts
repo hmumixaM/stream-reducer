@@ -6,6 +6,7 @@ export interface UserRow {
   id: number;
   email: string;
   is_admin: number;
+  preferred_language?: string;
   created_at: string;
 }
 
@@ -140,6 +141,15 @@ export interface ResearchBriefRow {
   key_points: string;
   matched_text: string;
   created_at: string;
+}
+
+export interface BulletinTranslationRow {
+  item_id: number;
+  lang: string;
+  bulletin: string;
+  status: string;
+  error: string | null;
+  updated_at: string;
 }
 
 export interface ResearchAskRow {

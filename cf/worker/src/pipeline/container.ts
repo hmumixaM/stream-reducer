@@ -82,7 +82,8 @@ interface PipelineJob {
   // structured_backfill re-generates structured summary fields from stored summary JSON.
   // headline_backfill re-generates only the headline/subhead from stored summary JSON.
   // infographic renders an image poster from stored summary JSON (image model).
-  mode: "process" | "resummarize" | "structured_backfill" | "headline_backfill" | "infographic";
+  // bulletin_translate re-generates only the short bulletin in the requested language.
+  mode: "process" | "resummarize" | "structured_backfill" | "headline_backfill" | "bulletin_translate" | "infographic";
   // Freshest (auto-refreshed) Bilibili cookie, attached per-job so the container
   // uses the current cookie instead of the static deploy-time secret.
   bilibili_cookie?: string;

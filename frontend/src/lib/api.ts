@@ -72,7 +72,13 @@ export interface User {
   id: number;
   email: string;
   is_admin: boolean;
+  preferred_language: "auto" | "zh";
   created_at: string;
+}
+
+export interface BulletinPreference {
+  preferred_language: "auto" | "zh";
+  enqueued?: number;
 }
 
 export interface AdminUser {
@@ -404,6 +410,11 @@ export interface ResearchDossier {
   coverage: ResearchCoverage;
   mention_count: number;
   mentions: ResearchBrief[];
+}
+
+export interface ResearchBriefDetail {
+  brief: ResearchBrief;
+  summary: { markdown: string; structured: JsonObject } | null;
 }
 
 export interface ResearchSource {
@@ -830,6 +841,14 @@ export const api = {
       body: JSON.stringify({ email }),
     }),
   getMe: () => optionalSession(),
+  getBulletinPreference: () => req<BulletinPreference>("/api/auth/preferences"),
+  updateBulletinPreference: (preferred_language: "auto" | "zh") =>
+    req<BulletinPreference>("/api/auth/preferences", {
+      method: "PATCH",
+      body: JSON.stringify({ preferred_language }),
+    }),
+  backfillBulletins: () =>
+    req<BulletinPreference>("/api/auth/preferences/backfill", { method: "POST" }),
   logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
 
   // The signed-in user's personal library (waiting + done).
@@ -1045,6 +1064,7 @@ export const api = {
     req<{ ok: boolean }>(`/api/research/agents/${id}`, { method: "DELETE" }),
   listResearchBriefs: (limit = 40) =>
     req<ResearchBrief[]>(`/api/research/feed?limit=${Math.min(Math.max(limit, 1), 100)}`),
+  getResearchBrief: (id: number) => req<ResearchBriefDetail>(`/api/research/briefs/${id}`),
   runResearch: () =>
     req<{ ok: boolean; created: number; generated_at: string }>("/api/research/run", { method: "POST" }),
   askResearch: (question: string) =>

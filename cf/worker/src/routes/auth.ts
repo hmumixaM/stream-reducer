@@ -8,11 +8,28 @@ import {
   setSessionCookie,
   resolveUser,
   clearSession,
+  requireAuth,
 } from "../auth";
 import { readForm, readJson } from "../lib/request";
+import { all } from "../db";
+import { enqueueBulletinTranslations } from "../lib/bulletin";
 import { OAUTH_RETURN_COOKIE } from "./oauth";
 
 export const authRoutes = new Hono<AppContext>();
+
+const PREFERRED_LANGUAGES = new Set(["auto", "zh"]);
+
+async function backfillBulletins(c: Parameters<typeof requireAuth>[0], lang: string): Promise<number> {
+  if (lang !== "zh") return 0;
+  const rows = await all<{ id: number }>(c.env.DB.prepare(
+    `SELECT i.id
+       FROM item i
+       JOIN summary s ON s.item_id = i.id
+      WHERE i.status = 'done'
+      ORDER BY i.id`,
+  ));
+  return enqueueBulletinTranslations(c.env, rows.map((row) => row.id), lang);
+}
 
 // After a successful sign-in, return the user to a pending OAuth authorize URL
 // if one was stashed (and only an on-site /oauth/ path, to avoid open redirect).
@@ -95,9 +112,33 @@ authRoutes.get("/me", async (c) => {
       id: user.id,
       email: user.email,
       is_admin: !!user.is_admin,
+      preferred_language: user.preferred_language || "auto",
       created_at: user.created_at,
     },
   });
+});
+
+authRoutes.get("/preferences", requireAuth, (c) => c.json({
+  preferred_language: c.get("user").preferred_language || "auto",
+}));
+
+authRoutes.patch("/preferences", requireAuth, async (c) => {
+  const body = await readJson<{ preferred_language?: string }>(c);
+  const preferredLanguage = (body.preferred_language || "auto").trim();
+  if (!PREFERRED_LANGUAGES.has(preferredLanguage)) {
+    return c.json({ error: "unsupported preferred language" }, 400);
+  }
+  await c.env.DB.prepare("UPDATE user SET preferred_language = ? WHERE id = ?")
+    .bind(preferredLanguage, c.get("user").id)
+    .run();
+  const enqueued = await backfillBulletins(c, preferredLanguage);
+  return c.json({ preferred_language: preferredLanguage, enqueued });
+});
+
+authRoutes.post("/preferences/backfill", requireAuth, async (c) => {
+  const preferredLanguage = c.get("user").preferred_language || "auto";
+  const enqueued = await backfillBulletins(c, preferredLanguage);
+  return c.json({ preferred_language: preferredLanguage, enqueued });
 });
 
 authRoutes.post("/logout", async (c) => {
