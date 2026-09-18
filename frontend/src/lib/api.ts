@@ -239,6 +239,7 @@ export interface Infographic {
 }
 
 export interface ItemDetail extends Item {
+  localized_bulletin?: LocalizedBulletin | null;
   summary?: Summary | null;
   transcript?: Transcript | null;
   stages: StageRun[];
@@ -423,6 +424,15 @@ export interface BulletinQuote {
   timestamp: number | null;
 }
 
+export interface LocalizedBulletin {
+  status: string;
+  complete: boolean;
+  headline: string;
+  subhead: string;
+  tldr: string;
+  bulletin: { text: string; timestamp: number | null }[];
+}
+
 export interface BulletinPoint { text: string; timestamp: number | null }
 export interface ReadingSummary {
   lead: string;
@@ -447,6 +457,8 @@ export interface BulletinItem {
   duration_s: number | null;
   saved: boolean;
   bulletin_points: BulletinPoint[];
+  bulletin_overview: string;
+  bulletin_intro_ready: boolean;
   bulletin_language: "zh" | "original";
   localization_status: string;
   markdown: string;
@@ -463,7 +475,7 @@ export interface BulletinItem {
   reading_summary: ReadingSummaryResult;
 }
 
-export type BulletinCardItem = Pick<BulletinItem, "id" | "title" | "source_title" | "subhead" | "author" | "source_url" | "published_at" | "created_at" | "platform" | "duration_s" | "saved" | "bulletin" | "bulletin_points" | "bulletin_language" | "localization_status" | "summary">;
+export type BulletinCardItem = Pick<BulletinItem, "id" | "title" | "source_title" | "subhead" | "author" | "source_url" | "published_at" | "created_at" | "platform" | "duration_s" | "saved" | "bulletin" | "bulletin_points" | "bulletin_language" | "localization_status" | "summary" | "bulletin_overview" | "bulletin_intro_ready">;
 
 export interface BulletinFeed {
   items: BulletinCardItem[];
@@ -1137,6 +1149,7 @@ export const api = {
     return req<BulletinFeed>(`/api/bulletin/feed?${sp}`);
   },
   getBulletin: (id: number) => req<BulletinItem>(`/api/bulletin/${id}`),
+  prepareBulletin: (id: number) => req<LocalizedBulletin>(`/api/items/${id}/bulletin`, { method: "POST" }),
   prepareReadingSummary: (id: number) => req<ReadingSummaryResult>(`/api/bulletin/${id}/reading-summary`, { method: "POST" }),
   runResearch: () =>
     req<{ ok: boolean; created: number; generated_at: string }>("/api/research/run", { method: "POST" }),

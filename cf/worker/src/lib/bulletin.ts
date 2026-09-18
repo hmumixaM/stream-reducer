@@ -31,22 +31,22 @@ export async function enqueueBulletinTranslations(
   if (!BULLETIN_LANGUAGES.has(lang)) return 0;
   const ids = [...new Set(itemIds.filter((id) => Number.isFinite(id) && id > 0))];
   let enqueued = 0;
-  for (let offset = 0; offset < ids.length; offset += 100) {
-    const batchIds = ids.slice(offset, offset + 100);
+  for (let offset = 0; offset < ids.length; offset += 99) {
+    const batchIds = ids.slice(offset, offset + 99);
     if (!batchIds.length) continue;
     const placeholders = batchIds.map(() => "?").join(",");
-    const existing = await all<{ item_id: number; status: string }>(env.DB.prepare(
-      `SELECT item_id, status FROM bulletin_translation
+    const existing = await all<{ item_id: number; status: string; headline: string; tldr: string }>(env.DB.prepare(
+      `SELECT item_id, status, headline, tldr FROM bulletin_translation
         WHERE lang = ? AND item_id IN (${placeholders})`,
     ).bind(lang, ...batchIds));
-    const byId = new Map(existing.map((row) => [row.item_id, row.status]));
-    const pending = batchIds.filter((id) => !byId.has(id) || byId.get(id) === "error");
+    const byId = new Map(existing.map((row) => [row.item_id, row]));
+    const pending = batchIds.filter((id) => !byId.has(id) || byId.get(id)?.status === "error" || (byId.get(id)?.status === "done" && (!byId.get(id)?.headline || !byId.get(id)?.tldr)));
     if (!pending.length) continue;
     await env.DB.batch(pending.map((id) => env.DB.prepare(
       `INSERT INTO bulletin_translation (item_id, lang, bulletin, status, error, updated_at)
        VALUES (?, ?, '[]', 'queued', NULL, ?)
        ON CONFLICT(item_id, lang) DO UPDATE SET status='queued', error=NULL, updated_at=excluded.updated_at
-       WHERE bulletin_translation.status = 'error'`,
+       WHERE bulletin_translation.status = 'error' OR (bulletin_translation.status='done' AND (bulletin_translation.headline='' OR bulletin_translation.tldr=''))`,
     ).bind(id, lang, isoNow())));
     try {
       await env.PIPELINE.sendBatch(pending.map((id) => ({

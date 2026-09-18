@@ -44,7 +44,7 @@ export function Preferences() {
           <div className="mt-0.5 rounded-full bg-accent p-2 text-primary"><Languages className="h-4 w-4" /></div>
           <div className="min-w-0 flex-1">
             <h2 className="font-serif text-xl font-semibold tracking-tight">Preferred bulletin language</h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">Bulletin cards and the first layer of each summary can be shown in Chinese while the detailed content stays in its original language.</p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">中文偏好会覆盖 Bulletin 的标题、副标题、概览段落和要点；详细内容保留原文语言。 Chinese applies to the complete bulletin, including its headline and overview.</p>
             <Select value={language} onChange={(event) => setLanguage(event.target.value as "auto" | "zh")} className="mt-4 max-w-sm">
               <option value="auto">Auto · keep the source language</option>
               <option value="zh">简体中文 · Chinese bulletin</option>

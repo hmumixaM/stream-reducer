@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
@@ -30,8 +30,10 @@ import {
   type Infographic,
   type ItemDetail as ItemDetailData,
   type Summary,
+  type LocalizedBulletin,
 } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
+import { dateLabel } from "@/lib/bulletin";
 import { useMe } from "@/lib/auth";
 import { Button, Card, Select, Spinner } from "@/components/ui";
 import { BackLink, ErrorState, LoadingState } from "@/components/shell";
@@ -69,12 +71,29 @@ export function ItemDetail() {
     localStorage.setItem("sr_read_mode", String(readMode));
   }, [readMode]);
 
+  const preferChinese = me.data?.user?.preferred_language === "zh";
+  const itemKey = ["item", itemId, me.data?.user?.id, preferChinese];
   const item = useQuery({
-    queryKey: ["item", itemId],
+    queryKey: itemKey,
     queryFn: () => api.getItem(itemId),
     refetchInterval: (q) =>
-      q.state.data && ["done", "error"].includes(q.state.data.status) ? false : 3000,
+      q.state.data?.localized_bulletin?.status === "processing" ? 3000 : q.state.data && ["done", "error"].includes(q.state.data.status) ? false : 3000,
   });
+  const prepareBulletin = useMutation({
+    mutationFn: (id: number) => api.prepareBulletin(id),
+    onSuccess: (localized_bulletin, id) => {
+      qc.setQueryData<ItemDetailData>(["item", id, me.data?.user?.id, preferChinese], (old) => old ? { ...old, localized_bulletin } : old);
+      qc.invalidateQueries({ queryKey: ["bulletin"] });
+    },
+  });
+  const attemptedBulletins = useRef(new Set<number>());
+  useEffect(() => {
+    const localized = item.data?.localized_bulletin;
+    if (preferChinese && item.data?.summary && !localized?.complete && localized?.status !== "processing" && !attemptedBulletins.current.has(itemId)) {
+      attemptedBulletins.current.add(itemId);
+      prepareBulletin.mutate(itemId);
+    }
+  }, [itemId, preferChinese, item.data?.summary, item.data?.localized_bulletin?.complete, item.data?.localized_bulletin?.status]);
   const articleTitle = item.data?.title?.trim() || item.data?.source_url;
 
   useEffect(() => {
@@ -181,7 +200,7 @@ export function ItemDetail() {
             <PlatformBadge platform={d.platform} />
             <StatusBadge status={d.status} />
           </div>
-          <h1 className="text-display font-semibold leading-tight">{d.title || d.source_url}</h1>
+          <h1 className="text-display font-semibold leading-tight">{preferChinese ? d.localized_bulletin?.headline || "中文简报整理中" : d.title || d.source_url}</h1>
           {d.author && <p className="mt-1 text-sm text-muted-foreground">{d.author}</p>}
         </div>
         {/* Capped so a long action row wraps instead of squeezing the title. */}
@@ -221,7 +240,7 @@ export function ItemDetail() {
               <ExternalLink className="h-4 w-4" /> <span className="hidden sm:inline">Source</span>
             </Button>
           </a>
-          <Button variant="outline" size="sm" onClick={() => window.print()} title="Save this summary as a PDF">
+          <Button variant="outline" size="sm" disabled={preferChinese && !d.localized_bulletin?.complete} onClick={() => window.print()} title="Save this summary as a PDF">
             <FileDown className="h-4 w-4" /> <span className="hidden sm:inline">Export PDF</span>
           </Button>
           <Button 
@@ -299,6 +318,10 @@ export function ItemDetail() {
           {d.summary ? (
             <SummaryView
               itemId={itemId}
+              localizedBulletin={d.localized_bulletin}
+              preferChinese={preferChinese}
+              preparingBulletin={prepareBulletin.isPending || d.localized_bulletin?.status === "processing"}
+              onPrepareBulletin={() => prepareBulletin.mutate(itemId)}
               summaryMarkdown={d.summary.markdown}
               structured={d.summary.structured}
               headline={d.headline}
@@ -428,7 +451,7 @@ export function ItemDetail() {
 
       {["done", "error"].includes(d.status) && <RelatedArticles itemId={itemId} />}
     </div>
-    <PrintSummary item={d} summary={d.summary} />
+    <PrintSummary item={d} summary={d.summary} preferChinese={preferChinese} />
     </>
   );
 }
@@ -478,21 +501,25 @@ function printDetailedMarkdown(markdown: string, structured: Record<string, unkn
     .trim();
 }
 
-function PrintSummary({ item, summary }: { item: ItemDetailData; summary: Summary | null | undefined }) {
+function PrintSummary({ item, summary, preferChinese }: { item: ItemDetailData; summary: Summary | null | undefined; preferChinese: boolean }) {
   if (!summary) return null;
   const structured = summary.structured ?? {};
-  const bulletin = summaryBulletin(structured);
+  const localized = preferChinese ? item.localized_bulletin : null;
+  const bulletin = preferChinese ? localized?.bulletin.map((point) => point.text) || [] : summaryBulletin(structured);
+  const headline = preferChinese ? localized?.headline : item.headline || item.title || item.source_url;
+  const subhead = preferChinese ? localized?.subhead : item.subhead;
+  const tldr = preferChinese ? localized?.tldr : typeof structured.tldr === "string" ? structured.tldr : "";
   const detailedMarkdown = printDetailedMarkdown(summary.markdown, structured, bulletin.length > 0);
   return (
     <article className="print-summary">
       <p className="print-kicker">STREAM-REDUCE · BULLETIN</p>
-      <h1>{item.headline || item.title || item.source_url}</h1>
-      {item.subhead && <p className="print-dek">{item.subhead}</p>}
-      <p className="print-meta">{item.author || "Unknown source"}{item.published_at ? ` · ${formatDate(item.published_at)}` : ""}</p>
-      {typeof structured.tldr === "string" && structured.tldr && <p className="print-lead">{structured.tldr}</p>}
+      <h1>{headline}</h1>
+      {subhead && <p className="print-dek">{subhead}</p>}
+      <p className="print-meta">{item.author || "Unknown source"}{item.published_at ? ` · ${preferChinese ? dateLabel(item.published_at, true) : formatDate(item.published_at)}` : ""}</p>
+      {tldr && <p className="print-lead">{tldr}</p>}
       {bulletin.length > 0 && <ul className="print-bulletin">{bulletin.map((point) => <li key={point}>{point}</li>)}</ul>}
       {detailedMarkdown && <div className="print-detailed">
-        <h2>Detailed brief</h2>
+        <h2>{preferChinese ? "详细内容 · 原文" : "Detailed brief"}</h2>
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{detailedMarkdown}</ReactMarkdown>
       </div>}
       <p className="print-source">Source: {item.source_url}</p>
@@ -533,6 +560,10 @@ function SummaryView({
   itemId,
   summaryMarkdown,
   structured,
+  localizedBulletin,
+  preferChinese,
+  preparingBulletin,
+  onPrepareBulletin,
   headline,
   subhead,
   itemTitle,
@@ -549,6 +580,10 @@ function SummaryView({
 }: {
   itemId: number;
   summaryMarkdown: string;
+  localizedBulletin?: LocalizedBulletin | null;
+  preferChinese: boolean;
+  preparingBulletin: boolean;
+  onPrepareBulletin: () => void;
   structured: Record<string, unknown>;
   headline?: string | null;
   subhead?: string | null;
@@ -606,9 +641,11 @@ function SummaryView({
     }
   };
 
-  const bulletin = summaryBulletin(structured);
-  const tldr = typeof structured.tldr === "string" ? structured.tldr : "";
-  const displayHeadline = headline || itemTitle;
+  const chineseBulletin = preferChinese && summaryMode === "bulletin";
+  const bulletin = chineseBulletin ? localizedBulletin?.bulletin.map((point) => point.text) || [] : summaryBulletin(structured);
+  const tldr = chineseBulletin ? localizedBulletin?.tldr || "" : typeof structured.tldr === "string" ? structured.tldr : "";
+  const displayHeadline = chineseBulletin ? localizedBulletin?.headline || "中文简报整理中" : headline || itemTitle;
+  const displaySubhead = chineseBulletin ? localizedBulletin?.subhead || "" : subhead;
 
   return (
     <Card className={cn("summary-paper", readMode ? "border-none bg-transparent shadow-none" : "p-6")}>
@@ -617,25 +654,29 @@ function SummaryView({
           <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
             <span className="h-1.5 w-1.5 rounded-full bg-primary" />
             {summaryMode === "bulletin" ? "Bulletin" : "Full brief"}
-            {publishedAt && <span className="font-normal tracking-normal">· {formatDate(publishedAt)}</span>}
+            {publishedAt && <span className="font-normal tracking-normal">· {preferChinese ? dateLabel(publishedAt, true) : formatDate(publishedAt)}</span>}
           </div>
           <h2 className="font-serif text-2xl font-semibold leading-tight tracking-tight">{displayHeadline}</h2>
-          {subhead && <p className="mt-2 max-w-2xl font-serif text-base italic leading-6 text-muted-foreground">{subhead}</p>}
+          {displaySubhead && <p className="mt-2 max-w-2xl font-serif text-base italic leading-6 text-muted-foreground">{displaySubhead}</p>}
         </div>
         <div className="flex shrink-0 rounded-full border border-border p-0.5 text-xs">
           <button type="button" onClick={() => setSummaryMode("bulletin")} className={cn("rounded-full px-3 py-1.5 transition-colors", summaryMode === "bulletin" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>Bulletin</button>
-          <button type="button" onClick={() => setSummaryMode("detailed")} className={cn("rounded-full px-3 py-1.5 transition-colors", summaryMode === "detailed" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>Detailed</button>
+          <button type="button" onClick={() => setSummaryMode("detailed")} className={cn("rounded-full px-3 py-1.5 transition-colors", summaryMode === "detailed" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>{preferChinese ? "详细内容 · 原文" : "Detailed"}</button>
         </div>
       </div>
       {summaryMode === "bulletin" && (
-        <div className="mb-6 space-y-4">
+        <div className="mb-6 space-y-4" lang={chineseBulletin ? "zh-CN" : undefined}>
+          {chineseBulletin && !localizedBulletin?.complete && <div className="rounded-md border border-border p-4 text-sm text-muted-foreground" role="status">
+            {preparingBulletin ? "正在补齐中文标题与概览…" : "中文概览暂未就绪，已翻译的要点仍可阅读。"}
+            {!preparingBulletin && <Button variant="outline" size="sm" className="ml-3" onClick={onPrepareBulletin}>重试中文简报</Button>}
+          </div>}
           {tldr && <p className="max-w-3xl font-serif text-lg leading-8 text-foreground/90">{tldr}</p>}
           {bulletin.length > 0 ? (
             <ul className="space-y-3 border-l border-primary/40 pl-5">
               {bulletin.map((point) => <li key={point} className="relative font-serif text-base leading-7 text-foreground/90 before:absolute before:-left-[1.35rem] before:top-[0.75rem] before:h-1.5 before:w-1.5 before:rounded-full before:bg-primary/70">{point}</li>)}
             </ul>
-          ) : <p className="text-sm text-muted-foreground">Switch to Detailed to read the full brief.</p>}
-          <a href={sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">Read original source <ExternalLink className="h-3 w-3" /></a>
+          ) : <p className="text-sm text-muted-foreground">{preferChinese ? "可切换到“详细内容”阅读原文。" : "Switch to Detailed to read the full brief."}</p>}
+          <a href={sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">{preferChinese ? "查看原始来源" : "Read original source"} <ExternalLink className="h-3 w-3" /></a>
         </div>
       )}
       {summaryMode === "detailed" && <div className="mb-4 flex flex-wrap items-center gap-1.5 border-b border-border pb-3">

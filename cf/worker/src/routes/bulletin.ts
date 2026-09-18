@@ -14,6 +14,8 @@ type BulletinRow = {
   published_at: string | null; created_at: string; sort_date: number; saved: number;
   summary_structured: string | null; summary_markdown?: string | null;
   localized_bulletin: string | null; localized_bulletin_status: string | null;
+  localized_headline?: string | null; localized_subhead?: string | null; localized_tldr?: string | null;
+  localized_updated_at?: string | null;
 };
 
 export function parseObject(value: string | null): Record<string, unknown> {
@@ -34,26 +36,31 @@ export function serializeBulletin(row: BulletinRow, language: string, detail = f
   const structured = parseObject(row.summary_structured);
   let points = parsePoints(structured.bulletin);
   let localized = false;
-  if (language === "zh" && row.localized_bulletin_status === "done") {
+  if (language === "zh" && row.localized_bulletin) {
     try {
       const translated = parsePoints(JSON.parse(row.localized_bulletin || "[]"));
       if (translated.length) { points = translated; localized = true; }
-    } catch { /* Show available source content if a historical translation is corrupt. */ }
+    } catch { /* Leave the Chinese edition pending if a historical translation is corrupt. */ }
   }
+  const localizedIntro = localized && Boolean(row.localized_headline?.trim() && row.localized_tldr?.trim());
+  const localizationStatus = row.localized_bulletin_status === "processing" && row.localized_updated_at && Date.parse(row.localized_updated_at) < Date.now() - 120_000 ? "error" : row.localized_bulletin_status;
   const keyPoints = parsePoints(structured.key_points);
-  if (!points.length) points = keyPoints.slice(0, 4);
+  if (language === "zh" && !localized) points = [];
+  else if (!points.length) points = keyPoints.slice(0, 4);
   const base = {
-    id: row.id, title: row.headline || row.title || row.source_url,
+    id: row.id, title: language === "zh" ? (localizedIntro ? row.localized_headline! : "中文简报整理中") : row.headline || row.title || row.source_url,
     source_title: row.title || row.headline || row.source_url,
-    subhead: row.subhead, author: row.author, platform: row.platform,
+    subhead: language === "zh" ? (localizedIntro ? row.localized_subhead || "" : "") : row.subhead, author: row.author, platform: row.platform,
     source_url: row.source_url, duration_s: row.duration_s, published_at: row.published_at,
     created_at: row.created_at, saved: Boolean(row.saved),
     bulletin: points.slice(0, 5).map((point) => point.text),
     bulletin_points: points.slice(0, 5),
     bulletin_language: localized ? "zh" : "original",
-    localization_status: language === "zh" ? (localized ? "done" : row.localized_bulletin_status === "done" ? "error" : row.localized_bulletin_status || "missing") : "original",
+    bulletin_overview: language === "zh" ? (localizedIntro ? row.localized_tldr! : "") : text(structured.tldr),
+    bulletin_intro_ready: language !== "zh" || localizedIntro,
+    localization_status: language === "zh" ? (localizedIntro ? "done" : localizationStatus === "done" ? "missing" : localizationStatus || "missing") : "original",
     // Used only for historical content without bulletin points; no duplicate lead on cards.
-    summary: points.length ? "" : text(structured.tldr) || text(structured.background),
+    summary: points.length ? "" : language === "zh" ? (localizedIntro ? row.localized_tldr || "" : "") : text(structured.tldr) || text(structured.background),
   };
   if (!detail) return base;
   return {
@@ -82,7 +89,9 @@ const accessible = `FROM item i JOIN summary s ON s.item_id=i.id
 const metadata = `i.id, i.title, i.headline, i.subhead, i.author, i.source_url, i.platform,
   i.duration_s, i.published_at, i.created_at, (ui.id IS NOT NULL) AS saved,
   COALESCE(julianday(i.published_at),julianday(i.created_at),0) AS sort_date,
-  bt.bulletin AS localized_bulletin, bt.status AS localized_bulletin_status`;
+  bt.bulletin AS localized_bulletin, bt.status AS localized_bulletin_status,
+  bt.headline AS localized_headline, bt.subhead AS localized_subhead, bt.tldr AS localized_tldr,
+  bt.updated_at AS localized_updated_at`;
 const sortDate = "COALESCE(julianday(i.published_at),julianday(i.created_at),0)";
 
 bulletinRoutes.get("/feed", async (c) => {

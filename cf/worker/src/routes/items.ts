@@ -8,7 +8,7 @@ import { splitUrls, nonItemUrlError } from "../lib/url";
 import { readJson } from "../lib/request";
 import { includeSummaryDescription } from "../lib/summaryDescription";
 import { isInfographicContentReady } from "../lib/autoInfographic";
-import { parseBulletin } from "../lib/bulletin";
+import { readBulletinTranslation, translateBulletinEdition, type BulletinTranslationRow } from "../lib/bulletinTranslation";
 import {
   LIBRARY_SORT_COLUMNS,
   SORT_COLUMNS,
@@ -272,6 +272,19 @@ itemsRoutes.post("/library", requireAuth, async (c) => {
   return c.json(created);
 });
 
+// Prepare the short Chinese reading layer independently of the full summary.
+itemsRoutes.post("/:id/bulletin", requireAuth, async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id) || id <= 0) return c.json({ error: "Invalid item" }, 400);
+  const source = await first<{ id: number }>(c.env.DB.prepare("SELECT id FROM item WHERE id=? AND status='done'").bind(id));
+  if (!source) return c.json({ error: "item not found" }, 404);
+  try { return c.json(await translateBulletinEdition(c.env, id)); }
+  catch (error) {
+    console.error("bulletin localization failed", id, String(error));
+    return c.json({ error: "Chinese bulletin could not be prepared. Please retry." }, 503);
+  }
+});
+
 // Item detail: global content + this user's comments/highlights + user_item.
 // Public: anonymous visitors get the global content with empty personal state.
 itemsRoutes.get("/:id", async (c) => {
@@ -319,20 +332,14 @@ itemsRoutes.get("/:id", async (c) => {
         item.source_url,
       )
     : null;
-  if (summaryContent && user?.preferred_language === "zh") {
-    const localized = await first<{ bulletin: string; status: string }>(c.env.DB.prepare(
-      "SELECT bulletin, status FROM bulletin_translation WHERE item_id = ? AND lang = 'zh'",
-    ).bind(id));
-    if (localized?.status === "done") {
-      summaryContent.structured = {
-        ...summaryContent.structured,
-        bulletin: parseBulletin(localized.bulletin),
-      };
-    }
-  }
+  const localizedBulletin = summaryContent && user?.preferred_language === "zh"
+    ? readBulletinTranslation(await first<BulletinTranslationRow>(c.env.DB.prepare(
+      "SELECT * FROM bulletin_translation WHERE item_id=? AND lang='zh'",
+    ).bind(id))) : null;
 
   return c.json({
     ...toItemRead(item, ui, { is_interested: interested != null }),
+    localized_bulletin: localizedBulletin,
     summary: summaryContent
       ? { ...summary, ...summaryContent }
       : null,

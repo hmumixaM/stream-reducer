@@ -91,6 +91,12 @@
     @page { size: A4; margin: 18mm 16mm 20mm; }
     body { background: #fff; color: #1f1d1a; font-family: Georgia, "Times New Roman", serif; }
     .screen-only, aside, header, nav { display: none !important; }
+    body:has(.print-summary) #root, body:has(.print-summary) #root > div,
+    body:has(.print-summary) main, body:has(.print-summary) main > div {
+      display: block !important; width: 100% !important; max-width: none !important;
+      height: auto !important; min-height: 0 !important; padding: 0 !important;
+      margin: 0 !important; overflow: visible !important;
+    }
     .print-summary { display: block; max-width: 760px; margin: 0 auto; font-family: Georgia, "Times New Roman", serif; }
     .print-summary h1 { margin: 0 0 8pt; font-size: 25pt; line-height: 1.08; letter-spacing: -0.02em; }
     .print-kicker { margin: 0 0 14pt; color: #8d5f50; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 8pt; font-weight: 700; letter-spacing: .18em; }
@@ -103,6 +109,7 @@
     .print-detailed { border-top: 1pt solid #ddd4c8; padding-top: 16pt; font-size: 10.5pt; line-height: 1.55; }
     .print-detailed h2 { margin: 18pt 0 6pt; font-size: 14pt; }
     .print-detailed h3 { margin: 14pt 0 5pt; font-size: 11.5pt; }
+    .print-detailed h2, .print-detailed h3 { break-after: avoid; }
     .print-detailed p { margin: 0 0 8pt; }
     .print-detailed ul, .print-detailed ol { margin: 5pt 0 10pt; padding-left: 18pt; }
     .print-detailed blockquote { margin: 8pt 0; border-left: 2pt solid #b78778; padding-left: 10pt; color: #625c55; font-style: italic; }

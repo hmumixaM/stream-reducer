@@ -43,12 +43,23 @@ export function BulletinDetail() {
   const queryKey = ["bulletin", itemId, me.data?.user?.id, zh];
   const bulletin = useQuery({
     queryKey, queryFn: () => api.getBulletin(itemId), enabled: Number.isInteger(itemId) && itemId > 0,
-    refetchInterval: (query) => query.state.data?.reading_summary.status === "processing" ? 3000 : false,
+    refetchInterval: (query) => query.state.data?.reading_summary.status === "processing" || (zh && query.state.data?.localization_status === "processing") ? 3000 : false,
   });
   const preparation = useMutation({
     mutationFn: (id: number) => api.prepareReadingSummary(id),
     onSuccess: (result, id) => qc.setQueryData<BulletinItem>(["bulletin", id, me.data?.user?.id, zh], (old) => old ? { ...old, reading_summary: result } : old),
   });
+  const localization = useMutation({
+    mutationFn: (id: number) => api.prepareBulletin(id),
+    onSuccess: (_result, id) => qc.invalidateQueries({ queryKey: ["bulletin", id] }),
+  });
+  const localizedAttempts = useRef(new Set<number>());
+  useEffect(() => {
+    if (zh && bulletin.data && !bulletin.data.bulletin_intro_ready && bulletin.data.localization_status !== "processing" && !localizedAttempts.current.has(itemId)) {
+      localizedAttempts.current.add(itemId);
+      localization.mutate(itemId);
+    }
+  }, [itemId, zh, bulletin.data?.bulletin_intro_ready, bulletin.data?.localization_status]);
   const attempted = useRef(new Set<number>());
   useEffect(() => {
     if (view === "summary" && bulletin.data?.reading_summary.status === "missing" && !attempted.current.has(itemId)) {
@@ -89,7 +100,7 @@ export function BulletinDetail() {
     <div className="reader-screen screen-only">
       <div className="mb-7 flex flex-wrap items-center justify-between gap-3">
         <Link to="/bulletin" className="desk-utility"><ArrowLeft size={15} />{zh ? "返回 Bulletin" : "Back to Bulletin"}</Link>
-        <div className="flex items-center gap-2"><Select value={printFull ? "full" : "summary"} onChange={(event) => setPrintFull(event.target.value === "full")} aria-label={zh ? "PDF 内容" : "PDF contents"} className="w-auto bg-transparent text-xs"><option value="summary">{zh ? "简报 + 精炼概括" : "Bulletin + summary"}</option><option value="full">{zh ? "包含完整逐段内容" : "Include deep dive"}</option></Select><Button variant="outline" aria-label={zh ? "导出 PDF" : "Export PDF"} disabled={printing || (!summary && !printFull)} onClick={exportPdf}>{printing ? <RefreshCw size={14} className="animate-spin" /> : <FileDown size={14} />}<span className="hidden sm:inline">{zh ? "导出 PDF" : "Export PDF"}</span></Button></div>
+        <div className="flex items-center gap-2"><Select value={printFull ? "full" : "summary"} onChange={(event) => setPrintFull(event.target.value === "full")} aria-label={zh ? "PDF 内容" : "PDF contents"} className="w-auto bg-transparent text-xs"><option value="summary">{zh ? "简报 + 精炼概括" : "Bulletin + summary"}</option><option value="full">{zh ? "包含完整逐段内容" : "Include deep dive"}</option></Select><Button variant="outline" aria-label={zh ? "导出 PDF" : "Export PDF"} disabled={printing || (zh && !item.bulletin_intro_ready) || (!summary && !printFull)} onClick={exportPdf}>{printing ? <RefreshCw size={14} className="animate-spin" /> : <FileDown size={14} />}<span className="hidden sm:inline">{zh ? "导出 PDF" : "Export PDF"}</span></Button></div>
       </div>
       {printError && <p role="alert" className="mb-4 text-sm text-muted-foreground">{zh ? "完整内容尚未加载完毕，请稍后重试导出。" : "The full edition is still loading. Please try exporting again in a moment."}</p>}
       <div className="reader-heading">
@@ -101,8 +112,10 @@ export function BulletinDetail() {
         <div className="min-w-0">
           <section className="reader-bulletin" aria-label="Bulletin">
             <div className="mb-4 flex items-center justify-between"><p className="desk-eyebrow text-primary">BULLETIN</p><span className="font-mono text-[10px] text-muted-foreground">{item.bulletin_language === "zh" ? "中文" : (zh ? "原文" : "AT A GLANCE")}</span></div>
+            {zh && !item.bulletin_intro_ready && <div className="mb-4 text-sm text-muted-foreground" role="status">{localization.isPending || item.localization_status === "processing" ? "正在补齐中文标题与概览…" : <button onClick={() => localization.mutate(itemId)} className="underline">中文概览暂未就绪，点击重试</button>}</div>}
+            {item.bulletin_overview && <p className="mb-5 text-sm leading-7">{item.bulletin_overview}</p>}
             <ul>{item.bulletin_points.map((point, index) => <li key={index}>{point.text}{point.timestamp !== null && <a href={sourceAt(item.source_url, point.timestamp)} target="_blank" rel="noreferrer" className="ml-2 whitespace-nowrap font-mono text-[10px] text-primary hover:underline">{timestampLabel(point.timestamp)}</a>}</li>)}</ul>
-            {!item.bulletin_points.length && <p className="text-sm leading-7">{item.summary || item.tldr}</p>}
+            {!zh && !item.bulletin_points.length && !item.bulletin_overview && <p className="text-sm leading-7">{item.summary || item.tldr}</p>}
           </section>
           <div className="reader-tabs" role="tablist" aria-label={zh ? "阅读层次" : "Reading views"}>{tabs.map((tab) => <button key={tab.value} id={`tab-${tab.value}`} role="tab" aria-selected={view === tab.value} aria-controls={`panel-${tab.value}`} tabIndex={view === tab.value ? 0 : -1} onKeyDown={(event) => {
             const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
@@ -138,6 +151,7 @@ export function BulletinDetail() {
     </div>
     <article className="reading-print">
       <p className="print-kicker">STREAM-REDUCE / THE BULLETIN</p><h1>{item.title}</h1><p className="print-meta">{item.author} · {dateLabel(item.published_at || item.created_at, zh)}</p>
+      {item.bulletin_overview && <p className="print-lead">{item.bulletin_overview}</p>}
       <ul className="print-bulletin">{item.bulletin.map((point, index) => <li key={index}>{point}</li>)}</ul>
       {summary && <div className="print-detailed"><SummaryBody summary={summary} source={item.source_url} zh={zh} print /></div>}
       {printFull && <div className="print-detailed print-full-notes"><h2>{zh ? "完整逐段内容" : "Full notes"}</h2><Suspense fallback={<p>{zh ? "正在加载完整内容…" : "Loading full notes…"}</p>}><FullMarkdown markdown={item.walkthrough || item.markdown} highlights={[]} source="summary" readOnly onCreate={noOp} onUpdateNote={noOp} onDelete={noOp} className="prose-sr reader-prose" /></Suspense></div>}

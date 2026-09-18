@@ -13,6 +13,7 @@ import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
 import { isTransientCapacity } from "./transient";
 import { enqueuePreferredBulletinTranslation } from "../lib/bulletin";
+import { translateBulletinEdition } from "../lib/bulletinTranslation";
 import { generateReadingSummary, type ReadingSource } from "../lib/readingSummary";
 
 export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAttempt = 1): Promise<void> {
@@ -33,7 +34,8 @@ export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAtte
     case "translate":
       return translateItem(env, msg.item_id, msg.lang);
     case "bulletin_translate":
-      return translateBulletin(env, msg.item_id, msg.lang);
+      await translateBulletinEdition(env, msg.item_id, msg.lang);
+      return;
     case "reading_summary": {
       const source = await first<ReadingSource>(env.DB.prepare(
         `SELECT i.id, i.title, i.author, i.source_url, s.structured AS summary_structured, s.markdown AS summary_markdown
@@ -279,50 +281,6 @@ async function translateItem(env: Env, itemId: number, lang: string): Promise<vo
   } catch (err) {
     await fail(err instanceof Error ? `${err.name}: ${err.message}` : String(err));
     throw err;
-  }
-}
-
-// Generate a target-language bulletin only. The source summary and its detailed
-// walkthrough stay untouched so a user's language preference never rewrites the
-// original research record.
-async function translateBulletin(env: Env, itemId: number, lang: string): Promise<void> {
-  const item = await first<ItemRow>(env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(itemId));
-  const summary = await first<{ structured: string }>(env.DB.prepare("SELECT structured FROM summary WHERE item_id = ?").bind(itemId));
-  if (!item || !summary) return;
-  const fail = async (message: string) => {
-    await env.DB.prepare(
-      "UPDATE bulletin_translation SET status='error', error=?, updated_at=? WHERE item_id=? AND lang=?",
-    ).bind(message.slice(0, 2000), isoNow(), itemId, lang).run();
-  };
-  try {
-    const existing = JSON.parse(summary.structured || "{}") as JsonObject;
-    const result = await runPipeline(env, {
-      item_id: itemId,
-      source_url: item.source_url,
-      platform: item.platform,
-      mode: "bulletin_translate",
-      target_lang: lang,
-      summary: existing,
-      item: {
-        title: item.title,
-        author: item.author,
-        description: item.description,
-        duration_s: item.duration_s,
-        published_at: item.published_at,
-        view_count: item.view_count,
-        like_count: item.like_count,
-      },
-    });
-    if (result.error || !result.summary) throw new Error(result.error || "no bulletin produced");
-    const bulletin = Array.isArray(result.summary.structured.bulletin) ? result.summary.structured.bulletin : [];
-    await env.DB.prepare(
-      `INSERT INTO bulletin_translation (item_id, lang, bulletin, status, updated_at)
-       VALUES (?, ?, ?, 'done', ?)
-       ON CONFLICT(item_id, lang) DO UPDATE SET bulletin=excluded.bulletin, status='done', error=NULL, updated_at=excluded.updated_at`,
-    ).bind(itemId, lang, JSON.stringify(bulletin), isoNow()).run();
-  } catch (error) {
-    await fail(error instanceof Error ? `${error.name}: ${error.message}` : String(error));
-    throw error;
   }
 }
 
