@@ -20,6 +20,7 @@ import {
   Menu,
   LogOut,
   Shield,
+  Radar,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/auth";
@@ -48,6 +49,7 @@ const NAV: {
   admin?: boolean;
 }[] = [
   { to: "/", label: "Timeline", icon: Clock, section: "main", end: true },
+  { to: "/research", label: "Research", icon: Radar, section: "main" },
   { to: "/subscriptions", label: "Channels", icon: Rss, section: "main" },
   { to: "/library", label: "Saved", icon: Bookmark, section: "main" },
   { to: "/browse", label: "Browse", icon: Compass, section: "discover" },

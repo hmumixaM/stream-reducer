@@ -107,6 +107,49 @@ export interface ChannelItemRow {
   discovered_at: string;
 }
 
+export interface ResearchCoverageRow {
+  id: number;
+  user_id: number;
+  label: string;
+  normalized: string;
+  kind: string;
+  created_at: string;
+}
+
+export interface ResearchAgentRow {
+  id: number;
+  user_id: number;
+  name: string;
+  kind: string;
+  prompt: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearchBriefRow {
+  id: number;
+  user_id: number;
+  agent_id: number | null;
+  coverage_id: number | null;
+  item_id: number;
+  brief_type: string;
+  title: string;
+  summary: string;
+  key_points: string;
+  matched_text: string;
+  created_at: string;
+}
+
+export interface ResearchAskRow {
+  id: number;
+  user_id: number;
+  question: string;
+  answer: string;
+  sources: string;
+  created_at: string;
+}
+
 // --- Thin query helpers ---------------------------------------------------
 
 export async function first<T>(stmt: D1PreparedStatement): Promise<T | null> {

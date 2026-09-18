@@ -27,6 +27,13 @@ export function Login() {
               We sent a sign-in link to <span className="font-medium">{email}</span>. It
               expires in 15 minutes. Open it on this device to continue.
             </p>
+            <button
+              type="button"
+              className="pt-2 text-sm text-primary hover:underline"
+              onClick={() => mutation.reset()}
+            >
+              Use a different email
+            </button>
           </div>
         ) : (
           <form
@@ -41,6 +48,9 @@ export function Login() {
               <p className="text-sm text-muted-foreground">
                 Enter your email and we'll send you a magic sign-in link. No password
                 needed.
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                The link expires in 15 minutes and can be opened on this device.
               </p>
             </div>
             {linkError && (
@@ -61,7 +71,9 @@ export function Login() {
               {mutation.isPending ? <Spinner /> : "Send magic link"}
             </Button>
             {mutation.isError && (
-              <p className="text-sm text-danger">{mutation.error.message}</p>
+              <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">
+                {mutation.error.message}
+              </p>
             )}
           </form>
         )}

@@ -18,6 +18,7 @@ import { adminRoutes } from "./routes/admin";
 import { oauthRoutes } from "./routes/oauth";
 import { collectionRoutes } from "./routes/collections";
 import { mcpHandler } from "./routes/mcp";
+import { generateResearchForAllUsers, researchRoutes } from "./routes/research";
 import { handleMessage, failStrandedItems } from "./pipeline/consumer";
 import { pollDueSubscriptions } from "./pipeline/subscriptions";
 import { refreshBilibiliCookie } from "./lib/biliRefresh";
@@ -35,6 +36,7 @@ app.route("/api/items/groups", folderRoutes);
 app.route("/api", annotationRoutes);
 app.route("/api/items", itemsRoutes);
 app.route("/api/collections", collectionRoutes);
+app.route("/api/research", researchRoutes);
 app.route("/api/subscriptions", subscriptionRoutes);
 app.route("/api/channels", channelRoutes);
 app.route("/api/timeline", timelineRoutes);
@@ -108,6 +110,11 @@ export default {
       // that can no longer be auto-reclaimed, so they don't hang forever.
       await failStrandedItems(env);
       await pollDueSubscriptions(env);
+      try {
+        await generateResearchForAllUsers(env);
+      } catch (err) {
+        console.error("research brief generation failed", err);
+      }
     }
     // Safety pump: kick the self-draining pipeline in case the continuation
     // chain ever stopped (e.g. a Worker eviction). A no-op when nothing claimable.

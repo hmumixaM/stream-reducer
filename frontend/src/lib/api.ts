@@ -366,6 +366,60 @@ export interface TimelineItem extends ChannelItemRead {
   channel_title?: string | null;
 }
 
+export interface ResearchCoverage {
+  id: number;
+  label: string;
+  kind: "name" | "ticker";
+  created_at: string;
+}
+
+export interface ResearchAgent {
+  id: number;
+  name: string;
+  kind: "theme" | "custom";
+  prompt: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearchBrief {
+  id: number;
+  item_id: number;
+  title: string;
+  summary: string;
+  key_points: string[];
+  brief_type: string;
+  matched_text: string;
+  created_at: string;
+  source_url: string | null;
+  item_title: string | null;
+  item_published_at: string | null;
+  agent_name: string | null;
+  coverage_label: string | null;
+}
+
+export interface ResearchDossier {
+  coverage: ResearchCoverage;
+  mention_count: number;
+  mentions: ResearchBrief[];
+}
+
+export interface ResearchSource {
+  item_id: number;
+  title: string;
+  source_url: string;
+  published_at: string | null;
+}
+
+export interface ResearchAsk {
+  id: number;
+  question: string;
+  answer: string;
+  sources: ResearchSource[];
+  created_at: string;
+}
+
 export interface ListTimelineParams {
   /** Show only what this followed channel published. */
   channelId?: number;
@@ -965,6 +1019,41 @@ export const api = {
     req<SubscriptionAnnotation[]>(`/api/subscriptions/${id}/annotations`),
   deleteSubscription: (id: number) =>
     req<void>(`/api/subscriptions/${id}`, { method: "DELETE" }),
+
+  // --- research agents ---
+  listResearchCoverage: () => req<ResearchCoverage[]>("/api/research/coverage"),
+  addResearchCoverage: (label: string, kind: "name" | "ticker" = "name") =>
+    req<ResearchCoverage>("/api/research/coverage", {
+      method: "POST",
+      body: JSON.stringify({ label, kind }),
+    }),
+  deleteResearchCoverage: (id: number) =>
+    req<{ ok: boolean }>(`/api/research/coverage/${id}`, { method: "DELETE" }),
+  listResearchAgents: () => req<ResearchAgent[]>("/api/research/agents"),
+  addResearchAgent: (payload: { name: string; kind: "theme" | "custom"; prompt: string }) =>
+    req<ResearchAgent>("/api/research/agents", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateResearchAgent: (id: number, payload: Partial<Pick<ResearchAgent, "name" | "prompt" | "enabled">>) =>
+    req<ResearchAgent>(`/api/research/agents/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteResearchAgent: (id: number) =>
+    req<{ ok: boolean }>(`/api/research/agents/${id}`, { method: "DELETE" }),
+  listResearchBriefs: (limit = 40) =>
+    req<ResearchBrief[]>(`/api/research/feed?limit=${Math.min(Math.max(limit, 1), 100)}`),
+  runResearch: () =>
+    req<{ ok: boolean; created: number; generated_at: string }>("/api/research/run", { method: "POST" }),
+  askResearch: (question: string) =>
+    req<ResearchAsk>("/api/research/ask", {
+      method: "POST",
+      body: JSON.stringify({ question }),
+    }),
+  listResearchAsks: () => req<ResearchAsk[]>("/api/research/asks"),
+  getResearchDossier: (slug: string) =>
+    req<ResearchDossier>(`/api/research/dossiers/${encodeURIComponent(slug)}`),
 
   search: (params: SearchParams) => {
     if (MIRROR) return mirrorSearch(params);

@@ -43,6 +43,8 @@ const Queue = named(() => import("@/pages/Queue"), "Queue");
 const Subscriptions = named(() => import("@/pages/Subscriptions"), "Subscriptions");
 const ChannelDetail = named(() => import("@/pages/ChannelDetail"), "ChannelDetail");
 const Stats = named(() => import("@/pages/Stats"), "Stats");
+const Research = named(() => import("@/pages/Research"), "Research");
+const Dossier = named(() => import("@/pages/Dossier"), "Dossier");
 const Settings = named(() => import("@/pages/Settings"), "Settings");
 const Admin = named(() => import("@/pages/Admin"), "Admin");
 
@@ -168,6 +170,8 @@ const router = createBrowserRouter([
       { path: "subscriptions", element: <Subscriptions /> },
       { path: "channels/:id", element: <ChannelDetail /> },
       // Personal pages require a session.
+      { path: "research", element: <RequireAuth><Research /></RequireAuth> },
+      { path: "dossiers/:slug", element: <RequireAuth><Dossier /></RequireAuth> },
       { path: "library", element: <RequireAuth><Library /></RequireAuth> },
       { path: "search", element: <RequireAuth><Search /></RequireAuth> },
       { path: "graph", element: <RequireAuth><Graph /></RequireAuth> },
