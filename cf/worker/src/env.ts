@@ -95,5 +95,6 @@ export type PipelineMessage =
   | { kind: "infographic"; item_id: number }
   | { kind: "translate"; item_id: number; lang: string }
   | { kind: "bulletin_translate"; item_id: number; lang: string }
+  | { kind: "reading_summary"; item_id: number }
   | { kind: "poll"; subscription_id: number }
   | { kind: "graph_build"; force?: boolean };

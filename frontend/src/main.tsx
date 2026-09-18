@@ -149,14 +149,14 @@ function PublicHome() {
   );
 }
 
-// Signed-in users land on their subscription timeline; the read-only mirror has
+// Signed-in users land on their reading bulletin; the read-only mirror has
 // no follows so it stays on the mirrored library; anonymous visitors get the
 // public front page.
 function Home() {
   const me = useMe();
   if (me.isLoading) return <FullScreenSpinner />;
   if (MIRROR) return <Library />;
-  return me.data?.user ? <Timeline /> : <PublicHome />;
+  return me.data?.user ? <Navigate to="/bulletin" replace /> : <PublicHome />;
 }
 
 const router = createBrowserRouter([
@@ -178,6 +178,7 @@ const router = createBrowserRouter([
       { path: "dossiers/:slug", element: <RequireAuth><Dossier /></RequireAuth> },
       { path: "research/briefs/:id", element: <RequireAuth><ResearchBrief /></RequireAuth> },
       { path: "bulletin", element: <RequireAuth><Bulletin /></RequireAuth> },
+      { path: "timeline", element: <RequireAuth><Timeline /></RequireAuth> },
       { path: "bulletin/:id", element: <RequireAuth><BulletinDetail /></RequireAuth> },
       { path: "library", element: <RequireAuth><Library /></RequireAuth> },
       { path: "search", element: <RequireAuth><Search /></RequireAuth> },
@@ -196,7 +197,7 @@ const router = createBrowserRouter([
 
 // Start the landing route's chunk alongside the session request rather than
 // after it. Which one depends on where this visitor last landed.
-(MIRROR ? Library : sessionSnapshot()?.user ? Timeline : Browse).preload();
+(MIRROR ? Library : sessionSnapshot()?.user ? Bulletin : Browse).preload();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

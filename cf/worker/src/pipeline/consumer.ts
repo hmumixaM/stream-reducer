@@ -13,6 +13,7 @@ import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
 import { isTransientCapacity } from "./transient";
 import { enqueuePreferredBulletinTranslation } from "../lib/bulletin";
+import { generateReadingSummary, type ReadingSource } from "../lib/readingSummary";
 
 export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAttempt = 1): Promise<void> {
   switch (msg.kind) {
@@ -33,6 +34,14 @@ export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAtte
       return translateItem(env, msg.item_id, msg.lang);
     case "bulletin_translate":
       return translateBulletin(env, msg.item_id, msg.lang);
+    case "reading_summary": {
+      const source = await first<ReadingSource>(env.DB.prepare(
+        `SELECT i.id, i.title, i.author, i.source_url, s.structured AS summary_structured, s.markdown AS summary_markdown
+         FROM item i JOIN summary s ON s.item_id=i.id WHERE i.id=? AND i.status='done'`,
+      ).bind(msg.item_id));
+      if (source) await generateReadingSummary(env, source);
+      return;
+    }
     case "poll":
       await pollSubscription(env, msg.subscription_id);
       return;
@@ -677,6 +686,11 @@ async function persistCompletedPipeline(env: Env, itemId: number, result: Pipeli
   await persistResultWithDiagnostics(env, itemId, result);
   await embedChunks(env, itemId);
   await markItemDone(env, itemId);
+  try {
+    await env.PIPELINE.send({ kind: "reading_summary", item_id: itemId });
+  } catch (error) {
+    console.error("reading summary enqueue failed", itemId, error);
+  }
   try {
     await enqueueAutomaticTranslations(env, itemId);
   } catch (error) {

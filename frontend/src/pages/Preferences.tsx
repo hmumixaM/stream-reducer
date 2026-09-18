@@ -19,12 +19,14 @@ export function Preferences() {
       qc.setQueryData(["bulletin-preference"], data);
       qc.invalidateQueries({ queryKey: ["me"] });
       qc.invalidateQueries({ queryKey: ["research"] });
+      qc.invalidateQueries({ queryKey: ["bulletin"] });
       qc.invalidateQueries({ queryKey: ["item"] });
     },
   });
   const backfill = useMutation({
     mutationFn: api.backfillBulletins,
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bulletin"] });
       qc.invalidateQueries({ queryKey: ["research"] });
       qc.invalidateQueries({ queryKey: ["item"] });
     },

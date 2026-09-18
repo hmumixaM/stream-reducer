@@ -1,97 +1,95 @@
+import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { ArrowUpRight, ChevronRight, ExternalLink, Newspaper, RefreshCw } from "lucide-react";
-import { Link } from "react-router-dom";
-import { api, type BulletinItem } from "@/lib/api";
-import { Badge, Button, Card } from "@/components/ui";
-import { EmptyState, ErrorState, LoadingState, PageHeader } from "@/components/shell";
-import { formatDate } from "@/lib/utils";
-
-const PAGE_SIZE = 60;
+import { ArrowDown, ArrowUpRight, Check, Clock3, ExternalLink, Newspaper, RefreshCw, Search, Settings2 } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { api, type BulletinCardItem } from "@/lib/api";
+import { useMe } from "@/lib/auth";
+import { dateLabel } from "@/lib/bulletin";
+import { cn, formatLength } from "@/lib/utils";
+import { Button, Input, Select } from "@/components/ui";
+import { EmptyState, ErrorState } from "@/components/shell";
 
 export function Bulletin() {
+  const me = useMe();
+  const zh = me.data?.user?.preferred_language === "zh";
+  const [params, setParams] = useSearchParams();
+  const q = params.get("q") || "";
+  const platform = params.get("platform") || "";
+  const saved = params.get("saved") === "true";
+  const [search, setSearch] = useState(q);
+  useEffect(() => setSearch(q), [q]);
+  useEffect(() => {
+    if (search === q) return;
+    const timer = window.setTimeout(() => {
+      setParams((previous) => { const next = new URLSearchParams(previous); if (search.trim()) next.set("q", search.trim()); else next.delete("q"); return next; }, { replace: true });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search, q, setParams]);
+  const setFilter = (name: string, value: string) => setParams((previous) => { const next = new URLSearchParams(previous); if (value) next.set(name, value); else next.delete(name); return next; }, { replace: true });
   const feed = useInfiniteQuery({
-    queryKey: ["bulletin", "feed"],
-    queryFn: ({ pageParam }) => api.listBulletins(PAGE_SIZE, pageParam),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage) => lastPage.next_offset ?? undefined,
+    queryKey: ["bulletin", "feed", me.data?.user?.id, zh, q, platform, saved],
+    queryFn: ({ pageParam }) => api.listBulletins({ cursor: pageParam, q, platform, saved }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.next_cursor ?? undefined,
+    refetchInterval: (query) => query.state.data?.pages.some((page) => page.items.some((item) => item.localization_status === "queued" || item.localization_status === "processing")) ? 30_000 : false,
   });
-  const items = feed.data?.pages.flatMap((page) => page.items) ?? [];
-
-  if (feed.isLoading) return <LoadingState label="Loading bulletin…" />;
-  if (feed.isError) return <ErrorState message="The bulletin could not be loaded." onRetry={() => feed.refetch()} />;
+  const items = useMemo(() => [...new Map((feed.data?.pages.flatMap((page) => page.items) || []).map((item) => [item.id, item])).values()], [feed.data]);
+  const groups = useMemo(() => {
+    const result = new Map<string, BulletinCardItem[]>();
+    for (const item of items) {
+      const label = dateLabel(item.published_at || item.created_at, zh);
+      result.set(label, [...(result.get(label) || []), item]);
+    }
+    return [...result];
+  }, [items, zh]);
 
   return (
-    <div className="bulletin-page mx-auto max-w-5xl">
-      <PageHeader
-        title="Bulletin"
-        subtitle="A living stream of the highest-signal points from the sources in your library. Open any entry for the full detailed summary."
-        actions={
-          <Link to="/research?view=setup">
-            <Button variant="outline"><Newspaper className="h-4 w-4" /> Configure agents</Button>
-          </Link>
-        }
-      />
+    <div className="bulletin-desk mx-auto max-w-5xl pb-14">
+      <div className="desk-masthead">
+        <div className="flex items-center justify-between gap-3">
+          <p className="desk-eyebrow"><span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" /> {zh ? "你的每日阅读" : "YOUR DAILY READING"}</p>
+          <Link to="/preferences" className="desk-utility"><Settings2 size={14} /> {zh ? "中文简报" : "Reading preferences"}</Link>
+        </div>
+        <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
+          <div><h1 className="desk-title">The Bulletin<span className="text-primary">.</span></h1><p className="mt-3 max-w-xl text-sm leading-7 text-muted-foreground">{zh ? "先读重点，再读懂来龙去脉。来自你关注和收藏的每一个来源。" : "The essential ideas from the sources you follow. A short read now, a deeper understanding when you need it."}</p></div>
+          <p className="pb-1 font-mono text-[11px] text-muted-foreground">{dateLabel(new Date().toISOString(), zh)}</p>
+        </div>
+      </div>
 
-      {items.length === 0 ? (
-        <EmptyState
-          icon={<Newspaper className="h-5 w-5" />}
-          title="Your bulletin is empty"
-          description="Add a source to your library or follow a channel. Once a summary is ready, its bulletin will appear here."
-          action={<Link to="/library"><Button>Open knowledge base</Button></Link>}
-        />
-      ) : (
-        <>
-          <div className="mb-5 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">Your signal desk</p>
-              <p className="mt-1 text-sm text-muted-foreground">{items.length} bulletin{items.length === 1 ? "" : "s"} loaded</p>
-            </div>
-            {feed.isFetching && <span className="inline-flex items-center gap-2 text-xs text-muted-foreground"><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Refreshing</span>}
-          </div>
-          <div className="relative space-y-6 before:absolute before:bottom-5 before:left-[0.45rem] before:top-5 before:w-px before:bg-border">
-            {items.map((item) => <BulletinCard key={item.id} item={item} />)}
-          </div>
-          {feed.hasNextPage && (
-            <div className="mt-8 flex justify-center">
-              <Button variant="outline" onClick={() => feed.fetchNextPage()} disabled={feed.isFetchingNextPage}>
-                {feed.isFetchingNextPage ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
-                {feed.isFetchingNextPage ? "Loading…" : "Load older bulletins"}
-              </Button>
-            </div>
-          )}
-        </>
+      <div className="desk-toolbar">
+        <div className="flex gap-1" aria-label={zh ? "内容范围" : "Content scope"}>
+          <button className={cn("desk-tab", !saved && "is-active")} onClick={() => setFilter("saved", "")}>{zh ? "全部简报" : "All bulletins"}</button>
+          <button className={cn("desk-tab", saved && "is-active")} onClick={() => setFilter("saved", "true")}>{zh ? "知识库" : "My library"}</button>
+        </div>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+          <div className="relative min-w-[150px] flex-1 sm:max-w-[240px]"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={zh ? "搜索标题或来源" : "Search title or source"} aria-label={zh ? "搜索简报" : "Search bulletins"} className="bg-transparent pl-9" /></div>
+          <Select value={platform} onChange={(event) => setFilter("platform", event.target.value)} aria-label={zh ? "平台" : "Platform"} className="w-auto max-w-[145px] bg-transparent"><option value="">{zh ? "所有平台" : "All platforms"}</option><option value="youtube">YouTube</option><option value="bilibili">Bilibili</option><option value="xiaoyuzhou">小宇宙</option><option value="apple_podcast">Apple Podcasts</option><option value="rss">RSS</option></Select>
+          <button className="desk-icon-button" onClick={() => feed.refetch()} disabled={feed.isFetching} aria-label={zh ? "刷新简报" : "Refresh bulletins"}><RefreshCw size={15} className={feed.isFetching ? "animate-spin" : ""} /></button>
+        </div>
+      </div>
+      {feed.isLoading ? <div aria-label={zh ? "加载简报" : "Loading bulletins"} className="space-y-5 py-6">{[0, 1, 2].map((key) => <div key={key} className="h-56 animate-pulse rounded-xl bg-muted/40" />)}</div> : feed.isError && !items.length ? <ErrorState message={zh ? "简报加载失败，请重试。" : "Bulletins could not be loaded."} onRetry={() => feed.refetch()} /> : !items.length ? <EmptyState icon={<Newspaper size={22} />} title={q || platform || saved ? (zh ? "没有匹配的简报" : "No matching bulletins") : (zh ? "第一份简报，从关注一个来源开始" : "Your first bulletin starts with a source")} description={zh ? "关注频道或把内容加入知识库，处理完成后会出现在这里。" : "Follow a channel or save a source. Its bulletin appears here once the summary is ready."} action={<Link to="/subscriptions"><Button variant="outline">{zh ? "浏览来源" : "Explore sources"}<ArrowUpRight size={14} /></Button></Link>} /> : (
+        <div className="pt-3">
+          {groups.map(([date, entries]) => <section key={date} className="desk-day"><div className="desk-day-label"><span>{date}</span><span className="text-muted-foreground/60">{entries.length} {zh ? "篇" : "stories"}</span></div><div className="desk-timeline">{entries.map((item) => <BulletinCard key={item.id} item={item} zh={zh} />)}</div></section>)}
+          {feed.isError && <ErrorState compact message={zh ? "未能加载更多内容，已加载的简报仍可阅读。" : "More bulletins could not be loaded. Your current stories are still available."} onRetry={() => feed.fetchNextPage()} />}
+          {feed.hasNextPage ? <div className="mt-8 flex justify-center"><Button variant="outline" onClick={() => feed.fetchNextPage()} disabled={feed.isFetchingNextPage}>{feed.isFetchingNextPage ? <RefreshCw size={14} className="animate-spin" /> : <ArrowDown size={14} />}{zh ? "更早的简报" : "Earlier bulletins"}</Button></div> : <p className="desk-end"><Check size={14} />{zh ? "已读到这份信息流的起点" : "You’ve reached the beginning"}</p>}
+        </div>
       )}
     </div>
   );
 }
 
-function BulletinCard({ item }: { item: BulletinItem }) {
-  const points = item.bulletin.length > 0 ? item.bulletin : item.key_points;
+function BulletinCard({ item, zh }: { item: BulletinCardItem; zh: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const points = expanded ? item.bulletin_points : item.bulletin_points.slice(0, 3);
+  const pending = zh && item.localization_status !== "done";
   return (
-    <div className="relative pl-6">
-      <span className="absolute left-0 top-6 z-10 h-[0.6rem] w-[0.6rem] rounded-full border-2 border-background bg-primary shadow-sm" aria-hidden="true" />
-      <Card interactive className="overflow-hidden">
-        <Link to={`/bulletin/${item.id}`} className="block p-5 sm:p-6">
-          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Badge className="bg-accent text-accent-foreground">Bulletin</Badge>
-            <span>{item.published_at ? formatDate(item.published_at) : "Recent"}</span>
-            {item.author && <span>{item.author}</span>}
-            <span className="ml-auto inline-flex items-center gap-1 text-primary">Open detail <ChevronRight className="h-3.5 w-3.5" /></span>
-          </div>
-          <h2 className="max-w-3xl font-serif text-2xl font-semibold leading-tight tracking-tight">{item.title}</h2>
-          {item.subhead && <p className="mt-2 max-w-3xl font-serif text-base italic leading-6 text-muted-foreground">{item.subhead}</p>}
-          {item.summary && <p className="mt-4 max-w-3xl border-l-2 border-primary/50 pl-3 font-serif text-base leading-7 text-foreground/85">{item.summary}</p>}
-          {points.length > 0 && (
-            <ul className="mt-5 grid gap-3 text-sm leading-6 text-foreground/85 md:grid-cols-2">
-              {points.slice(0, 4).map((point) => <li key={point} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/70" aria-hidden="true" /><span>{point}</span></li>)}
-            </ul>
-          )}
-        </Link>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/20 px-5 py-3 text-xs sm:px-6">
-          <Link to={`/bulletin/${item.id}`} className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline"><ArrowUpRight className="h-3.5 w-3.5" /> Read detailed summary</Link>
-          {item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground hover:underline"><ExternalLink className="h-3.5 w-3.5" /> Original source</a>}
-        </div>
-      </Card>
-    </div>
+    <article className="desk-story">
+      <div className="desk-story-meta"><span className="font-medium text-foreground/80">{item.author || item.platform}</span><span>·</span><span>{item.platform.replace(/_/g, " ")}</span>{item.duration_s ? <span className="ml-auto inline-flex items-center gap-1.5"><Clock3 size={12} />{formatLength(item.duration_s)}</span> : null}</div>
+      <Link to={`/bulletin/${item.id}`} className="desk-story-title"><h2>{item.title}</h2></Link>
+      {pending && <p className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">{item.localization_status === "queued" || item.localization_status === "processing" ? <><RefreshCw size={11} className="animate-spin" />中文简报准备中 · 暂显示原文</> : <Link to="/preferences" className="hover:underline">原文简报 · 在偏好设置中补齐中文</Link>}</p>}
+      {points.length ? <ul className="desk-story-points" lang={item.bulletin_language === "zh" ? "zh-CN" : undefined}>{points.map((point, i) => <li key={i}>{point.text}</li>)}</ul> : <p className="mt-4 text-sm leading-7 text-foreground/85">{item.summary}</p>}
+      {item.bulletin_points.length > 3 && <button onClick={() => setExpanded(!expanded)} className="mt-3 text-xs text-muted-foreground hover:text-primary" aria-expanded={expanded}>{expanded ? (zh ? "收起要点" : "Fewer points") : (zh ? `再看 ${item.bulletin_points.length - 3} 条要点` : `${item.bulletin_points.length - 3} more points`)}</button>}
+      <div className="desk-story-footer"><Link to={`/bulletin/${item.id}`} className="inline-flex items-center gap-2 font-medium text-primary">{zh ? "阅读精炼概括" : "Read the summary"}<ArrowUpRight size={14} /></Link><a href={item.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"><ExternalLink size={12} />{zh ? "原始来源" : "Original source"}</a></div>
+    </article>
   );
 }

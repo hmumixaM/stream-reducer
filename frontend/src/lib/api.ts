@@ -423,6 +423,17 @@ export interface BulletinQuote {
   timestamp: number | null;
 }
 
+export interface BulletinPoint { text: string; timestamp: number | null }
+export interface ReadingSummary {
+  lead: string;
+  sections: { heading: string; body: string; timestamp: number | null }[];
+  conclusion: string;
+}
+export interface ReadingSummaryResult {
+  status: "missing" | "processing" | "done" | "error";
+  content: ReadingSummary | null;
+}
+
 export interface BulletinItem {
   id: number;
   title: string;
@@ -432,21 +443,32 @@ export interface BulletinItem {
   source_url: string;
   published_at: string | null;
   created_at: string;
+  platform: string;
+  duration_s: number | null;
+  saved: boolean;
+  bulletin_points: BulletinPoint[];
+  bulletin_language: "zh" | "original";
+  localization_status: string;
   markdown: string;
   tldr: string;
   summary: string;
   bulletin: string[];
   key_points: string[];
+  key_point_details: BulletinPoint[];
   background: string;
   atmosphere: string;
   walkthrough: string;
   quotes: BulletinQuote[];
   entities: string[];
+  reading_summary: ReadingSummaryResult;
 }
 
+export type BulletinCardItem = Pick<BulletinItem, "id" | "title" | "source_title" | "subhead" | "author" | "source_url" | "published_at" | "created_at" | "platform" | "duration_s" | "saved" | "bulletin" | "bulletin_points" | "bulletin_language" | "localization_status" | "summary">;
+
 export interface BulletinFeed {
-  items: BulletinItem[];
+  items: BulletinCardItem[];
   next_offset: number | null;
+  next_cursor: string | null;
 }
 
 export interface ResearchSource {
@@ -1097,9 +1119,16 @@ export const api = {
   listResearchBriefs: (limit = 40) =>
     req<ResearchBrief[]>(`/api/research/feed?limit=${Math.min(Math.max(limit, 1), 100)}`),
   getResearchBrief: (id: number) => req<ResearchBriefDetail>(`/api/research/briefs/${id}`),
-  listBulletins: (limit = 60, offset = 0) =>
-    req<BulletinFeed>(`/api/bulletin/feed?limit=${Math.min(Math.max(limit, 1), 100)}&offset=${Math.max(offset, 0)}`),
+  listBulletins: (params: { cursor?: string; q?: string; platform?: string; saved?: boolean } = {}) => {
+    const sp = new URLSearchParams({ limit: "24" });
+    if (params.cursor) sp.set("cursor", params.cursor);
+    if (params.q) sp.set("q", params.q);
+    if (params.platform) sp.set("platform", params.platform);
+    if (params.saved) sp.set("saved", "true");
+    return req<BulletinFeed>(`/api/bulletin/feed?${sp}`);
+  },
   getBulletin: (id: number) => req<BulletinItem>(`/api/bulletin/${id}`),
+  prepareReadingSummary: (id: number) => req<ReadingSummaryResult>(`/api/bulletin/${id}/reading-summary`, { method: "POST" }),
   runResearch: () =>
     req<{ ok: boolean; created: number; generated_at: string }>("/api/research/run", { method: "POST" }),
   askResearch: (question: string) =>

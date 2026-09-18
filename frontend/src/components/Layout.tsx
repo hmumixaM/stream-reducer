@@ -49,8 +49,8 @@ const NAV: {
   end?: boolean;
   admin?: boolean;
 }[] = [
-  { to: "/", label: "Feed", icon: Clock, section: "main", end: true },
   { to: "/bulletin", label: "Bulletin", icon: Newspaper, section: "main" },
+  { to: MIRROR ? "/" : "/timeline", label: "Source feed", icon: Clock, section: "main", end: true },
   { to: "/research", label: "Agents", icon: Radar, section: "main" },
   { to: "/subscriptions", label: "Sources", icon: Rss, section: "main" },
   { to: "/library", label: "Knowledge base", icon: Bookmark, section: "main" },
@@ -187,7 +187,9 @@ export function Layout() {
 
   const toggleTheme = () => {
     document.documentElement.classList.toggle("dark");
-    setDark(document.documentElement.classList.contains("dark"));
+    const nextDark = document.documentElement.classList.contains("dark");
+    setDark(nextDark);
+    try { localStorage.setItem("sr-theme", nextDark ? "dark" : "light"); } catch { /* Theme still works without storage. */ }
   };
 
   // Close sidebar on route change on mobile
@@ -281,6 +283,7 @@ export function Layout() {
         </div>
         <button
           onClick={() => setSidebarOpen(true)}
+          aria-label="Open navigation"
           className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Menu className="h-5 w-5" />
