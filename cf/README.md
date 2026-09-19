@@ -1,4 +1,6 @@
-# stream-reduce on Cloudflare (multi-user, public)
+# Stream Reducer on Cloudflare
+
+[Product overview](../README.md) · [Live app](https://reducer.xgoose.org)
 
 A fully Cloudflare-native rewrite of stream-reduce: a public, multi-user app
 where each account has its own library, subscriptions, comments, highlights, and
@@ -26,6 +28,7 @@ Worker (Hono, TS)  ──►  D1            (users, items, user_item, subs, ...)
         │                                   • OpenRouter Whisper STT
         │                                   • Gemini-proxy summary
         │                                  returns transcript+summary+chunks JSON
+        ├── Bulletin queue ──► newest-first short Chinese translations ──► D1
         └── persists results, embeds chunks -> Vectorize, stores audio -> R2
 ```
 
@@ -36,13 +39,14 @@ Worker (Hono, TS)  ──►  D1            (users, items, user_item, subs, ...)
   persists.
 - **Frontend**: the existing `frontend/` SPA. The global **Browse**,
   **Collections**, collection detail, and item detail pages are public (no
-  account needed); the per-user **Library**, Search, Graph, annotations, queue,
+  account needed), including collection Bulletin feeds. The per-user
+  **Bulletin**, reading summaries, **Library**, Search, Graph, annotations, queue,
   subscriptions, and settings require a magic-link session.
 
 ## Prerequisites
 
 - A **Workers Paid plan** (Containers, Queues, and Email Sending all require it).
-- `wrangler` (installed via `npm install` here), Docker running locally (to
+- `wrangler` (installed via `npm ci` in `cf/worker`), Docker running locally (to
   build the container image on deploy).
 - A domain on Cloudflare, onboarded in **Email Service → Email Sending** so
   magic-link mail delivers to any recipient (the `EMAIL_FROM` address must be on
@@ -55,7 +59,7 @@ Worker (Hono, TS)  ──►  D1            (users, items, user_item, subs, ...)
 
 ```bash
 cd cf/worker
-npm install
+npm ci
 
 # D1 — copy the returned database_id into wrangler.jsonc.
 npx wrangler d1 create stream_reduce
@@ -66,13 +70,18 @@ npx wrangler vectorize create stream-reduce-chunks --dimensions=1024 --metric=co
 # R2 bucket for audio.
 npx wrangler r2 bucket create stream-reduce-media
 
-# Queues (pipeline + dead-letter).
+# Queues (media pipeline, dead-letter, and independent bulletin processing).
 npx wrangler queues create stream-reduce-pipeline
 npx wrangler queues create stream-reduce-pipeline-dlq
+npx wrangler queues create stream-reduce-bulletins
+
+# KV namespaces — copy the returned IDs into the OAUTH_KV and BILI_AUTH bindings.
+npx wrangler kv namespace create OAUTH_KV
+npx wrangler kv namespace create BILI_AUTH
 ```
 
 Then edit `wrangler.jsonc`:
-- set `d1_databases[0].database_id` to the id from `d1 create`,
+- replace the repository-specific D1 and KV IDs with your newly created resource IDs,
 - set `vars.APP_ORIGIN` to your public origin (e.g. `https://stream-reduce.you.dev`),
 - set `vars.EMAIL_FROM` to a verified address on your Email Service domain.
 
@@ -81,6 +90,8 @@ Then edit `wrangler.jsonc`:
 ```bash
 npx wrangler secret put GEMINI_API_KEY       # bearer for the Gemini summary proxy
 npx wrangler secret put OPENROUTER_API_KEY   # OpenRouter Whisper key
+npx wrangler secret put RIGHTCODE_API_KEY    # infographic image provider
+npx wrangler secret put ADMIN_TOKEN          # headless maintenance token
 npx wrangler secret put YOUTUBE_COOKIE       # signed-in browser cookie header
 npx wrangler secret put TS_AUTHKEY           # Tailscale OAuth client secret
 ```
@@ -102,8 +113,7 @@ npx wrangler d1 migrations apply stream_reduce --remote
 
 ## Deploy with GitHub Actions
 
-Production deploys should go through the repository workflow:
-`.github/workflows/deploy-cloudflare.yml`.
+Production deploys use the [GitHub Actions workflow](../.github/workflows/deploy-cloudflare.yml).
 
 The workflow runs automatically on pushes to `main` that touch `cf/**`,
 `frontend/**`, `app/**`, or the workflow file itself. It can also be started
@@ -125,7 +135,7 @@ Required GitHub repository secrets:
 - `CLOUDFLARE_ACCOUNT_ID`
 - `GEMINI_API_KEY`
 - `OPENROUTER_API_KEY`
-- `GEMINI_IMAGE_API_KEY`
+- `RIGHTCODE_API_KEY`
 - `ADMIN_TOKEN`
 
 This is preferred over deploying from a laptop because the workflow provides a
@@ -159,10 +169,16 @@ and wires the queue + cron triggers.
 cd cf/worker
 cp .dev.vars.example .dev.vars   # fill in secrets
 npx wrangler d1 migrations apply stream_reduce --local
-npx wrangler dev                 # serves the API + (built) SPA locally
+npx wrangler dev --port 8000     # serves the API + (built) SPA locally
 ```
 
-Note: Containers run in local dev only if Docker is available; otherwise the
+Build the SPA first with `npm --prefix frontend run build` from the repository
+root. The Worker serves it at `http://localhost:8000`. For frontend hot reload,
+run `npm --prefix frontend run dev` in a second terminal; Vite's `/api` proxy
+expects the Worker on port 8000. Set `GEMINI_API_KEY` and `OPENROUTER_API_KEY` in
+`.dev.vars`; add `RIGHTCODE_API_KEY` when testing infographic generation.
+
+Containers run in local dev only if Docker is available; otherwise the
 ingest pipeline calls will fail locally but the rest of the API works.
 
 ## How the core requirements map to the code
@@ -210,9 +226,35 @@ Gemini release raises: it lists the models `LLM_BASE_URL` serves next to the one
 `vars` currently pin, and `?model=gemini-3.7-flash` asks that model to reply, so a
 switch can be verified before it is deployed.
 
-Run it before touching `LLM_MODEL`. The endpoint is a Gemini **web** reverse proxy
-rather than the Gemini API: it maps a fixed list of names onto the web app's model
-picker and quietly serves its own default for anything unknown, so an unsupported
-model (a new release, a typo) answers normally while running something else
-entirely. Names outside that list — including anything from Google's API catalogue
-like `gemini-3.7-flash` — are therefore not usable here, whatever the var says.
+Use this check when changing `LLM_MODEL` or `LLM_MODEL_FALLBACK`. Model names
+are resolved by the configured OpenAI-compatible proxy; its aliases and
+credentials must match the provider you operate. The Worker variable
+`GEMINI_API_KEY` is the bearer token for that proxy.
+
+## Bulletin processing and reading views
+
+The personal Bulletin feed and public collection feeds share the same short
+edition serializer. Collection filters use a cursor ordered by publication date
+and item ID, so a source appearing in several tracks is returned once.
+
+Chinese localization covers the headline, subheading, overview, and short
+points. The source's detailed summary is retained. The independent
+`stream-reduce-bulletins` queue has a maximum concurrency of six; each wake-up
+selects the newest eligible D1 row rather than depending on queue delivery
+order. Translation leases prevent duplicate model calls. Failed attempts use
+backoff, automatic retries stop after three attempts, and scheduled wake-ups
+recover interrupted processing.
+
+The second reading layer is generated on demand and cached in
+`reading_summary`. The frontend offers Summary, Deep dive, and Sources & quotes
+views, with browser-based PDF export.
+
+Validation from the repository root:
+
+```bash
+npm --prefix cf/worker run typecheck
+npm --prefix cf/worker test
+npm --prefix frontend run build
+```
+
+Use Node.js 22.13+ for the tests, including their `node:sqlite` migration checks.
