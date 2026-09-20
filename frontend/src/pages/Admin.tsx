@@ -28,7 +28,7 @@ export function Admin() {
 function UsersPanel() {
   const qc = useQueryClient();
   const me = useMe();
-  const users = useQuery({ queryKey: ["admin", "users"], queryFn: api.adminListUsers });
+  const users = useQuery({ queryKey: ["admin", "users"], queryFn: api.adminListUsers, refetchInterval: 60_000 });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["admin", "users"] });
 
   const setAdmin = useMutation({
@@ -53,12 +53,14 @@ function UsersPanel() {
           </span>
         }
       />
+      <p className="mb-3 text-xs text-muted-foreground">Last sign-in records a successful login. Times use your local timezone.</p>
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="border-b border-border text-left text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 font-medium">Email</th>
+                <th className="whitespace-nowrap px-4 py-2 font-medium">Last sign-in</th>
                 <th className="px-4 py-2 font-medium">Library</th>
                 <th className="px-4 py-2 font-medium">In&nbsp;queue</th>
                 <th className="px-4 py-2 font-medium">Subs</th>
@@ -68,7 +70,7 @@ function UsersPanel() {
             </thead>
             <tbody>
               {users.isLoading && (
-                <tr><td colSpan={6} className="px-4 py-6 text-muted-foreground"><Spinner /> Loading…</td></tr>
+                <tr><td colSpan={7} className="px-4 py-6 text-muted-foreground"><Spinner /> Loading…</td></tr>
               )}
               {rows.map((u: AdminUser) => {
                 const self = u.id === me.data?.user?.id;
@@ -80,6 +82,14 @@ function UsersPanel() {
                         <span className="ml-2 rounded bg-primary/15 px-1.5 py-0.5 text-xs text-primary">admin</span>
                       )}
                       {self && <span className="ml-2 text-xs text-muted-foreground">(you)</span>}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-2 tabular-nums">
+                      {u.last_login_at ? <>
+                        <time dateTime={u.last_login_at} title={new Date(u.last_login_at).toLocaleString()}>
+                          {new Date(u.last_login_at).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" })}
+                        </time>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">{timeAgo(u.last_login_at)}</span>
+                      </> : <span className="text-muted-foreground" title="No retained login record is available for this account.">Not recorded</span>}
                     </td>
                     <td className="px-4 py-2 tabular-nums">{u.library_count}</td>
                     <td className="px-4 py-2 tabular-nums">{u.queued_count}</td>
@@ -113,7 +123,7 @@ function UsersPanel() {
                 );
               })}
               {!users.isLoading && rows.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-6 text-muted-foreground">No users.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-6 text-muted-foreground">No users.</td></tr>
               )}
             </tbody>
           </table>

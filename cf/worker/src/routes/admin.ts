@@ -37,6 +37,7 @@ interface AdminUserRow {
   email: string;
   is_admin: number;
   created_at: string;
+  last_login_at: string | null;
   library_count: number;
   queued_count: number;
   subscription_count: number;
@@ -78,7 +79,7 @@ adminRoutes.get("/proxy-check", async (c) => {
 adminRoutes.get("/users", async (c) => {
   const rows = await all<AdminUserRow>(
     c.env.DB.prepare(
-      `SELECT u.id, u.email, u.is_admin, u.created_at,
+      `SELECT u.id, u.email, u.is_admin, u.created_at, u.last_login_at,
               (SELECT COUNT(*) FROM user_item ui WHERE ui.user_id = u.id) AS library_count,
               (SELECT COUNT(*) FROM user_item ui JOIN item i ON i.id = ui.item_id
                  WHERE ui.user_id = u.id AND i.status != 'done') AS queued_count,

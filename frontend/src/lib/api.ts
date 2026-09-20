@@ -86,6 +86,7 @@ export interface AdminUser {
   email: string;
   is_admin: boolean;
   created_at: string;
+  last_login_at: string | null;
   library_count: number;
   queued_count: number;
   subscription_count: number;

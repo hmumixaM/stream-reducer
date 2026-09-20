@@ -69,6 +69,7 @@ export async function verifyMagicLink(env: Env, token: string): Promise<string |
 
   const sessionToken = randomToken();
   const sessionHash = await sha256(sessionToken);
+  const signedInAt = isoNow();
   const admins = (env.ADMIN_EMAILS || "")
     .split(",")
     .map((e) => e.trim().toLowerCase())
@@ -80,8 +81,11 @@ export async function verifyMagicLink(env: Env, token: string): Promise<string |
   // The session INSERT reads the user id back through a subselect, so nothing
   // here has to come back to the Worker first.
   const statements = [
-    env.DB.prepare("UPDATE auth_token SET used_at = ? WHERE id = ?").bind(isoNow(), row.id),
-    env.DB.prepare("INSERT INTO user (email) VALUES (?) ON CONFLICT(email) DO NOTHING").bind(row.email),
+    env.DB.prepare("UPDATE auth_token SET used_at = ? WHERE id = ?").bind(signedInAt, row.id),
+    // Persist login time in the same transaction as session creation so it
+    // survives logout/session cleanup and does not track ordinary API visits.
+    env.DB.prepare(`INSERT INTO user (email, last_login_at) VALUES (?, ?)
+      ON CONFLICT(email) DO UPDATE SET last_login_at = excluded.last_login_at`).bind(row.email, signedInAt),
   ];
   if (admins.includes(row.email.toLowerCase())) {
     statements.push(env.DB.prepare("UPDATE user SET is_admin = 1 WHERE email = ?").bind(row.email));

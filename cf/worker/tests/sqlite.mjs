@@ -2,10 +2,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 
 // Run the production migrations and SQL, adapting only D1's async result shape.
-export function database() {
+export function database({ beforeMigration } = {}) {
   const db = new DatabaseSync(':memory:');
   const directory = new URL('../migrations/', import.meta.url);
-  for (const name of readdirSync(directory).filter(name => name.endsWith('.sql')).sort()) db.exec(readFileSync(new URL(name, directory), 'utf8'));
+  for (const name of readdirSync(directory).filter(name => name.endsWith('.sql')).sort()) {
+    if (name === beforeMigration) break;
+    db.exec(readFileSync(new URL(name, directory), 'utf8'));
+  }
   const DB = {
     prepare(sql) {
       const statement = db.prepare(sql); let args = [];

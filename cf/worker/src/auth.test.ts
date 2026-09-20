@@ -125,11 +125,12 @@ describe("verifyMagicLink", () => {
     expect(executed).toHaveLength(4);
     expect(batches[0].map((s) => s.sql.split("\n")[0].trim())).toEqual([
       "UPDATE auth_token SET used_at = ? WHERE id = ?",
-      "INSERT INTO user (email) VALUES (?) ON CONFLICT(email) DO NOTHING",
+      "INSERT INTO user (email, last_login_at) VALUES (?, ?)",
       "INSERT INTO session (token_hash, user_id, expires_at)",
     ]);
     // The cookie value is never stored raw.
     expect(batches[0][2].bindings[0]).toBe(await sha256(token!));
+    expect(batches[0][1].bindings).toEqual(["reader@example.com", batches[0][0].bindings[0]]);
   });
 
   it("grants admin inside the same batch for configured emails", async () => {
