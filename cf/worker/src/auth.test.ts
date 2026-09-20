@@ -65,6 +65,7 @@ async function callResolveUser(env: Env, cookie: string) {
 
 describe("resolveUser", () => {
   it("resolves the session and its user in a single query", async () => {
+    const lastOnline = new Date().toISOString();
     const { env, executed } = fakeEnv([
       {
         match: "FROM session s JOIN user u",
@@ -72,6 +73,7 @@ describe("resolveUser", () => {
           id: 7,
           email: "reader@example.com",
           is_admin: 0,
+          last_online_at: lastOnline,
           created_at: "2026-01-01T00:00:00.000Z",
           session_expires_at: isoIn(60_000),
         },
@@ -84,6 +86,7 @@ describe("resolveUser", () => {
       id: 7,
       email: "reader@example.com",
       is_admin: 0,
+      last_online_at: lastOnline,
       created_at: "2026-01-01T00:00:00.000Z",
     });
     expect(executed).toHaveLength(1);
@@ -125,12 +128,12 @@ describe("verifyMagicLink", () => {
     expect(executed).toHaveLength(4);
     expect(batches[0].map((s) => s.sql.split("\n")[0].trim())).toEqual([
       "UPDATE auth_token SET used_at = ? WHERE id = ?",
-      "INSERT INTO user (email, last_login_at) VALUES (?, ?)",
+      "INSERT INTO user (email, last_login_at, last_online_at) VALUES (?, ?, ?)",
       "INSERT INTO session (token_hash, user_id, expires_at)",
     ]);
     // The cookie value is never stored raw.
     expect(batches[0][2].bindings[0]).toBe(await sha256(token!));
-    expect(batches[0][1].bindings).toEqual(["reader@example.com", batches[0][0].bindings[0]]);
+    expect(batches[0][1].bindings).toEqual(["reader@example.com", batches[0][0].bindings[0], batches[0][0].bindings[0]]);
   });
 
   it("grants admin inside the same batch for configured emails", async () => {

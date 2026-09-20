@@ -84,8 +84,9 @@ export async function verifyMagicLink(env: Env, token: string): Promise<string |
     env.DB.prepare("UPDATE auth_token SET used_at = ? WHERE id = ?").bind(signedInAt, row.id),
     // Persist login time in the same transaction as session creation so it
     // survives logout/session cleanup and does not track ordinary API visits.
-    env.DB.prepare(`INSERT INTO user (email, last_login_at) VALUES (?, ?)
-      ON CONFLICT(email) DO UPDATE SET last_login_at = excluded.last_login_at`).bind(row.email, signedInAt),
+    env.DB.prepare(`INSERT INTO user (email, last_login_at, last_online_at) VALUES (?, ?, ?)
+      ON CONFLICT(email) DO UPDATE SET last_login_at = excluded.last_login_at,
+      last_online_at = excluded.last_online_at`).bind(row.email, signedInAt, signedInAt),
   ];
   if (admins.includes(row.email.toLowerCase())) {
     statements.push(env.DB.prepare("UPDATE user SET is_admin = 1 WHERE email = ?").bind(row.email));
@@ -131,6 +132,21 @@ export async function resolveUser(env: Env, c: Context<AppContext>): Promise<Use
   );
   if (!row || row.session_expires_at < isoNow()) return null;
   const { session_expires_at: _expires, ...user } = row;
+  // Record authenticated activity at most once per minute per user. The SQL
+  // guard also prevents concurrent requests from repeatedly writing the row.
+  const now = isoNow();
+  const cutoff = new Date(Date.parse(now) - 60_000).toISOString();
+  if (!user.last_online_at || user.last_online_at < cutoff) {
+    try {
+      await env.DB.prepare(`UPDATE user SET last_online_at = ?
+        WHERE id = ? AND (last_online_at IS NULL OR last_online_at < ?)`)
+        .bind(now, user.id, cutoff).run();
+      user.last_online_at = now;
+    } catch (error) {
+      // Activity telemetry must never prevent an otherwise valid login.
+      console.error("Failed to record user activity", error);
+    }
+  }
   return user as UserRow;
 }
 

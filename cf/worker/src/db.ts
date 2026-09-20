@@ -8,6 +8,7 @@ export interface UserRow {
   is_admin: number;
   preferred_language?: string;
   last_login_at?: string | null;
+  last_online_at?: string | null;
   created_at: string;
 }
 

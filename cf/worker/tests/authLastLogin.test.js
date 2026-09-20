@@ -99,3 +99,49 @@ describe('last successful sign-in', () => {
     ]));
   });
 });
+
+describe('last online', () => {
+  it('records authenticated visits, throttles writes, and preserves the login timestamp', async () => {
+    const { db, env } = setup();
+    await magicLink(db, 'online');
+    const token = await verifyMagicLink(env, 'online');
+    const initial = db.prepare('SELECT * FROM user').get();
+    expect(initial.last_online_at).toBe(initial.last_login_at);
+    db.prepare('UPDATE user SET last_online_at=?').run('2020-01-01T00:00:00.000Z');
+    const app = new Hono();
+    app.get('/me', async c => c.json(await resolveUser(env, c)));
+    app.post('/logout', async c => { await clearSession(env, c); return c.json({ ok: true }); });
+    const headers = { Cookie: `sr_session=${token}` };
+    const before = Date.now();
+    await app.request('/me', { headers });
+    const active = db.prepare('SELECT * FROM user').get();
+    expect(Date.parse(active.last_online_at)).toBeGreaterThanOrEqual(before);
+    expect(active.last_login_at).toBe(initial.last_login_at);
+    const spy = vi.spyOn(env.DB, 'prepare');
+    await app.request('/me', { headers });
+    expect(spy.mock.calls.some(([sql]) => sql.includes('UPDATE user'))).toBe(false);
+    await app.request('/logout', { method: 'POST', headers });
+    expect(db.prepare('SELECT last_online_at FROM user').get().last_online_at).toBe(active.last_online_at);
+  });
+
+  it('ignores expired and unknown sessions', async () => {
+    const { db, env } = setup();
+    db.exec("INSERT INTO user(id,email) VALUES(1,'reader@example.com')");
+    db.prepare('INSERT INTO session(token_hash,user_id,expires_at) VALUES(?,1,?)')
+      .run(await sha256('expired'), '2000-01-01T00:00:00.000Z');
+    const app = new Hono();
+    app.get('/me', async c => c.json(await resolveUser(env, c)));
+    for (const token of ['expired', 'unknown']) {
+      expect(await (await app.request('/me', { headers: { Cookie: `sr_session=${token}` } })).json()).toBeNull();
+    }
+    expect(db.prepare('SELECT last_online_at FROM user').get().last_online_at).toBeNull();
+  });
+
+  it('backfills known login activity and leaves unknown history empty', () => {
+    const { db } = setup({ beforeMigration: '0024_user_last_online.sql' });
+    db.exec("INSERT INTO user(email,last_login_at) VALUES('known@example.com','2026-09-01T00:00:00.000Z'),('unknown@example.com',NULL)");
+    db.exec(readFileSync(new URL('../migrations/0024_user_last_online.sql', import.meta.url), 'utf8'));
+    expect(db.prepare('SELECT last_online_at FROM user ORDER BY id').all().map(row => row.last_online_at))
+      .toEqual(['2026-09-01T00:00:00.000Z', null]);
+  });
+});
