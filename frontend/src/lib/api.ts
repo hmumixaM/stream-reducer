@@ -475,6 +475,7 @@ export interface BulletinItem {
   quotes: BulletinQuote[];
   entities: string[];
   reading_summary: ReadingSummaryResult;
+  content_translations?: { lang: string; status: string }[];
 }
 
 export type BulletinCardItem = Pick<BulletinItem, "id" | "title" | "source_title" | "subhead" | "author" | "source_url" | "published_at" | "created_at" | "platform" | "duration_s" | "saved" | "bulletin" | "bulletin_points" | "bulletin_language" | "localization_status" | "summary" | "bulletin_overview" | "bulletin_intro_ready">;

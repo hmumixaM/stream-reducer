@@ -15,14 +15,12 @@ import {
   Send,
   BookOpen,
   Highlighter,
-  Languages,
   Sparkles,
   Image as ImageIcon,
   FileDown,
 } from "lucide-react";
 import {
   api,
-  TRANSLATE_LANGS,
   type StageRun,
   type Comment,
   type Highlight,
@@ -30,13 +28,13 @@ import {
   type Infographic,
   type ItemDetail as ItemDetailData,
   type Summary,
-  type LocalizedBulletin,
 } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
 import { dateLabel } from "@/lib/bulletin";
 import { useMe } from "@/lib/auth";
-import { Button, Card, Select, Spinner } from "@/components/ui";
+import { Button, Card, Spinner } from "@/components/ui";
 import { BackLink, ErrorState, LoadingState } from "@/components/shell";
+import { ContentLanguageBar, languageLabel } from "@/components/ContentLanguage";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { RelatedArticles } from "@/components/RelatedArticles";
 import { HighlightableMarkdown, HighlightLayer, hlClass } from "@/components/Highlightable";
@@ -200,7 +198,7 @@ export function ItemDetail() {
             <PlatformBadge platform={d.platform} />
             <StatusBadge status={d.status} />
           </div>
-          <h1 className="text-display font-semibold leading-tight">{preferChinese ? d.localized_bulletin?.headline || "中文简报整理中" : d.title || d.source_url}</h1>
+          <h1 className="text-display font-semibold leading-tight">{d.title || d.source_url}</h1>
           {d.author && <p className="mt-1 text-sm text-muted-foreground">{d.author}</p>}
         </div>
         {/* Capped so a long action row wraps instead of squeezing the title. */}
@@ -240,7 +238,7 @@ export function ItemDetail() {
               <ExternalLink className="h-4 w-4" /> <span className="hidden sm:inline">Source</span>
             </Button>
           </a>
-          <Button variant="outline" size="sm" disabled={preferChinese && !d.localized_bulletin?.complete} onClick={() => window.print()} title="Save this summary as a PDF">
+          <Button variant="outline" size="sm" onClick={() => window.print()} title="Save this summary as a PDF">
             <FileDown className="h-4 w-4" /> <span className="hidden sm:inline">Export PDF</span>
           </Button>
           <Button 
@@ -318,10 +316,7 @@ export function ItemDetail() {
           {d.summary ? (
             <SummaryView
               itemId={itemId}
-              localizedBulletin={d.localized_bulletin}
               preferChinese={preferChinese}
-              preparingBulletin={prepareBulletin.isPending || d.localized_bulletin?.status === "processing"}
-              onPrepareBulletin={() => prepareBulletin.mutate(itemId)}
               summaryMarkdown={d.summary.markdown}
               structured={d.summary.structured}
               headline={d.headline}
@@ -560,10 +555,7 @@ function SummaryView({
   itemId,
   summaryMarkdown,
   structured,
-  localizedBulletin,
   preferChinese,
-  preparingBulletin,
-  onPrepareBulletin,
   headline,
   subhead,
   itemTitle,
@@ -580,10 +572,7 @@ function SummaryView({
 }: {
   itemId: number;
   summaryMarkdown: string;
-  localizedBulletin?: LocalizedBulletin | null;
   preferChinese: boolean;
-  preparingBulletin: boolean;
-  onPrepareBulletin: () => void;
   structured: Record<string, unknown>;
   headline?: string | null;
   subhead?: string | null;
@@ -599,17 +588,15 @@ function SummaryView({
   onUpdateNote: (id: number, note: string) => void;
   onDelete: (id: number) => void;
 }) {
-  const [lang, setLang] = useState<string | null>(null);
+  const picked = useRef(false);
+  const askedChinese = useRef(false);
+  const [lang, setLang] = useState<string | null>(preferChinese ? "zh" : null);
   const [summaryMode, setSummaryMode] = useState<"bulletin" | "detailed">("bulletin");
-  const [pick, setPick] = useState("");
   const qc = useQueryClient();
   const mdClass = readMode ? "prose-read max-w-none" : "prose-sr max-w-none text-sm";
-
-  const labelFor = (code: string) => TRANSLATE_LANGS.find((l) => l.code === code)?.label ?? code;
-  // Languages already translated (or in progress) become one-click chips.
-  const available = [...translations].sort((a, b) => labelFor(a.lang).localeCompare(labelFor(b.lang)));
-  const availSet = new Set(translations.map((t) => t.lang));
-  const remaining = TRANSLATE_LANGS.filter((l) => !availSet.has(l.code));
+  useEffect(() => {
+    if (!picked.current && preferChinese) setLang("zh");
+  }, [preferChinese]);
 
   const translation = useQuery({
     queryKey: ["translation", itemId, lang],
@@ -630,124 +617,102 @@ function SummaryView({
       qc.invalidateQueries({ queryKey: ["item", itemId] });
       qc.invalidateQueries({ queryKey: ["translation", itemId, code] });
       setLang(code);
-      setPick("");
     },
   });
 
-  const requestPick = () => {
-    if (!pick) return;
-    if (confirm(`Generate a ${labelFor(pick)} translation? It runs a one-time job and is then shared with everyone.`)) {
-      request.mutate(pick);
+  const requestLanguage = (code: string) => {
+    picked.current = true;
+    if (code === "zh" && preferChinese) {
+      request.mutate(code);
+      return;
     }
+    const label = languageLabel(code);
+    const prompt = preferChinese
+      ? `生成${label}全文？生成一次后所有人共用。`
+      : `Generate a ${label} edition of the full summary? It runs once and is then shared.`;
+    if (confirm(prompt)) request.mutate(code);
   };
+  useEffect(() => {
+    if (!authed || !preferChinese || lang !== "zh" || askedChinese.current) return;
+    if (translations.some((row) => row.lang === "zh")) return;
+    askedChinese.current = true;
+    request.mutate("zh");
+  }, [authed, preferChinese, lang, translations, request]);
 
-  const chineseBulletin = preferChinese && summaryMode === "bulletin";
-  const bulletin = chineseBulletin ? localizedBulletin?.bulletin.map((point) => point.text) || [] : summaryBulletin(structured);
-  const tldr = chineseBulletin ? localizedBulletin?.tldr || "" : typeof structured.tldr === "string" ? structured.tldr : "";
-  const displayHeadline = chineseBulletin ? localizedBulletin?.headline || "中文简报整理中" : headline || itemTitle;
-  const displaySubhead = chineseBulletin ? localizedBulletin?.subhead || "" : subhead;
+  const edition = lang != null && translation.data?.status === "done" ? translation.data : null;
+  const viewStructured = (edition?.structured ?? structured) as Record<string, unknown>;
+  const viewMarkdown = edition?.markdown || summaryMarkdown;
+  const bulletin = summaryBulletin(viewStructured);
+  const tldr = typeof viewStructured.tldr === "string" ? viewStructured.tldr : "";
+  const displayHeadline = edition
+    ? (typeof viewStructured.headline === "string" && viewStructured.headline) || itemTitle
+    : headline || itemTitle;
+  const displaySubhead = edition
+    ? (typeof viewStructured.subhead === "string" ? viewStructured.subhead : "")
+    : subhead || "";
+  const waiting = lang != null && !edition && translation.data?.status !== "error";
 
   return (
     <Card className={cn("summary-paper", readMode ? "border-none bg-transparent shadow-none" : "p-6")}>
+      <ContentLanguageBar
+        active={lang}
+        translations={translations}
+        authed={authed}
+        busy={request.isPending}
+        zhUi={preferChinese}
+        onSelect={(code) => { picked.current = true; setLang(code); }}
+        onRequest={requestLanguage}
+      />
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
         <div className="min-w-0">
           <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
             <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-            {summaryMode === "bulletin" ? "Bulletin" : "Full brief"}
+            {summaryMode === "bulletin" ? (preferChinese ? "简报" : "Bulletin") : (preferChinese ? "详细内容" : "Full brief")}
             {publishedAt && <span className="font-normal tracking-normal">· {preferChinese ? dateLabel(publishedAt, true) : formatDate(publishedAt)}</span>}
           </div>
           <h2 className="font-serif text-2xl font-semibold leading-tight tracking-tight">{displayHeadline}</h2>
           {displaySubhead && <p className="mt-2 max-w-2xl font-serif text-base italic leading-6 text-muted-foreground">{displaySubhead}</p>}
         </div>
         <div className="flex shrink-0 rounded-full border border-border p-0.5 text-xs">
-          <button type="button" onClick={() => setSummaryMode("bulletin")} className={cn("rounded-full px-3 py-1.5 transition-colors", summaryMode === "bulletin" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>Bulletin</button>
-          <button type="button" onClick={() => setSummaryMode("detailed")} className={cn("rounded-full px-3 py-1.5 transition-colors", summaryMode === "detailed" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>{preferChinese ? "详细内容 · 原文" : "Detailed"}</button>
+          <button type="button" onClick={() => setSummaryMode("bulletin")} className={cn("rounded-full px-3 py-1.5 transition-colors", summaryMode === "bulletin" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>{preferChinese ? "简报" : "Bulletin"}</button>
+          <button type="button" onClick={() => setSummaryMode("detailed")} className={cn("rounded-full px-3 py-1.5 transition-colors", summaryMode === "detailed" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>{preferChinese ? "详细内容" : "Detailed"}</button>
         </div>
       </div>
-      {summaryMode === "bulletin" && (
-        <div className="mb-6 space-y-4" lang={chineseBulletin ? "zh-CN" : undefined}>
-          {chineseBulletin && !localizedBulletin?.complete && <div className="rounded-md border border-border p-4 text-sm text-muted-foreground" role="status">
-            {preparingBulletin ? "正在补齐中文标题与概览…" : "中文概览暂未就绪，已翻译的要点仍可阅读。"}
-            {!preparingBulletin && <Button variant="outline" size="sm" className="ml-3" onClick={onPrepareBulletin}>重试中文简报</Button>}
-          </div>}
+      {waiting ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+          <Spinner /> {preferChinese ? `正在生成${languageLabel(lang!)}全文，生成一次后所有人共用。` : `Preparing the ${languageLabel(lang!)} edition. This runs once and is shared.`}
+        </div>
+      ) : lang != null && translation.data?.status === "error" ? (
+        <div className="space-y-3 text-sm text-danger">
+          <p>{preferChinese ? "全文翻译失败。" : "Translation failed."}{translation.data.error ? ` ${translation.data.error}` : ""}</p>
+          {authed && (
+            <Button size="sm" variant="outline" onClick={() => request.mutate(lang)} disabled={request.isPending}>
+              <RefreshCw className="h-4 w-4" /> {preferChinese ? "重试" : "Retry"}
+            </Button>
+          )}
+        </div>
+      ) : summaryMode === "bulletin" ? (
+        <div className="mb-6 space-y-4" lang={edition?.lang === "zh" ? "zh-CN" : undefined}>
           {tldr && <p className="max-w-3xl font-serif text-lg leading-8 text-foreground/90">{tldr}</p>}
           {bulletin.length > 0 ? (
             <ul className="space-y-3 border-l border-primary/40 pl-5">
               {bulletin.map((point) => <li key={point} className="relative font-serif text-base leading-7 text-foreground/90 before:absolute before:-left-[1.35rem] before:top-[0.75rem] before:h-1.5 before:w-1.5 before:rounded-full before:bg-primary/70">{point}</li>)}
             </ul>
-          ) : <p className="text-sm text-muted-foreground">{preferChinese ? "可切换到“详细内容”阅读原文。" : "Switch to Detailed to read the full brief."}</p>}
+          ) : <p className="text-sm text-muted-foreground">{preferChinese ? "可切换到“详细内容”阅读全文。" : "Switch to Detailed to read the full brief."}</p>}
           <a href={sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">{preferChinese ? "查看原始来源" : "Read original source"} <ExternalLink className="h-3 w-3" /></a>
         </div>
-      )}
-      {summaryMode === "detailed" && <div className="mb-4 flex flex-wrap items-center gap-1.5 border-b border-border pb-3">
-        <Languages className="mr-1 h-4 w-4 text-muted-foreground" />
-        <LangChip label="Original" active={lang === null} onClick={() => setLang(null)} />
-        {available.map((t) => (
-          <LangChip
-            key={t.lang}
-            label={labelFor(t.lang) + (t.status === "done" ? "" : " …")}
-            active={lang === t.lang}
-            onClick={() => setLang(t.lang)}
-          />
-        ))}
-        {authed && remaining.length > 0 && (
-          <span className="ml-auto flex items-center gap-1.5">
-            <Select
-              value={pick}
-              onChange={(e) => setPick(e.target.value)}
-              className="h-8 w-auto py-0 text-xs"
-            >
-              <option value="">Translate to…</option>
-              {remaining.map((l) => (
-                <option key={l.code} value={l.code}>{l.label}</option>
-              ))}
-            </Select>
-            <Button size="sm" variant="outline" disabled={!pick || request.isPending} onClick={requestPick}>
-              {request.isPending ? <Spinner /> : <Languages className="h-4 w-4" />} Translate
-            </Button>
-          </span>
-        )}
-        {!authed && remaining.length > 0 && (
-          <span className="ml-auto text-xs text-muted-foreground">Sign in to request a translation</span>
-        )}
-      </div>}
-
-      {summaryMode === "detailed" && lang === null ? (
+      ) : (
         <HighlightableMarkdown
-          markdown={summaryMarkdown}
-          highlights={summaryHighlights}
+          markdown={viewMarkdown}
+          highlights={edition ? [] : summaryHighlights}
           source="summary"
-          readOnly={!canEdit}
+          readOnly={!canEdit || !!edition}
           onCreate={onCreate}
           onUpdateNote={onUpdateNote}
           onDelete={onDelete}
           className={mdClass}
         />
-      ) : summaryMode === "detailed" && translation.data?.status === "done" ? (
-        <HighlightableMarkdown
-          markdown={translation.data.markdown}
-          highlights={[]}
-          source="summary"
-          readOnly
-          onCreate={() => {}}
-          onUpdateNote={() => {}}
-          onDelete={() => {}}
-          className={mdClass}
-        />
-      ) : summaryMode === "detailed" && translation.data?.status === "error" ? (
-        <div className="space-y-3 text-sm text-danger">
-          <p>Translation failed.{translation.data.error ? ` ${translation.data.error}` : ""}</p>
-          {authed && (
-            <Button size="sm" variant="outline" onClick={() => request.mutate(lang!)} disabled={request.isPending}>
-              <RefreshCw className="h-4 w-4" /> Retry
-            </Button>
-          )}
-        </div>
-      ) : summaryMode === "detailed" ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner /> Translating to {labelFor(lang!)}… generated once and shared with everyone. This can take a minute.
-        </div>
-      ) : null}
+      )}
     </Card>
   );
 }
@@ -872,30 +837,6 @@ function InfographicView({
         </div>
       </div>
     </div>
-  );
-}
-
-function LangChip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
-        active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border text-muted-foreground hover:bg-accent",
-      )}
-    >
-      {label}
-    </button>
   );
 }
 

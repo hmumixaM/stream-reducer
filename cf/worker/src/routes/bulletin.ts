@@ -64,7 +64,14 @@ bulletinRoutes.get("/:id", async (c) => {
   if (!row) return c.json({ error: "bulletin not found" }, 404);
   const source = { ...row, summary_markdown: row.summary_markdown || null };
   const cached = await first<ReadingRow>(c.env.DB.prepare("SELECT * FROM reading_summary WHERE item_id=?").bind(id));
-  return c.json({ ...serializeBulletin(row, user.preferred_language || "auto", true), reading_summary: readCached(cached, await sourceHash(source)) });
+  const contentTranslations = await all<{ lang: string; status: string }>(
+    c.env.DB.prepare("SELECT lang, status FROM item_translation WHERE item_id = ? ORDER BY lang").bind(id),
+  );
+  return c.json({
+    ...serializeBulletin(row, user.preferred_language || "auto", true),
+    reading_summary: readCached(cached, await sourceHash(source)),
+    content_translations: contentTranslations,
+  });
 });
 
 bulletinRoutes.post("/:id/reading-summary", async (c) => {

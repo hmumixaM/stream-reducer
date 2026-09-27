@@ -12,6 +12,7 @@ import {
 } from "../auth";
 import { readForm, readJson } from "../lib/request";
 import { all } from "../db";
+import { enqueueLibraryContentTranslations } from "../lib/autoTranslate";
 import { enqueueBulletinTranslations } from "../lib/bulletin";
 import { OAUTH_RETURN_COOKIE } from "./oauth";
 
@@ -28,7 +29,11 @@ async function backfillBulletins(c: Parameters<typeof requireAuth>[0], lang: str
       WHERE i.status = 'done'
       ORDER BY COALESCE(julianday(i.published_at),julianday(i.created_at),0) DESC, i.id DESC`,
   ));
-  return enqueueBulletinTranslations(c.env, rows.map((row) => row.id), lang);
+  const bulletins = await enqueueBulletinTranslations(c.env, rows.map((row) => row.id), lang);
+  // The short bulletin and the full reading edition are separate jobs. Library
+  // owners who asked for Chinese get the full edition queued here too.
+  await enqueueLibraryContentTranslations(c.env, c.get("user").id, lang);
+  return bulletins;
 }
 
 // After a successful sign-in, return the user to a pending OAuth authorize URL

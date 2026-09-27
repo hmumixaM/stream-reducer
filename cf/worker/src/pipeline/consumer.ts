@@ -3,7 +3,7 @@ import { first, type ItemRow } from "../db";
 import { isoNow } from "../lib/crypto";
 import { persistItemMetadata, cacheThumbnail, recomputePriority } from "../lib/ingest";
 import { attachItemChannelBestEffort } from "../lib/itemChannel";
-import { enqueueAutomaticTranslations } from "../lib/autoTranslate";
+import { enqueueAutomaticTranslations, enqueuePreferredContentTranslation } from "../lib/autoTranslate";
 import {
   enqueueAutomaticInfographic,
   isInfographicContentReady,
@@ -663,6 +663,11 @@ async function persistCompletedPipeline(env: Env, itemId: number, result: Pipeli
     await enqueuePreferredBulletinTranslation(env, itemId);
   } catch (error) {
     console.error("preferred bulletin enqueue failed", itemId, error);
+  }
+  try {
+    await enqueuePreferredContentTranslation(env, itemId);
+  } catch (error) {
+    console.error("preferred content translation enqueue failed", itemId, error);
   }
   try {
     await enqueueAutomaticInfographic(env, itemId);
