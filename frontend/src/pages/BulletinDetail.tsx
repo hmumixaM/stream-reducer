@@ -10,6 +10,7 @@ import { dateLabel, readingMinutes, sourceAt, timestampLabel } from "@/lib/bulle
 import { cn } from "@/lib/utils";
 import { Button, Select } from "@/components/ui";
 import { ContentLanguageBar, languageLabel } from "@/components/ContentLanguage";
+import { isPredominantlyChinese } from "@/lib/chinese";
 import { ErrorState, LoadingState } from "@/components/shell";
 
 const FullMarkdown = lazy(() => import("@/components/Highlightable").then((module) => ({ default: module.HighlightableMarkdown })));
@@ -78,8 +79,9 @@ export function BulletinDetail() {
   const attempted = useRef(new Set<number>());
   const picked = useRef(false);
   const askedChinese = useRef(false);
+  const nativeChinese = isPredominantlyChinese(bulletin.data?.markdown || bulletin.data?.tldr || "");
   const [lang, setLang] = useState<string | null>(zh ? "zh" : null);
-  useEffect(() => { if (!picked.current && zh) setLang("zh"); }, [zh]);
+  useEffect(() => { if (!picked.current) setLang(zh && !nativeChinese ? "zh" : null); }, [zh, nativeChinese]);
   const translations = bulletin.data?.content_translations ?? [];
   const translation = useQuery({
     queryKey: ["translation", itemId, lang],
@@ -90,7 +92,11 @@ export function BulletinDetail() {
   });
   const requestEdition = useMutation({
     mutationFn: (code: string) => api.requestTranslation(itemId, code),
-    onSuccess: (_data, code) => {
+    onSuccess: (data, code) => {
+      if (data.status === "original") {
+        setLang(null);
+        return;
+      }
       setLang(code);
       qc.invalidateQueries({ queryKey: ["bulletin", itemId] });
       qc.invalidateQueries({ queryKey: ["translation", itemId, code] });
@@ -98,17 +104,18 @@ export function BulletinDetail() {
   });
   const requestLanguage = (code: string) => {
     picked.current = true;
+    if (code === "zh" && nativeChinese) { setLang(null); return; }
     if (code === "zh" && zh) { requestEdition.mutate(code); return; }
     const label = languageLabel(code);
     if (confirm(zh ? `生成${label}全文？生成一次后所有人共用。` : `Generate a ${label} edition of the full summary? It runs once and is then shared.`)) requestEdition.mutate(code);
   };
   useEffect(() => {
-    if (!zh || lang !== "zh" || askedChinese.current) return;
+    if (!zh || nativeChinese || lang !== "zh" || askedChinese.current) return;
     if (translations.some((row) => row.lang === "zh")) return;
     if (!bulletin.data) return;
     askedChinese.current = true;
     requestEdition.mutate("zh");
-  }, [zh, lang, translations, bulletin.data, itemId, requestEdition]);
+  }, [zh, nativeChinese, lang, translations, bulletin.data, itemId, requestEdition]);
   useEffect(() => {
     if (lang == null && view === "summary" && bulletin.data?.reading_summary.status === "missing" && !attempted.current.has(itemId)) {
       attempted.current.add(itemId);
@@ -165,7 +172,7 @@ export function BulletinDetail() {
         <h1>{pageTitle}</h1>
         <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Clock3 size={13} />{readingMinutes(edition?.markdown || summaryText)} {zh ? "分钟精读" : "min read"}</span><span>{lang == null ? (zh ? "正文为原文" : "Summary in the source language") : waitingEdition ? (zh ? `正在生成${languageLabel(lang)}全文` : `Preparing the ${languageLabel(lang)} edition`) : failedEdition ? (zh ? "全文翻译失败" : "Translation failed") : (zh ? `全文为${languageLabel(lang)}` : `Full summary in ${languageLabel(lang)}`)}</span><a href={item.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 hover:text-primary">{zh ? "原始来源" : "Original source"}<ExternalLink size={12} /></a></div>
       </div>
-      <ContentLanguageBar active={lang} translations={translations} authed zhUi={zh} busy={requestEdition.isPending} onSelect={(code) => { picked.current = true; setLang(code); }} onRequest={requestLanguage} />
+      <ContentLanguageBar active={lang} translations={translations} authed zhUi={zh} nativeChinese={nativeChinese} busy={requestEdition.isPending} onSelect={(code) => { picked.current = true; setLang(code); }} onRequest={requestLanguage} />
       <div className="reader-columns">
         <div className="min-w-0">
           <section className="reader-bulletin" aria-label="Bulletin">

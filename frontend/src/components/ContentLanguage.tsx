@@ -19,6 +19,7 @@ export function ContentLanguageBar({
   authed,
   busy,
   zhUi,
+  nativeChinese = false,
   onSelect,
   onRequest,
 }: {
@@ -27,6 +28,7 @@ export function ContentLanguageBar({
   authed: boolean;
   busy: boolean;
   zhUi: boolean;
+  nativeChinese?: boolean;
   onSelect: (lang: string | null) => void;
   onRequest: (lang: string) => void;
 }) {
@@ -36,12 +38,16 @@ export function ContentLanguageBar({
   const remaining = TRANSLATE_LANGS.filter((lang) => !PRIMARY.includes(lang.code) && !status.has(lang.code));
 
   const choose = (code: string | null) => {
+    if (code === "zh" && nativeChinese) {
+      onSelect(null);
+      return;
+    }
     if (code != null && !status.has(code)) onRequest(code);
     else onSelect(code);
   };
 
   const chip = (code: string | null, label: string) => {
-    const pending = code != null && status.has(code) && !["done", "error"].includes(status.get(code) || "");
+    const pending = code != null && !(code === "zh" && nativeChinese) && status.has(code) && !["done", "error"].includes(status.get(code) || "");
     return (
       <button
         key={label}

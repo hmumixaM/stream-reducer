@@ -35,6 +35,7 @@ import { useMe } from "@/lib/auth";
 import { Button, Card, Spinner } from "@/components/ui";
 import { BackLink, ErrorState, LoadingState } from "@/components/shell";
 import { ContentLanguageBar, languageLabel } from "@/components/ContentLanguage";
+import { isPredominantlyChinese } from "@/lib/chinese";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { RelatedArticles } from "@/components/RelatedArticles";
 import { HighlightableMarkdown, HighlightLayer, hlClass } from "@/components/Highlightable";
@@ -325,6 +326,7 @@ export function ItemDetail() {
               sourceUrl={d.source_url}
               publishedAt={d.published_at}
               translations={d.translations ?? []}
+              sourceText={d.transcript?.text || ""}
               readMode={readMode}
               canEdit={canEdit}
               authed={!!me.data?.user}
@@ -562,6 +564,7 @@ function SummaryView({
   sourceUrl,
   publishedAt,
   translations,
+  sourceText,
   readMode,
   canEdit,
   authed,
@@ -580,6 +583,7 @@ function SummaryView({
   sourceUrl: string;
   publishedAt?: string | null;
   translations: { lang: string; status: string }[];
+  sourceText: string;
   readMode: boolean;
   canEdit: boolean;
   authed: boolean;
@@ -590,13 +594,15 @@ function SummaryView({
 }) {
   const picked = useRef(false);
   const askedChinese = useRef(false);
-  const [lang, setLang] = useState<string | null>(preferChinese ? "zh" : null);
+  const nativeChinese = isPredominantlyChinese(summaryMarkdown || sourceText);
+  const [lang, setLang] = useState<string | null>(preferChinese && !nativeChinese ? "zh" : null);
   const [summaryMode, setSummaryMode] = useState<"bulletin" | "detailed">("bulletin");
   const qc = useQueryClient();
   const mdClass = readMode ? "prose-read max-w-none" : "prose-sr max-w-none text-sm";
   useEffect(() => {
-    if (!picked.current && preferChinese) setLang("zh");
-  }, [preferChinese]);
+    if (picked.current) return;
+    setLang(preferChinese && !nativeChinese ? "zh" : null);
+  }, [preferChinese, nativeChinese]);
 
   const translation = useQuery({
     queryKey: ["translation", itemId, lang],
@@ -613,7 +619,11 @@ function SummaryView({
   // accidentally spawn many jobs. Existing translations are just viewed.
   const request = useMutation({
     mutationFn: (code: string) => api.requestTranslation(itemId, code),
-    onSuccess: (_data, code) => {
+    onSuccess: (data, code) => {
+      if (data.status === "original") {
+        setLang(null);
+        return;
+      }
       qc.invalidateQueries({ queryKey: ["item", itemId] });
       qc.invalidateQueries({ queryKey: ["translation", itemId, code] });
       setLang(code);
@@ -622,6 +632,10 @@ function SummaryView({
 
   const requestLanguage = (code: string) => {
     picked.current = true;
+    if (code === "zh" && nativeChinese) {
+      setLang(null);
+      return;
+    }
     if (code === "zh" && preferChinese) {
       request.mutate(code);
       return;
@@ -633,11 +647,11 @@ function SummaryView({
     if (confirm(prompt)) request.mutate(code);
   };
   useEffect(() => {
-    if (!authed || !preferChinese || lang !== "zh" || askedChinese.current) return;
+    if (!authed || !preferChinese || nativeChinese || lang !== "zh" || askedChinese.current) return;
     if (translations.some((row) => row.lang === "zh")) return;
     askedChinese.current = true;
     request.mutate("zh");
-  }, [authed, preferChinese, lang, translations, request]);
+  }, [authed, preferChinese, nativeChinese, lang, translations, request]);
 
   const edition = lang != null && translation.data?.status === "done" ? translation.data : null;
   const viewStructured = (edition?.structured ?? structured) as Record<string, unknown>;
@@ -660,6 +674,7 @@ function SummaryView({
         authed={authed}
         busy={request.isPending}
         zhUi={preferChinese}
+        nativeChinese={nativeChinese}
         onSelect={(code) => { picked.current = true; setLang(code); }}
         onRequest={requestLanguage}
       />

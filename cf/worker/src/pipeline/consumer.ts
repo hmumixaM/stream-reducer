@@ -4,6 +4,7 @@ import { isoNow } from "../lib/crypto";
 import { persistItemMetadata, cacheThumbnail, recomputePriority } from "../lib/ingest";
 import { attachItemChannelBestEffort } from "../lib/itemChannel";
 import { enqueueAutomaticTranslations, enqueuePreferredContentTranslation } from "../lib/autoTranslate";
+import { sourceAlreadyChinese } from "../lib/chinese";
 import {
   enqueueAutomaticInfographic,
   isInfographicContentReady,
@@ -236,6 +237,13 @@ async function translateItem(env: Env, itemId: number, lang: string): Promise<vo
     ).bind(msg.slice(0, 2000), isoNow(), itemId, lang).run();
   };
   if (!item || !t) return fail("item has no transcript to translate");
+  if (lang === "zh" && await sourceAlreadyChinese(env, itemId)) {
+    await env.DB.prepare(
+      `DELETE FROM item_translation
+        WHERE item_id = ? AND lang = ? AND status IN ('queued', 'processing')`,
+    ).bind(itemId, lang).run();
+    return;
+  }
 
   await env.DB.prepare(
     "UPDATE item_translation SET status = 'processing', error = NULL, updated_at = ? WHERE item_id = ? AND lang = ?",

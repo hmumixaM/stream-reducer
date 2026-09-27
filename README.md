@@ -72,7 +72,7 @@ The same reading flow adapts to narrow screens.
 The default preference, **Auto · keep the source language**, preserves the
 language of each source. English sources have English bulletins and reading
 summaries. In **Preferences**, you can choose Simplified Chinese. That queues a full Chinese
-edition of your library — the same summary shown on the reading page and the
+edition of library items that are not already in Chinese — the same summary shown on the reading page and the
 item page — and you can switch any of those editions to English. The Bulletin
 list still uses a shorter Chinese glance. Detailed notes stay in the source
 language until that full edition is ready.

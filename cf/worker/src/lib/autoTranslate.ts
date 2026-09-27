@@ -1,6 +1,7 @@
 import type { Env } from "../env";
 import { all, first } from "../db";
 import { isoNow } from "./crypto";
+import { isPredominantlyChinese, sourceAlreadyChinese } from "./chinese";
 
 const SUPPORTED_LANGUAGES = new Set([
   "en",
@@ -52,6 +53,7 @@ export async function enqueueTranslationLanguages(
     if (!SUPPORTED_LANGUAGES.has(language)) {
       throw new Error(`unsupported translation language: ${language}`);
     }
+    if (language === "zh" && await sourceAlreadyChinese(env, itemId)) continue;
     const result = await env.DB.prepare(QUEUE_TRANSLATION).bind(itemId, language).run();
     if ((result.meta.changes ?? 0) === 0) continue;
     try {
@@ -79,16 +81,20 @@ export async function enqueueLibraryContentTranslations(
   if (!SUPPORTED_LANGUAGES.has(lang)) {
     throw new Error(`unsupported translation language: ${lang}`);
   }
-  const rows = await all<{ id: number }>(
+  const rows = await all<{ id: number; sample: string | null }>(
     env.DB.prepare(
-      `SELECT i.id
+      `SELECT i.id, substr(COALESCE(s.markdown, t.text, ''), 1, 8000) AS sample
          FROM user_item ui
          JOIN item i ON i.id = ui.item_id
          JOIN transcript t ON t.item_id = i.id
+         LEFT JOIN summary s ON s.item_id = i.id
         WHERE ui.user_id = ? AND i.status = 'done'`,
     ).bind(userId),
   );
-  return enqueueContentTranslations(env, rows.map((row) => row.id), lang);
+  const ids = rows
+    .filter((row) => lang !== "zh" || !isPredominantlyChinese(row.sample || ""))
+    .map((row) => row.id);
+  return enqueueContentTranslations(env, ids, lang);
 }
 
 // When a source finishes, give it the full edition preferred by someone who

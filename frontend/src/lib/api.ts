@@ -201,7 +201,7 @@ export interface Annotation {
   body: string;
 }
 
-export type TranslationStatus = "queued" | "processing" | "done" | "error";
+export type TranslationStatus = "queued" | "processing" | "done" | "error" | "original";
 
 export interface TranslationRef {
   lang: string;

@@ -44,7 +44,7 @@ export function Preferences() {
           <div className="mt-0.5 rounded-full bg-accent p-2 text-primary"><Languages className="h-4 w-4" /></div>
           <div className="min-w-0 flex-1">
             <h2 className="font-serif text-xl font-semibold tracking-tight">Preferred bulletin language</h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">中文偏好会把资料库里的全文排成简体中文，阅读页上仍可改成 English。简报列表继续用较短的中文简报。 Chinese queues a full Chinese edition of your library. On any reading page you can switch that same edition to English.</p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">中文偏好会把还不是中文的全文排成简体中文，已经是中文的内容保持原文。阅读页上仍可改成 English。简报列表继续用较短的中文简报。 Chinese queues a full Chinese edition only when the summary is not already Chinese. On any reading page you can switch that edition to English.</p>
             <Select value={language} onChange={(event) => setLanguage(event.target.value as "auto" | "zh")} className="mt-4 max-w-sm">
               <option value="auto">Auto · keep the source language</option>
               <option value="zh">简体中文 · Chinese bulletin</option>

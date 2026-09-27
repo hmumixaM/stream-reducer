@@ -8,6 +8,7 @@ import { splitUrls, nonItemUrlError } from "../lib/url";
 import { readJson } from "../lib/request";
 import { includeSummaryDescription } from "../lib/summaryDescription";
 import { isInfographicContentReady } from "../lib/autoInfographic";
+import { sourceAlreadyChinese } from "../lib/chinese";
 import { readBulletinTranslation, translateBulletinEdition, type BulletinTranslationRow } from "../lib/bulletinTranslation";
 import {
   LIBRARY_SORT_COLUMNS,
@@ -389,6 +390,13 @@ itemsRoutes.post("/:id/translate", requireAuth, async (c) => {
     c.env.DB.prepare("SELECT id FROM transcript WHERE item_id = ?").bind(id),
   );
   if (!transcript) return c.json({ error: "item has no transcript yet" }, 409);
+  if (lang === "zh" && await sourceAlreadyChinese(c.env, id)) {
+    await c.env.DB.prepare(
+      `DELETE FROM item_translation
+        WHERE item_id = ? AND lang = ? AND status IN ('queued', 'processing')`,
+    ).bind(id, lang).run();
+    return c.json({ lang, status: "original" });
+  }
 
   const existing = await first<{ status: string }>(
     c.env.DB.prepare("SELECT status FROM item_translation WHERE item_id = ? AND lang = ?").bind(id, lang),
