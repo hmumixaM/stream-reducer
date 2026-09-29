@@ -41,6 +41,14 @@ export function readingContext(text: string, budget = 60_000): string {
   return selected.map((section) => section.length <= perSection ? section : `${section.slice(0, perSection)}\n[Section excerpt]`).join("\n\n");
 }
 
+export function parseJsonObject(raw: string): unknown {
+  const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new SyntaxError("Reading summary response is not JSON");
+  return JSON.parse(text.slice(start, end + 1));
+}
+
 export function parseReadingSummary(raw: unknown): ReadingSummary | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
@@ -107,7 +115,7 @@ export async function generateReadingSummary(env: Env, source: ReadingSource, la
       headers: { authorization: `Bearer ${env.GEMINI_API_KEY}`, "content-type": "application/json" },
       signal: AbortSignal.timeout(55_000),
       body: JSON.stringify({
-        model: env.LLM_MODEL, temperature: 0.2, max_tokens: 4800,
+        model: env.LLM_MODEL, temperature: 0.2, max_tokens: 16000,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: localized ? CHINESE_BRIEF : SOURCE_BRIEF },
@@ -117,8 +125,8 @@ export async function generateReadingSummary(env: Env, source: ReadingSource, la
     });
     if (!response.ok) throw new Error(`Reading summary provider returned ${response.status}`);
     const payload = await response.json() as { choices?: { message?: { content?: string } }[] };
-    const raw = (payload.choices?.[0]?.message?.content || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-    const content = parseReadingSummary(JSON.parse(raw));
+    const raw = payload.choices?.[0]?.message?.content || "";
+    const content = parseReadingSummary(parseJsonObject(raw));
     if (!content) throw new Error("Reading summary response is incomplete");
     // Only link to timestamps actually present in the source headings.
     const timestamps = new Set<number>();

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../env";
-import { generateReadingSummary, parseReadingSummary, readCached, readingContext, READING_VERSION, sourceHash, type ReadingRow } from "./readingSummary";
+import { generateReadingSummary, parseJsonObject, parseReadingSummary, readCached, readingContext, READING_VERSION, sourceHash, type ReadingRow } from "./readingSummary";
 
 const source = { id: 1, title: "A source", author: "A speaker", source_url: "https://example.com/source", summary_structured: JSON.stringify({ walkthrough: "### [00:01:30] Evidence\nThe speaker projects 12% growth.\n### [00:04:00] Limits\nThe projection depends on demand." }), summary_markdown: "Original detailed content" };
 const brief = { lead: "The speaker projects growth subject to demand.", sections: [{ heading: "Growth", body: "The forecast is 12%.", timestamp: 90 }, { heading: "Limitations", body: "It depends on demand.", timestamp: 240 }], conclusion: "" };
@@ -32,6 +32,7 @@ describe("reading edition", () => {
     expect(parseReadingSummary({ lead: "", sections: [] })).toBeNull();
     expect(parseReadingSummary({ ...brief, sections: [{ heading: "Heading", body: "" }] })).toBeNull();
     expect(parseReadingSummary(brief)).toEqual(brief);
+    expect(parseJsonObject(`说明\n${JSON.stringify(brief)}`)).toMatchObject({ lead: brief.lead });
   });
   it("invalidates cached editions when source content or prompt version changes", () => {
     const row = { source_hash: "old", version: READING_VERSION, status: "done", content: JSON.stringify(brief), updated_at: new Date().toISOString() };
