@@ -45,7 +45,7 @@ export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAtte
         `SELECT i.id, i.title, i.author, i.source_url, s.structured AS summary_structured, s.markdown AS summary_markdown
          FROM item i JOIN summary s ON s.item_id=i.id WHERE i.id=? AND i.status='done'`,
       ).bind(msg.item_id));
-      if (source) await generateReadingSummary(env, source);
+      if (source) await generateReadingSummary(env, source, msg.lang === "zh" ? "zh" : "");
       return;
     }
     case "poll":

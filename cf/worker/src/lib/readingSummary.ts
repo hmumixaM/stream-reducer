@@ -113,7 +113,7 @@ export async function generateReadingSummary(env: Env, source: ReadingSource, la
     const response = await fetch(`${env.LLM_BASE_URL.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: { authorization: `Bearer ${env.GEMINI_API_KEY}`, "content-type": "application/json" },
-      signal: AbortSignal.timeout(55_000),
+      signal: AbortSignal.timeout(90_000),
       body: JSON.stringify({
         model: env.LLM_MODEL, temperature: 0.2, max_tokens: 16000,
         response_format: { type: "json_object" },
