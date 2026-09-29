@@ -63,13 +63,16 @@ bulletinRoutes.get("/:id", async (c) => {
   const row = await getAccessible(c.env, user.id, id);
   if (!row) return c.json({ error: "bulletin not found" }, 404);
   const source = { ...row, summary_markdown: row.summary_markdown || null };
+  const hash = await sourceHash(source);
   const cached = await first<ReadingRow>(c.env.DB.prepare("SELECT * FROM reading_summary WHERE item_id=?").bind(id));
+  const chinese = await first<ReadingRow>(c.env.DB.prepare("SELECT * FROM reading_summary_lang WHERE item_id=? AND lang='zh'").bind(id));
   const contentTranslations = await all<{ lang: string; status: string }>(
     c.env.DB.prepare("SELECT lang, status FROM item_translation WHERE item_id = ? ORDER BY lang").bind(id),
   );
   return c.json({
     ...serializeBulletin(row, user.preferred_language || "auto", true),
-    reading_summary: readCached(cached, await sourceHash(source)),
+    reading_summary: readCached(cached, hash),
+    reading_summary_zh: readCached(chinese, hash),
     content_translations: contentTranslations,
   });
 });
@@ -79,8 +82,10 @@ bulletinRoutes.post("/:id/reading-summary", async (c) => {
   if (!Number.isInteger(id) || id <= 0) return c.json({ error: "Invalid item" }, 400);
   const row = await getAccessible(c.env, c.get("user").id, id);
   if (!row) return c.json({ error: "bulletin not found" }, 404);
+  const body = await c.req.json().catch(() => ({})) as { lang?: string };
+  const lang = body.lang === "zh" ? "zh" : "";
   try {
-    const result = await generateReadingSummary(c.env, { ...row, summary_markdown: row.summary_markdown || null });
+    const result = await generateReadingSummary(c.env, { ...row, summary_markdown: row.summary_markdown || null }, lang);
     return c.json(result, result.status === "processing" ? 202 : 200);
   } catch (error) {
     console.error("reading summary failed", id, String(error));

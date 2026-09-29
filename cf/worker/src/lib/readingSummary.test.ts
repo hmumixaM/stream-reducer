@@ -61,6 +61,17 @@ describe("reading edition", () => {
     expect(writes.every((sql) => !sql.includes("UPDATE summary "))).toBe(true);
     expect(getRow()?.status).toBe("done");
   });
+  it("writes the concise brief in Chinese from the full source notes", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(brief) } }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    const { env, writes } = environment();
+    const result = await generateReadingSummary(env, source, "zh");
+    const request = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(result.content?.lead).toBe(brief.lead);
+    expect(request.messages[0].content).toContain("Simplified Chinese");
+    expect(request.messages[1].content).toContain("Evidence");
+    expect(writes.some((sql) => sql.includes("reading_summary_lang"))).toBe(true);
+  });
   it("persists an error when the provider fails so the UI can retry", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 })));
     const { env, getRow } = environment();

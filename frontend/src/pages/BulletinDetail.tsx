@@ -30,14 +30,21 @@ function SummaryBody({ summary, source, zh, print = false }: { summary: ReadingS
   </>;
 }
 
-function pointsOf(structured: Record<string, unknown>): { text: string; timestamp: number | null }[] {
-  if (!Array.isArray(structured.bulletin)) return [];
-  return structured.bulletin.flatMap((entry) => {
+function pointsOf(structured: Record<string, unknown>, field = "bulletin"): { text: string; timestamp: number | null }[] {
+  const raw = structured[field];
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry) => {
     if (typeof entry === "string" && entry.trim()) return [{ text: entry.trim(), timestamp: null }];
     if (!entry || typeof entry !== "object" || !("text" in entry) || typeof entry.text !== "string" || !entry.text.trim()) return [];
     const timestamp = "timestamp" in entry && typeof entry.timestamp === "number" && entry.timestamp >= 0 ? entry.timestamp : null;
     return [{ text: entry.text.trim(), timestamp }];
   });
+}
+
+function richestPoints(structured: Record<string, unknown>) {
+  const bulletin = pointsOf(structured, "bulletin");
+  const keyPoints = pointsOf(structured, "key_points");
+  return keyPoints.length > bulletin.length ? keyPoints : bulletin;
 }
 
 export function BulletinDetail() {
@@ -59,11 +66,11 @@ export function BulletinDetail() {
   const queryKey = ["bulletin", itemId, me.data?.user?.id, zh];
   const bulletin = useQuery({
     queryKey, queryFn: () => api.getBulletin(itemId), enabled: Number.isInteger(itemId) && itemId > 0,
-    refetchInterval: (query) => query.state.data?.reading_summary.status === "processing" || (zh && query.state.data?.localization_status === "processing") ? 3000 : false,
+    refetchInterval: (query) => query.state.data?.reading_summary.status === "processing" || query.state.data?.reading_summary_zh?.status === "processing" || (zh && query.state.data?.localization_status === "processing") ? 3000 : false,
   });
   const preparation = useMutation({
-    mutationFn: (id: number) => api.prepareReadingSummary(id),
-    onSuccess: (result, id) => qc.setQueryData<BulletinItem>(["bulletin", id, me.data?.user?.id, zh], (old) => old ? { ...old, reading_summary: result } : old),
+    mutationFn: ({ id, lang }: { id: number; lang?: "zh" }) => api.prepareReadingSummary(id, lang),
+    onSuccess: (result, { id, lang }) => qc.setQueryData<BulletinItem>(["bulletin", id, me.data?.user?.id, zh], (old) => old ? { ...old, ...(lang === "zh" ? { reading_summary_zh: result } : { reading_summary: result }) } : old),
   });
   const localization = useMutation({
     mutationFn: (id: number) => api.prepareBulletin(id),
@@ -76,7 +83,7 @@ export function BulletinDetail() {
       localization.mutate(itemId);
     }
   }, [itemId, zh, bulletin.data?.bulletin_intro_ready, bulletin.data?.localization_status]);
-  const attempted = useRef(new Set<number>());
+  const attempted = useRef(new Set<string>());
   const picked = useRef(false);
   const askedChinese = useRef(false);
   const nativeChinese = isPredominantlyChinese(bulletin.data?.markdown || bulletin.data?.tldr || "");
@@ -116,12 +123,15 @@ export function BulletinDetail() {
     askedChinese.current = true;
     requestEdition.mutate("zh");
   }, [zh, nativeChinese, lang, translations, bulletin.data, itemId, requestEdition]);
+  const chineseBrief = lang === "zh" && !nativeChinese;
+  const briefStatus = chineseBrief ? bulletin.data?.reading_summary_zh?.status : bulletin.data?.reading_summary.status;
   useEffect(() => {
-    if (lang == null && view === "summary" && bulletin.data?.reading_summary.status === "missing" && !attempted.current.has(itemId)) {
-      attempted.current.add(itemId);
-      preparation.mutate(itemId);
+    const key = `${itemId}:${chineseBrief ? "zh" : "source"}`;
+    if (briefStatus === "missing" && !attempted.current.has(key)) {
+      attempted.current.add(key);
+      preparation.mutate({ id: itemId, lang: chineseBrief ? "zh" : undefined });
     }
-  }, [itemId, lang, bulletin.data?.reading_summary.status, view]); // A missing source edition is prepared once; errors require an explicit retry.
+  }, [itemId, chineseBrief, briefStatus]); // A missing concise brief is prepared once; errors require an explicit retry.
   useEffect(() => { setPrintFull(false); }, [itemId]);
 
   if (bulletin.isLoading) return <LoadingState label={zh ? "正在打开阅读稿…" : "Opening your reading edition…"} />;
@@ -129,15 +139,19 @@ export function BulletinDetail() {
   const item = bulletin.data;
   const edition = lang != null && translation.data?.status === "done" ? translation.data : null;
   const editionStructured = (edition?.structured ?? {}) as Record<string, unknown>;
-  const editionPoints = edition ? pointsOf(editionStructured) : [];
+  const editionPoints = edition ? richestPoints(editionStructured) : [];
   const editionOverview = typeof editionStructured.tldr === "string" ? editionStructured.tldr : "";
   const pageTitle = edition && typeof editionStructured.headline === "string" && editionStructured.headline ? editionStructured.headline : item.source_title;
   const waitingEdition = lang != null && !edition && translation.data?.status !== "error";
   const failedEdition = lang != null && translation.data?.status === "error";
   const glancePoints = edition ? editionPoints : lang == null ? item.key_point_details : item.bulletin_points;
   const glanceOverview = edition ? editionOverview : lang == null ? item.tldr : item.bulletin_overview;
-  const summary = item.reading_summary.content;
-  const preparing = (preparation.isPending && preparation.variables === itemId) || item.reading_summary.status === "processing";
+  const brief = chineseBrief ? item.reading_summary_zh : item.reading_summary;
+  const summary = brief?.content ?? null;
+  const preparing = (preparation.isPending && preparation.variables?.id === itemId && Boolean(preparation.variables.lang) === chineseBrief) || brief?.status === "processing";
+  const notesMarkdown = edition
+    ? (typeof editionStructured.walkthrough === "string" && editionStructured.walkthrough.trim() ? editionStructured.walkthrough : edition.markdown)
+    : (item.walkthrough || item.markdown);
   const summaryText = summary ? [summary.lead, ...summary.sections.map((section) => section.body), summary.conclusion].join(" ") : item.tldr;
   const setView = (next: View) => setParams((previous) => { const p = new URLSearchParams(previous); if (next === "summary") p.delete("view"); else p.set("view", next); return p; }, { replace: true });
   const exportPdf = async () => {
@@ -193,21 +207,17 @@ export function BulletinDetail() {
             document.getElementById(`tab-${tabs[next].value}`)?.focus();
           }} className={cn("reader-tab", view === tab.value && "is-active")} onClick={() => setView(tab.value)}>{tab.label}</button>)}</div>
           <article className="reader-article" role="tabpanel" id={`panel-${view}`} aria-labelledby={`tab-${view}`}>
-            {lang != null && view !== "sources" ? (
-              waitingEdition || failedEdition ? <div className="reader-preparing" role="status"><RefreshCw size={18} className={cn("shrink-0", waitingEdition && "animate-spin")} /><div><p className="font-medium">{failedEdition ? (zh ? "全文翻译失败" : "The full edition failed") : (zh ? `正在生成${languageLabel(lang)}全文` : `Preparing the ${languageLabel(lang)} edition`)}</p>{failedEdition && <Button size="sm" variant="outline" className="mt-3" onClick={() => requestEdition.mutate(lang)}>{zh ? "重试" : "Retry"}</Button>}</div></div>
-              : <Suspense fallback={<LoadingState label={zh ? "加载全文…" : "Loading the edition…"} />}><FullMarkdown markdown={edition?.markdown || ""} highlights={[]} source="summary" readOnly onCreate={noOp} onUpdateNote={noOp} onDelete={noOp} className="prose-sr reader-prose" /></Suspense>
-            ) : view === "summary" && (summary ? <SummaryBody summary={summary} source={item.source_url} zh={zh} /> : <>
-              <div className="reader-preparing" role="status">{preparing ? <RefreshCw size={18} className="shrink-0 animate-spin" /> : <BookOpen size={18} className="shrink-0" />}<div><p className="font-medium">{preparing ? (zh ? "正在整理这篇精炼概括" : "Preparing your reading edition") : (zh ? "精炼概括暂时未就绪" : "The reading edition isn’t ready yet")}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{zh ? "先阅读下面的原有概览，或切换到完整逐段内容。" : "You can read the existing overview below, or switch to the full notes."}</p>{!preparing && <Button size="sm" variant="outline" className="mt-3" onClick={() => preparation.mutate(itemId)}>{zh ? "重新生成概括" : "Retry summary"}</Button>}</div></div>
-              {item.tldr && <p className="reader-lead">{item.tldr}</p>}
-              {item.key_point_details.length > 0 && <section className="reader-section"><h2>{zh ? "原有内容要点" : "Source takeaways"}</h2><ul className="reader-source-points">{item.key_point_details.slice(0, 6).map((point, index) => <li key={index}>{point.text}</li>)}</ul></section>}
+            {view === "summary" && (summary ? <SummaryBody summary={summary} source={item.source_url} zh={zh || chineseBrief} /> : <>
+              <div className="reader-preparing" role="status">{preparing ? <RefreshCw size={18} className="shrink-0 animate-spin" /> : <BookOpen size={18} className="shrink-0" />}<div><p className="font-medium">{preparing ? (zh ? "正在整理这篇精炼概括" : "Preparing your reading edition") : (zh ? "精炼概括暂时未就绪" : "The reading edition isn’t ready yet")}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{zh ? "先阅读上面的简报，或切换到完整逐段内容。" : "You can read the bulletin above, or switch to the full notes."}</p>{!preparing && <Button size="sm" variant="outline" className="mt-3" onClick={() => preparation.mutate({ id: itemId, lang: chineseBrief ? "zh" : undefined })}>{zh ? "重新生成概括" : "Retry summary"}</Button>}</div></div>
+              {(chineseBrief ? editionOverview : item.tldr) && <p className="reader-lead">{chineseBrief ? editionOverview : item.tldr}</p>}
             </>)}
-            {lang == null && view === "notes" && <><p className="mb-6 text-xs text-muted-foreground">{zh ? "保留完整论述、例子与时间线。" : "The full argument, examples and chronological notes."}</p><Suspense fallback={<LoadingState label={zh ? "加载完整内容…" : "Loading full notes…"} />}><FullMarkdown markdown={item.walkthrough || item.markdown} highlights={[]} source="summary" readOnly onCreate={noOp} onUpdateNote={noOp} onDelete={noOp} className="prose-sr reader-prose" /></Suspense></>}
+            {view === "notes" && (waitingEdition || failedEdition ? <div className="reader-preparing" role="status"><RefreshCw size={18} className={cn("shrink-0", waitingEdition && "animate-spin")} /><div><p className="font-medium">{failedEdition ? (zh ? "全文翻译失败" : "The full edition failed") : (zh ? `正在生成${languageLabel(lang!)}逐段内容` : `Preparing the ${languageLabel(lang!)} notes`)}</p>{failedEdition && <Button size="sm" variant="outline" className="mt-3" onClick={() => requestEdition.mutate(lang!)}>{zh ? "重试" : "Retry"}</Button>}</div></div> : <><p className="mb-6 text-xs text-muted-foreground">{zh ? "保留完整论述、例子与时间线。" : "The full argument, examples and chronological notes."}</p><Suspense fallback={<LoadingState label={zh ? "加载完整内容…" : "Loading full notes…"} />}><FullMarkdown markdown={notesMarkdown} highlights={[]} source="summary" readOnly onCreate={noOp} onUpdateNote={noOp} onDelete={noOp} className="prose-sr reader-prose" /></Suspense></>)}
             {view === "sources" && <><section className="reader-section pt-0"><p className="desk-eyebrow">{zh ? "原始来源" : "ORIGINAL SOURCE"}</p><h2 className="mt-3">{item.source_title}</h2><p className="reader-prose mt-4">{item.background}</p><a href={item.source_url} target="_blank" rel="noreferrer" className="reader-citation mt-4">{zh ? "打开原始来源" : "Open original source"}<ArrowUpRight size={12} /></a></section>{item.quotes.map((quote, index) => <blockquote className="reader-quote" key={index}><p>“{quote.text}”</p><footer>{quote.speaker}{quote.timestamp !== null && <a href={sourceAt(item.source_url, quote.timestamp)} target="_blank" rel="noreferrer"> · {timestampLabel(quote.timestamp)} ↗</a>}</footer></blockquote>)}{!item.quotes.length && <p className="text-sm text-muted-foreground">{zh ? "这篇内容未提取单独引文，可在完整内容中查阅。" : "No separate quotes were extracted. You can inspect the full notes."}</p>}<Link to={`/items/${item.id}`} className="reader-citation mt-8">{zh ? "查看逐字稿、笔记与标注" : "Open transcript, notes & highlights"}<ArrowUpRight size={13} /></Link></>}
           </article>
         </div>
         <aside className="reader-toc">
           <div className="sticky top-8 space-y-7">
-            <div><p className="desk-eyebrow"><List size={13} />{zh ? "本篇导读" : "IN THIS BRIEF"}</p>{lang == null && summary ? <ol className="mt-4 space-y-3">{summary.sections.map((section, index) => <li key={index}><a href={`#section-${index}`} className="flex gap-2 text-xs leading-5 text-muted-foreground hover:text-primary" onClick={(event) => {
+            <div><p className="desk-eyebrow"><List size={13} />{zh ? "本篇导读" : "IN THIS BRIEF"}</p>{summary ? <ol className="mt-4 space-y-3">{summary.sections.map((section, index) => <li key={index}><a href={`#section-${index}`} className="flex gap-2 text-xs leading-5 text-muted-foreground hover:text-primary" onClick={(event) => {
               event.preventDefault();
               setView("summary");
               requestAnimationFrame(() => document.getElementById(`section-${index}`)?.scrollIntoView({ behavior: "smooth", block: "start" }));

@@ -475,6 +475,7 @@ export interface BulletinItem {
   quotes: BulletinQuote[];
   entities: string[];
   reading_summary: ReadingSummaryResult;
+  reading_summary_zh?: ReadingSummaryResult;
   content_translations?: { lang: string; status: string }[];
 }
 
@@ -1158,7 +1159,7 @@ export const api = {
   },
   getBulletin: (id: number) => req<BulletinItem>(`/api/bulletin/${id}`),
   prepareBulletin: (id: number) => req<LocalizedBulletin>(`/api/items/${id}/bulletin`, { method: "POST" }),
-  prepareReadingSummary: (id: number) => req<ReadingSummaryResult>(`/api/bulletin/${id}/reading-summary`, { method: "POST" }),
+  prepareReadingSummary: (id: number, lang?: "zh") => req<ReadingSummaryResult>(`/api/bulletin/${id}/reading-summary`, { method: "POST", body: JSON.stringify(lang ? { lang } : {}) }),
   runResearch: () =>
     req<{ ok: boolean; created: number; generated_at: string }>("/api/research/run", { method: "POST" }),
   askResearch: (question: string) =>
