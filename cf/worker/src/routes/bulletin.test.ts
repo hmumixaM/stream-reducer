@@ -2,7 +2,10 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import type { AppContext } from "../auth";
 import type { Env } from "../env";
-vi.mock("../auth", () => ({ requireAuth: async (c: { set: (key: string, value: unknown) => void }, next: () => Promise<void>) => { c.set("user", { id: 4, preferred_language: "zh" }); await next(); } }));
+vi.mock("../auth", () => ({
+  requireAuth: async (c: { set: (key: string, value: unknown) => void }, next: () => Promise<void>) => { c.set("user", { id: 4, preferred_language: "zh" }); await next(); },
+  resolveUser: async () => null,
+}));
 import { bulletinRoutes, parsePoints, serializeBulletin } from "./bulletin";
 const row = { id: 10, title: "Original", headline: null, subhead: null, author: "Publisher", source_url: "https://example.com", platform: "youtube", duration_s: 600, published_at: "2026-09-18T13:00:00Z", created_at: "2026-09-18T14:00:00Z", sort_date: 2461302.1, saved: 1, summary_structured: JSON.stringify({ bulletin: [{ text: "Source claim", timestamp: 90 }], tldr: "Original overview", walkthrough: "Long original content" }), summary_markdown: "Long Markdown", localized_bulletin: JSON.stringify([{ text: "中文要点", timestamp: 90 }]), localized_bulletin_status: "done", localized_headline: "中文标题", localized_subhead: "中文副标题", localized_tldr: "中文概览段落" };
 function setup(rows: unknown[] = [], detail: unknown = null) {
@@ -66,6 +69,16 @@ describe("bulletin reading API", () => {
     const response = await app.request(`/api/bulletin${url}`, { method: url.endsWith("reading-summary") ? "POST" : "GET" }, env);
     expect(response.status).toBe(400);
     expect(queries).toHaveLength(0);
+  });
+  it("serves a finished bulletin without a session", async () => {
+    const { app, env, queries } = setup([], row);
+    const response = await app.request("/api/bulletin/10", {}, env);
+    expect(response.status).toBe(200);
+    const body = await response.json() as { walkthrough: string };
+    expect(body.walkthrough).toBe("Long original content");
+    expect(queries[0].sql).toContain("i.status='done'");
+    expect(queries[0].sql).not.toContain("sub.user_id");
+    expect(queries[0].args[0]).toBe(-1);
   });
   it("does not generate a brief for an inaccessible source", async () => {
     const { app, env } = setup();

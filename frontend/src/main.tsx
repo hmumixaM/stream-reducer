@@ -198,7 +198,7 @@ const router = createBrowserRouter([
       { path: "research/briefs/:id", element: <RequireAuth><ResearchBrief /></RequireAuth> },
       { path: "bulletin", element: <RequireAuth><Bulletin /></RequireAuth> },
       { path: "timeline", element: <RequireAuth><Timeline /></RequireAuth> },
-      { path: "bulletin/:id", element: <RequireAuth><BulletinDetail /></RequireAuth> },
+      { path: "bulletin/:id", element: <BulletinDetail /> },
       { path: "library", element: <RequireAuth><Library /></RequireAuth> },
       { path: "search", element: <RequireAuth><Search /></RequireAuth> },
       { path: "graph", element: <RequireAuth><Graph /></RequireAuth> },

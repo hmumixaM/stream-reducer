@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext } from "../auth";
-import { requireAuth } from "../auth";
+import { requireAuth, resolveUser } from "../auth";
 import { all, first } from "../db";
 import { generateReadingSummary, readCached, sourceHash, type ReadingRow } from "../lib/readingSummary";
 
@@ -8,7 +8,6 @@ import { serializeBulletin, type BulletinRow, bulletinMetadata as metadata, bull
 export { parseObject, parsePoints, serializeBulletin } from "../lib/bulletinPresentation";
 
 export const bulletinRoutes = new Hono<AppContext>();
-bulletinRoutes.use("*", requireAuth);
 
 // EXISTS avoids duplicating large summary rows across the many-to-many channel joins.
 const accessible = (includeCollections = false) => `FROM item i JOIN summary s ON s.item_id=i.id
@@ -21,7 +20,7 @@ const accessible = (includeCollections = false) => `FROM item i JOIN summary s O
       WHERE sub.user_id=? AND sub.enabled=1 AND f.item_id=i.id)
     ${includeCollections ? "OR EXISTS (SELECT 1 FROM collection_item ci JOIN collection c ON c.id=ci.collection_id WHERE ci.item_id=i.id AND c.is_public=1)" : ""})`;
 
-bulletinRoutes.get("/feed", async (c) => {
+bulletinRoutes.get("/feed", requireAuth, async (c) => {
   const params = c.req.query();
   const limit = Math.min(Math.max(Number(params.limit || 24), 1), 60);
   const offset = Math.min(Math.max(Number(params.offset || 0), 0), 10000);
@@ -59,8 +58,16 @@ async function getAccessible(env: AppContext["Bindings"], userId: number, id: nu
 bulletinRoutes.get("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id) || id <= 0) return c.json({ error: "Invalid item" }, 400);
-  const user = c.get("user");
-  const row = await getAccessible(c.env, user.id, id);
+  const user = await resolveUser(c.env, c);
+  // Finished bulletins are public reading, same as the item page. The personal
+  // feed and any generation stay behind a session.
+  const row = await first<BulletinRow>(c.env.DB.prepare(
+    `SELECT ${metadata}, s.structured AS summary_structured, s.markdown AS summary_markdown
+     FROM item i JOIN summary s ON s.item_id=i.id
+     LEFT JOIN user_item ui ON ui.item_id=i.id AND ui.user_id=?
+     LEFT JOIN bulletin_translation bt ON bt.item_id=i.id AND bt.lang='zh'
+     WHERE i.status='done' AND i.id=? LIMIT 1`,
+  ).bind(user?.id ?? -1, id));
   if (!row) return c.json({ error: "bulletin not found" }, 404);
   const source = { ...row, summary_markdown: row.summary_markdown || null };
   const hash = await sourceHash(source);
@@ -70,14 +77,14 @@ bulletinRoutes.get("/:id", async (c) => {
     c.env.DB.prepare("SELECT lang, status FROM item_translation WHERE item_id = ? ORDER BY lang").bind(id),
   );
   return c.json({
-    ...serializeBulletin(row, user.preferred_language || "auto", true),
+    ...serializeBulletin(row, user?.preferred_language || "auto", true),
     reading_summary: readCached(cached, hash),
     reading_summary_zh: readCached(chinese, hash),
     content_translations: contentTranslations,
   });
 });
 
-bulletinRoutes.post("/:id/reading-summary", async (c) => {
+bulletinRoutes.post("/:id/reading-summary", requireAuth, async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id) || id <= 0) return c.json({ error: "Invalid item" }, 400);
   const row = await getAccessible(c.env, c.get("user").id, id);

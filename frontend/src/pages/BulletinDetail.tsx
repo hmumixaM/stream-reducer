@@ -51,12 +51,13 @@ export function BulletinDetail() {
   const { id } = useParams();
   const itemId = Number(id);
   const me = useMe();
+  const authed = !!me.data?.user;
   const zh = me.data?.user?.preferred_language === "zh";
   const [params, setParams] = useSearchParams();
   const collection = params.get("collection");
   const returnParams = new URLSearchParams({ view: "bulletin" });
   for (const key of ["section", "track_id"]) if (params.get(key)) returnParams.set(key, params.get(key)!);
-  const backTo = collection ? `/collections/${encodeURIComponent(collection)}?${returnParams}` : "/bulletin";
+  const backTo = collection ? `/collections/${encodeURIComponent(collection)}?${returnParams}` : authed ? "/bulletin" : "/browse";
   const selected = params.get("view");
   const view: View = selected === "notes" || selected === "sources" ? selected : "summary";
   const [printFull, setPrintFull] = useState(false);
@@ -78,11 +79,12 @@ export function BulletinDetail() {
   });
   const localizedAttempts = useRef(new Set<number>());
   useEffect(() => {
+    if (!authed) return;
     if (zh && bulletin.data && !bulletin.data.bulletin_intro_ready && bulletin.data.localization_status !== "processing" && !localizedAttempts.current.has(itemId)) {
       localizedAttempts.current.add(itemId);
       localization.mutate(itemId);
     }
-  }, [itemId, zh, bulletin.data?.bulletin_intro_ready, bulletin.data?.localization_status]);
+  }, [authed, itemId, zh, bulletin.data?.bulletin_intro_ready, bulletin.data?.localization_status]);
   const attempted = useRef(new Set<string>());
   const picked = useRef(false);
   const askedChinese = useRef(false);
@@ -111,27 +113,29 @@ export function BulletinDetail() {
   });
   const requestLanguage = (code: string) => {
     picked.current = true;
+    if (!authed) return;
     if (code === "zh" && nativeChinese) { setLang(null); return; }
     if (code === "zh" && zh) { requestEdition.mutate(code); return; }
     const label = languageLabel(code);
     if (confirm(zh ? `生成${label}全文？生成一次后所有人共用。` : `Generate a ${label} edition of the full summary? It runs once and is then shared.`)) requestEdition.mutate(code);
   };
   useEffect(() => {
-    if (!zh || nativeChinese || lang !== "zh" || askedChinese.current) return;
+    if (!authed || !zh || nativeChinese || lang !== "zh" || askedChinese.current) return;
     if (translations.some((row) => row.lang === "zh")) return;
     if (!bulletin.data) return;
     askedChinese.current = true;
     requestEdition.mutate("zh");
-  }, [zh, nativeChinese, lang, translations, bulletin.data, itemId, requestEdition]);
+  }, [authed, zh, nativeChinese, lang, translations, bulletin.data, itemId, requestEdition]);
   const chineseBrief = lang === "zh" && !nativeChinese;
   const briefStatus = chineseBrief ? bulletin.data?.reading_summary_zh?.status : bulletin.data?.reading_summary.status;
   useEffect(() => {
     const key = `${itemId}:${chineseBrief ? "zh" : "source"}`;
+    if (!authed) return;
     if (briefStatus === "missing" && !attempted.current.has(key)) {
       attempted.current.add(key);
       preparation.mutate({ id: itemId, lang: chineseBrief ? "zh" : undefined });
     }
-  }, [itemId, chineseBrief, briefStatus]); // A missing concise brief is prepared once; errors require an explicit retry.
+  }, [authed, itemId, chineseBrief, briefStatus]); // A missing concise brief is prepared once; errors require an explicit retry.
   useEffect(() => { setPrintFull(false); }, [itemId]);
 
   if (bulletin.isLoading) return <LoadingState label={zh ? "正在打开阅读稿…" : "Opening your reading edition…"} />;
@@ -177,7 +181,7 @@ export function BulletinDetail() {
   return <div className="reading-edition mx-auto max-w-6xl">
     <div className="reader-screen screen-only">
       <div className="mb-7 flex flex-wrap items-center justify-between gap-3">
-        <Link to={backTo} className="desk-utility"><ArrowLeft size={15} />{collection ? (zh ? "返回 Collection 简报" : "Back to collection") : (zh ? "返回 Bulletin" : "Back to Bulletin")}</Link>
+        <Link to={backTo} className="desk-utility"><ArrowLeft size={15} />{collection ? (zh ? "返回 Collection 简报" : "Back to collection") : authed ? (zh ? "返回 Bulletin" : "Back to Bulletin") : (zh ? "返回目录" : "Back to catalog")}</Link>
         <div className="flex items-center gap-2"><Select value={printFull ? "full" : "summary"} onChange={(event) => setPrintFull(event.target.value === "full")} aria-label={zh ? "PDF 内容" : "PDF contents"} className="w-auto bg-transparent text-xs"><option value="summary">{zh ? "简报 + 精炼概括" : "Bulletin + summary"}</option><option value="full">{zh ? "包含完整逐段内容" : "Include deep dive"}</option></Select><Button variant="outline" aria-label={zh ? "导出 PDF" : "Export PDF"} disabled={printing || waitingEdition || (lang == null && zh && !item.bulletin_intro_ready) || (lang == null && !summary && !printFull)} onClick={exportPdf}>{printing ? <RefreshCw size={14} className="animate-spin" /> : <FileDown size={14} />}<span className="hidden sm:inline">{zh ? "导出 PDF" : "Export PDF"}</span></Button></div>
       </div>
       {printError && <p role="alert" className="mb-4 text-sm text-muted-foreground">{zh ? "完整内容尚未加载完毕，请稍后重试导出。" : "The full edition is still loading. Please try exporting again in a moment."}</p>}
@@ -186,7 +190,7 @@ export function BulletinDetail() {
         <h1>{pageTitle}</h1>
         <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Clock3 size={13} />{readingMinutes(edition?.markdown || summaryText)} {zh ? "分钟精读" : "min read"}</span><span>{lang == null ? (zh ? "正文为原文" : "Summary in the source language") : waitingEdition ? (zh ? `正在生成${languageLabel(lang)}全文` : `Preparing the ${languageLabel(lang)} edition`) : failedEdition ? (zh ? "全文翻译失败" : "Translation failed") : (zh ? `全文为${languageLabel(lang)}` : `Full summary in ${languageLabel(lang)}`)}</span><a href={item.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 hover:text-primary">{zh ? "原始来源" : "Original source"}<ExternalLink size={12} /></a></div>
       </div>
-      <ContentLanguageBar active={lang} translations={translations} authed zhUi={zh} nativeChinese={nativeChinese} busy={requestEdition.isPending} onSelect={(code) => { picked.current = true; setLang(code); }} onRequest={requestLanguage} />
+      <ContentLanguageBar active={lang} translations={translations} authed={authed} zhUi={zh} nativeChinese={nativeChinese} busy={requestEdition.isPending} onSelect={(code) => { picked.current = true; setLang(code); }} onRequest={requestLanguage} />
       <div className="reader-columns">
         <div className="min-w-0">
           <section className="reader-bulletin" aria-label="Bulletin">
@@ -208,7 +212,7 @@ export function BulletinDetail() {
           }} className={cn("reader-tab", view === tab.value && "is-active")} onClick={() => setView(tab.value)}>{tab.label}</button>)}</div>
           <article className="reader-article" role="tabpanel" id={`panel-${view}`} aria-labelledby={`tab-${view}`}>
             {view === "summary" && (summary ? <SummaryBody summary={summary} source={item.source_url} zh={zh || chineseBrief} /> : <>
-              <div className="reader-preparing" role="status">{preparing ? <RefreshCw size={18} className="shrink-0 animate-spin" /> : <BookOpen size={18} className="shrink-0" />}<div><p className="font-medium">{preparing ? (zh ? "正在整理这篇精炼概括" : "Preparing your reading edition") : (zh ? "精炼概括暂时未就绪" : "The reading edition isn’t ready yet")}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{zh ? "先阅读上面的简报，或切换到完整逐段内容。" : "You can read the bulletin above, or switch to the full notes."}</p>{!preparing && <Button size="sm" variant="outline" className="mt-3" onClick={() => preparation.mutate({ id: itemId, lang: chineseBrief ? "zh" : undefined })}>{zh ? "重新生成概括" : "Retry summary"}</Button>}</div></div>
+              <div className="reader-preparing" role="status">{preparing ? <RefreshCw size={18} className="shrink-0 animate-spin" /> : <BookOpen size={18} className="shrink-0" />}<div><p className="font-medium">{preparing ? (zh ? "正在整理这篇精炼概括" : "Preparing your reading edition") : (zh ? "精炼概括暂时未就绪" : "The reading edition isn’t ready yet")}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{zh ? "先阅读上面的简报，或切换到完整逐段内容。" : "You can read the bulletin above, or switch to the full notes."}</p>{!preparing && authed && <Button size="sm" variant="outline" className="mt-3" onClick={() => preparation.mutate({ id: itemId, lang: chineseBrief ? "zh" : undefined })}>{zh ? "重新生成概括" : "Retry summary"}</Button>}</div></div>
               {(chineseBrief ? editionOverview : item.tldr) && <p className="reader-lead">{chineseBrief ? editionOverview : item.tldr}</p>}
             </>)}
             {view === "notes" && (waitingEdition || failedEdition ? <div className="reader-preparing" role="status"><RefreshCw size={18} className={cn("shrink-0", waitingEdition && "animate-spin")} /><div><p className="font-medium">{failedEdition ? (zh ? "全文翻译失败" : "The full edition failed") : (zh ? `正在生成${languageLabel(lang!)}逐段内容` : `Preparing the ${languageLabel(lang!)} notes`)}</p>{failedEdition && <Button size="sm" variant="outline" className="mt-3" onClick={() => requestEdition.mutate(lang!)}>{zh ? "重试" : "Retry"}</Button>}</div></div> : <><p className="mb-6 text-xs text-muted-foreground">{zh ? "保留完整论述、例子与时间线。" : "The full argument, examples and chronological notes."}</p><Suspense fallback={<LoadingState label={zh ? "加载完整内容…" : "Loading full notes…"} />}><FullMarkdown markdown={notesMarkdown} highlights={[]} source="summary" readOnly onCreate={noOp} onUpdateNote={noOp} onDelete={noOp} className="prose-sr reader-prose" /></Suspense></>)}
