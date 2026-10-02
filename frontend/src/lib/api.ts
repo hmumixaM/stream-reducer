@@ -81,6 +81,16 @@ export interface BulletinPreference {
   enqueued?: number;
 }
 
+export interface FeedbackReport {
+  id: number;
+  email: string;
+  kind: "bug" | "suggestion";
+  body: string;
+  page_url: string | null;
+  created_at: string;
+  image_ids: number[];
+}
+
 export interface AdminUser {
   id: number;
   email: string;
@@ -1215,6 +1225,15 @@ export const api = {
   getStats: (refresh?: boolean) =>
     req<Stats>(`/api/stats${refresh ? "?refresh=true" : ""}`),
   // --- admin ---
+  sendFeedback: (input: { kind: "bug" | "suggestion"; body: string; pageUrl: string; images: File[] }) => {
+    const form = new FormData();
+    form.set("kind", input.kind);
+    form.set("body", input.body);
+    form.set("page_url", input.pageUrl);
+    for (const image of input.images) form.append("images", image);
+    return req<{ id: number; email: string }>("/api/feedback", { method: "POST", body: form, headers: {} });
+  },
+  adminListFeedback: () => req<FeedbackReport[]>("/api/admin/feedback"),
   adminListUsers: () => req<AdminUser[]>("/api/admin/users"),
   adminSetUserAdmin: (id: number, is_admin: boolean) =>
     req<{ ok: boolean }>(`/api/admin/users/${id}/admin`, {

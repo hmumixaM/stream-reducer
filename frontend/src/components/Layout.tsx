@@ -22,6 +22,7 @@ import {
   Shield,
   Radar,
   Newspaper,
+  MessageSquarePlus,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/auth";
@@ -31,6 +32,7 @@ import { Button, Card, Select, Spinner } from "@/components/ui";
 import { SkeletonGrid } from "@/components/shell";
 import { cn } from "@/lib/utils";
 import { LogIn } from "lucide-react";
+import { FeedbackDialog } from "@/components/FeedbackDialog";
 
 const SECTIONS = ["main", "discover", "system"] as const;
 type Section = (typeof SECTIONS)[number];
@@ -154,6 +156,7 @@ function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 export function Layout() {
   const [addOpen, setAddOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   
@@ -164,6 +167,7 @@ export function Layout() {
   const me = useMe();
   const authed = !!me.data?.user;
   const isAdmin = !!me.data?.user?.is_admin;
+  const zh = me.data?.user?.preferred_language === "zh";
 
   const queue = useQuery({
     queryKey: ["queue"],
@@ -254,6 +258,11 @@ export function Layout() {
             {me.data!.user!.email}
           </p>
         )}
+        {authed && (
+          <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setFeedbackOpen(true); setSidebarOpen(false); }}>
+            <MessageSquarePlus className="h-4 w-4" /> {zh ? "反馈" : "Feedback"}
+          </Button>
+        )}
         <Button variant="ghost" size="sm" className="w-full justify-start" onClick={toggleTheme}>
           {dark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
           {dark ? "Dark" : "Light"} mode
@@ -318,6 +327,9 @@ export function Layout() {
       </main>
       
       {!MIRROR && <AddDialog open={addOpen} onClose={() => setAddOpen(false)} />}
+      {authed && me.data?.user && (
+        <FeedbackDialog open={feedbackOpen} email={me.data.user.email} zh={zh} onClose={() => setFeedbackOpen(false)} />
+      )}
     </div>
   );
 }

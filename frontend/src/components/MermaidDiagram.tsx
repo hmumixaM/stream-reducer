@@ -1,26 +1,22 @@
 import { useEffect, useState } from "react";
+import { normalizeMermaidSource } from "@/lib/mermaidSource";
 
-interface DiagramState {
-  svg: string | null;
-  error: string | null;
-}
+type DiagramState =
+  | { status: "pending" }
+  | { status: "ready"; svg: string }
+  | { status: "hidden" };
 
 let initialized = false;
 let nextDiagramId = 0;
 let renderQueue = Promise.resolve();
-
-function normalizeMermaidSource(source: string): string {
-  // Mermaid's accessibility description directive is `accDescr`. Some LLMs
-  // emit the more natural-looking `accDescription`, which otherwise makes the
-  // entire diagram fail to parse.
-  return source.replace(/^(\s*)accDescription:/gim, "$1accDescr:");
-}
 
 async function renderDiagram(source: string): Promise<string> {
   const { default: mermaid } = await import("mermaid");
   if (!initialized) {
     mermaid.initialize({
       startOnLoad: false,
+      // A bad diagram must not paint Mermaid's "Syntax error in text" graphic.
+      suppressErrorRendering: true,
       securityLevel: "strict",
       theme: "base",
       themeVariables: {
@@ -68,14 +64,17 @@ async function renderDiagram(source: string): Promise<string> {
     initialized = true;
   }
 
+  const diagram = normalizeMermaidSource(source);
   let svg = "";
   renderQueue = renderQueue
     .catch(() => undefined)
     .then(async () => {
-      const result = await mermaid.render(
-        `mermaid-${nextDiagramId++}`,
-        normalizeMermaidSource(source),
-      );
+      const id = `mermaid-${nextDiagramId++}`;
+      await mermaid.parse(diagram);
+      const result = await mermaid.render(id, diagram);
+      if (result.svg.includes("Syntax error in text") || result.svg.includes('aria-roledescription="error"')) {
+        throw new Error("diagram did not render");
+      }
       svg = result.svg;
     });
   await renderQueue;
@@ -83,23 +82,18 @@ async function renderDiagram(source: string): Promise<string> {
 }
 
 export function MermaidDiagram({ source }: { source: string }) {
-  const [state, setState] = useState<DiagramState>({ svg: null, error: null });
+  const [state, setState] = useState<DiagramState>({ status: "pending" });
 
   useEffect(() => {
     let cancelled = false;
-    setState({ svg: null, error: null });
+    setState({ status: "pending" });
 
     renderDiagram(source)
       .then((svg) => {
-        if (!cancelled) setState({ svg, error: null });
+        if (!cancelled) setState({ status: "ready", svg });
       })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setState({
-            svg: null,
-            error: error instanceof Error ? error.message : "Unable to render diagram",
-          });
-        }
+      .catch(() => {
+        if (!cancelled) setState({ status: "hidden" });
       });
 
     return () => {
@@ -107,17 +101,11 @@ export function MermaidDiagram({ source }: { source: string }) {
     };
   }, [source]);
 
-  if (state.error) {
-    return (
-      <pre data-diagram-error={state.error}>
-        <code className="language-mermaid">{source}</code>
-      </pre>
-    );
-  }
+  if (state.status === "hidden") return null;
 
   return (
     <figure className="mermaid-diagram" aria-label="Flowchart">
-      {state.svg ? (
+      {state.status === "ready" ? (
         <div dangerouslySetInnerHTML={{ __html: state.svg }} />
       ) : (
         <div className="mermaid-diagram-loading" role="status">

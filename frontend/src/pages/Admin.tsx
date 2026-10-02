@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Shield, ShieldOff, Trash2, ArrowUp, RefreshCw, Users, ListChecks } from "lucide-react";
-import { api, type AdminUser, type AdminQueueItem } from "@/lib/api";
+import { api, type AdminUser, type AdminQueueItem, type FeedbackReport } from "@/lib/api";
 import { useMe } from "@/lib/auth";
 import { Button, Card, Spinner } from "@/components/ui";
 import { EmptyState, PageHeader, SectionHeader } from "@/components/shell";
@@ -19,9 +19,44 @@ export function Admin() {
         }
         subtitle="Manage users and the global processing queue."
       />
+      <FeedbackPanel />
       <UsersPanel />
       <QueuePanel />
     </div>
+  );
+}
+
+function FeedbackPanel() {
+  const reports = useQuery({ queryKey: ["admin", "feedback"], queryFn: api.adminListFeedback });
+  const rows = reports.data ?? [];
+  return (
+    <section>
+      <SectionHeader title={`Feedback (${rows.length})`} />
+      <Card className="divide-y divide-border">
+        {reports.isLoading && <p className="px-4 py-6 text-sm text-muted-foreground"><Spinner /> Loading…</p>}
+        {!reports.isLoading && rows.length === 0 && <p className="px-4 py-6 text-sm text-muted-foreground">No reports yet.</p>}
+        {rows.map((report: FeedbackReport) => (
+          <article key={report.id} className="space-y-2 px-4 py-3 text-sm">
+            <p className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{report.email}</span>
+              <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{report.kind}</span>
+              <span className="text-xs text-muted-foreground">{timeAgo(report.created_at)}</span>
+            </p>
+            <p className="whitespace-pre-wrap">{report.body}</p>
+            {report.page_url && <a className="block truncate text-xs text-primary" href={report.page_url}>{report.page_url}</a>}
+            {report.image_ids.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {report.image_ids.map((imageId) => (
+                  <a key={imageId} href={`/api/admin/feedback/${report.id}/images/${imageId}`} target="_blank" rel="noreferrer">
+                    <img src={`/api/admin/feedback/${report.id}/images/${imageId}`} alt="" className="h-20 w-20 rounded-md border border-border object-cover" />
+                  </a>
+                ))}
+              </div>
+            )}
+          </article>
+        ))}
+      </Card>
+    </section>
   );
 }
 

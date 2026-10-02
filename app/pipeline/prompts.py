@@ -54,7 +54,9 @@ Write a detailed, faithful walkthrough of THIS part as Markdown:
   Keep node IDs short, put human-readable labels in quoted brackets such as
   `A["Meeting transcript"]`, and keep each edge on its own line. Use an
   `accTitle:` line for accessibility. If you add an accessibility description,
-  the only valid directive is `accDescr:` (never `accDescription:`). Keep the
+  the only valid directive is `accDescr:` (never `accDescription:`). If an edge
+  label contains parentheses or brackets, wrap that label in double quotes,
+  for example `A -->|"step (one)"| B`. Keep the
   layout compact enough to fit in one viewport: group related stages into
   labeled subgraphs and avoid a single uninterrupted row or column longer than
   four nodes. Never draw boxes, arrows, or tables with ASCII characters in a
