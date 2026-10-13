@@ -3,8 +3,13 @@
 # Four public models are exposed: `gemini-3.8-flash`,
 # `gemini-3.7-flash`, `gemini-3.5-flash`, and `gemini-3.1-pro`.
 #
-#   gemini-3.8-flash / gemini-3.7-flash:
-#     Primary  : Corresponding Gemini model on rightapi.ai /gemini.
+#   gemini-3.8-flash:
+#     Primary  : Vertex AI `gemini-3.8-flash` (global).
+#     Fallback : rightapi.ai /gemini (`gemini-3.8-flash-rightcode`), then
+#                gemini-3.7-flash.
+#
+#   gemini-3.7-flash:
+#     Primary  : gemini-3.7-flash on rightapi.ai /gemini.
 #
 #   gemini-3.5-flash:
 #     Primary  : 3 gemini-web2api Workers (proxy-1/2/3), load-balanced by the
@@ -29,8 +34,18 @@
 # Vertex ADC JSON, as a string), RIGHTCODE_API_KEY, LITELLM_MASTER_KEY.
 
 model_list:
-  # --- Primary summary model: RightCode Gemini ---
+  # --- Primary summary model: Vertex AI Gemini 3.8 ---
   - model_name: gemini-3.8-flash
+    litellm_params:
+      model: vertex_ai/gemini-3.8-flash
+      vertex_project: "x-p-x-shared-ai-services-988d"
+      vertex_location: "global"
+      vertex_credentials: os.environ/VERTEX_CREDENTIALS
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000002
+
+  # --- Backup for gemini-3.8-flash: RightCode (internal alias) ---
+  - model_name: gemini-3.8-flash-rightcode
     litellm_params:
       model: openai/gemini-3.8-flash
       api_base: https://www.rightapi.ai/gemini/v1
@@ -129,11 +144,12 @@ litellm_settings:
   num_retries: 2
   request_timeout: 120
   # When the whole gemini-3.5-flash group is exhausted, fail over to Vertex.
-  # RightCode Gemini falls back to the load-balanced 3.5 group.
+  # Vertex Gemini 3.8 falls back to RightCode 3.8, then 3.7.
+  # RightCode Gemini 3.7 falls back to the load-balanced 3.5 group.
   # gemini-3.1-pro (DeepSeek) falls back opus-4-7 -> sonnet-4-6 -> deepseek.
   fallbacks:
     [
-      { "gemini-3.8-flash": ["gemini-3.7-flash"] },
+      { "gemini-3.8-flash": ["gemini-3.8-flash-rightcode", "gemini-3.7-flash"] },
       { "gemini-3.7-flash": ["gemini-3.5-flash"] },
       { "gemini-3.5-flash": ["gemini-3.5-flash-vertex"] },
       {
