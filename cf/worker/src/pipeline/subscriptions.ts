@@ -128,7 +128,7 @@ async function recordPollError(env: Env, subId: number, err: unknown): Promise<v
     .run();
 }
 
-export async function pollSubscription(env: Env, subId: number): Promise<number> {
+export async function pollSubscription(env: Env, subId: number, force = false): Promise<number> {
   const sub = await first<PollSubscriptionRow>(
     env.DB.prepare(
       `SELECT subscription.*,
@@ -141,6 +141,8 @@ export async function pollSubscription(env: Env, subId: number): Promise<number>
     ).bind(subId),
   );
   if (!sub) return 0;
+  await env.DB.prepare("UPDATE subscription SET poll_queued_at = NULL WHERE id = ?").bind(subId).run();
+  if (!force && polledRecently(sub)) return 0;
 
   const healedSub = await selfHealSubscriptionFeed(env, sub);
   const feed = await fetchSubscriptionFeed(
@@ -438,18 +440,38 @@ async function recordPollSuccess(
 
 // Cron entrypoint: enqueue polls for every subscription whose interval elapsed.
 // Following a channel is what subscribes to it, so every follow is polled.
+// A follow whose poll is still waiting in the queue is not enqueued again.
+// Re-enqueuing every tick while the queue was backed up stacked ~17k duplicate
+// polls, each refetching its feed, in front of item processing. The marker
+// expires after this long so a lost message cannot silence a follow.
+const POLL_QUEUE_LEASE_MS = 2 * 60 * 60 * 1000;
+
 export async function pollDueSubscriptions(env: Env): Promise<void> {
   const now = Date.now();
   const subs = await env.DB.prepare(
-    `SELECT subscription.id, subscription.interval_minutes, subscription.last_checked_at
+    `SELECT subscription.id, subscription.interval_minutes, subscription.last_checked_at,
+            subscription.poll_queued_at
        FROM subscription
        LEFT JOIN channel ON channel.id = subscription.channel_id
       WHERE COALESCE(channel.feed_url, subscription.feed_url) IS NOT NULL`,
-  ).all<{ id: number; interval_minutes: number; last_checked_at: string | null }>();
+  ).all<{
+    id: number;
+    interval_minutes: number;
+    last_checked_at: string | null;
+    poll_queued_at: string | null;
+  }>();
   for (const s of subs.results ?? []) {
     const last = s.last_checked_at ? new Date(s.last_checked_at).getTime() : 0;
-    if (now - last >= s.interval_minutes * 60 * 1000) {
-      await env.PIPELINE.send({ kind: "poll", subscription_id: s.id });
-    }
+    if (now - last < s.interval_minutes * 60 * 1000) continue;
+    if (s.poll_queued_at && now - new Date(s.poll_queued_at).getTime() < POLL_QUEUE_LEASE_MS) continue;
+    await env.DB.prepare("UPDATE subscription SET poll_queued_at = ? WHERE id = ?")
+      .bind(isoNow(), s.id)
+      .run();
+    await env.PIPELINE.send({ kind: "poll", subscription_id: s.id });
   }
+}
+
+function polledRecently(sub: PollSubscriptionRow): boolean {
+  if (!sub.last_checked_at) return false;
+  return Date.now() - new Date(sub.last_checked_at).getTime() < sub.interval_minutes * 60 * 1000 / 2;
 }

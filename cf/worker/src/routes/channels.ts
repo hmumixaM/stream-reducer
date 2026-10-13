@@ -79,7 +79,7 @@ async function enqueueFollowPoll(
   await env.DB.prepare(
     "UPDATE subscription SET last_checked_at = ? WHERE id = ?",
   ).bind(isoNow(), followId).run();
-  await env.PIPELINE.send({ kind: "poll", subscription_id: followId });
+  await env.PIPELINE.send({ kind: "poll", subscription_id: followId, force: true });
 }
 
 async function folderBelongsToUser(

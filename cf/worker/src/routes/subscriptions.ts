@@ -164,7 +164,7 @@ subscriptionRoutes.post("/", async (c) => {
   if (!row) throw new Error("failed to create subscription");
   await recomputeFeedPriorities(c, channel.feed_url);
   // Poll immediately so the user sees their last-3-months backfill start.
-  if (row) await c.env.PIPELINE.send({ kind: "poll", subscription_id: row.id });
+  if (row) await c.env.PIPELINE.send({ kind: "poll", subscription_id: row.id, force: true });
   return c.json(serialize(row!));
 });
 
@@ -220,7 +220,7 @@ subscriptionRoutes.post("/:id/poll", async (c) => {
   );
   if (!row) return c.json({ error: "subscription not found" }, 404);
   await c.env.DB.prepare("UPDATE subscription SET last_checked_at = ? WHERE id = ?").bind(isoNow(), id).run();
-  await c.env.PIPELINE.send({ kind: "poll", subscription_id: id });
+  await c.env.PIPELINE.send({ kind: "poll", subscription_id: id, force: true });
   return c.json({ ok: true });
 });
 

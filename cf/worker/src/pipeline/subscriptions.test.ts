@@ -341,4 +341,58 @@ describe("subscription channel polling", () => {
     expect(dueQuery).not.toContain("enabled");
     expect(dueQuery).toContain("COALESCE(channel.feed_url, subscription.feed_url)");
   });
+
+  it("does not enqueue a second poll while one is still waiting", async () => {
+    const { env, queries, sends } = fakeEnv(null);
+    const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+    (env.DB as unknown as { prepare: (sql: string) => unknown }).prepare = (sql: string) => {
+      const query: RecordedQuery = { sql, bindings: [] };
+      queries.push(query);
+      const statement = {
+        bind(...bindings: unknown[]) { query.bindings = bindings; return statement; },
+        async all() {
+          return {
+            results: [
+              { id: 1, interval_minutes: 60, last_checked_at: minutesAgo(90), poll_queued_at: null },
+              { id: 2, interval_minutes: 60, last_checked_at: minutesAgo(90), poll_queued_at: minutesAgo(20) },
+              { id: 3, interval_minutes: 60, last_checked_at: minutesAgo(300), poll_queued_at: minutesAgo(180) },
+              { id: 4, interval_minutes: 60, last_checked_at: minutesAgo(10), poll_queued_at: null },
+            ],
+          };
+        },
+        async run() { return { success: true }; },
+      };
+      return statement;
+    };
+
+    await pollDueSubscriptions(env);
+
+    expect(sends).toEqual([
+      { kind: "poll", subscription_id: 1 },
+      { kind: "poll", subscription_id: 3 },
+    ]);
+    const leases = queries.filter((q) => q.sql.includes("SET poll_queued_at = ?"));
+    expect(leases.map((q) => q.bindings[1])).toEqual([1, 3]);
+  });
+
+  it("skips a duplicate poll for a follow that was just checked", async () => {
+    const { env, queries } = fakeEnv(subscription({
+      last_checked_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+    }));
+
+    await expect(pollSubscription(env, 7)).resolves.toBe(0);
+
+    expect(mocks.fetchFeed).not.toHaveBeenCalled();
+    expect(queries.some((q) => q.sql.includes("SET poll_queued_at = NULL"))).toBe(true);
+  });
+
+  it("polls a just-checked follow when the user forces it", async () => {
+    const { env } = fakeEnv(subscription({
+      last_checked_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+    }));
+
+    await expect(pollSubscription(env, 7, true)).resolves.toBe(1);
+
+    expect(mocks.fetchFeed).toHaveBeenCalledTimes(1);
+  });
 });

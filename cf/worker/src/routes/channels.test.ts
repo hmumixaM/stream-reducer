@@ -184,7 +184,7 @@ describe("channel route safeguards", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(sends).toEqual([{ kind: "poll", subscription_id: 11 }]);
+    expect(sends).toEqual([{ kind: "poll", subscription_id: 11, force: true }]);
   });
 
   it("makes every new follow poll, backfilling the default window", async () => {
@@ -216,6 +216,6 @@ describe("channel route safeguards", () => {
     const insert = queries.find((query) => query.sql.includes("INSERT OR IGNORE INTO subscription"))!;
     expect(insert.bindings.at(-1)).toBe(1);
     expect(insert.bindings).toContain(60);
-    expect(sends).toEqual([{ kind: "poll", subscription_id: 42 }]);
+    expect(sends).toEqual([{ kind: "poll", subscription_id: 42, force: true }]);
   });
 });

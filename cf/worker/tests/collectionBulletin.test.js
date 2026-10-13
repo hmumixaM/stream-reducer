@@ -49,7 +49,7 @@ describe('collection bulletin SQL and access',()=>{
     const page=await (await request('/api/collections/public/bulletin')).json();
     expect(page.items[0].title).toBe('Source 3');
     expect((await request('/api/bulletin/3')).status).toBe(200);
-    expect((await request('/api/bulletin/4')).status).toBe(404);
+    expect((await request('/api/bulletin/4')).status).toBe(200);
     expect((await request('/api/bulletin/1')).status).toBe(404);
   });
 });

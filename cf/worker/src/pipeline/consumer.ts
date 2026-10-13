@@ -49,7 +49,7 @@ export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAtte
       return;
     }
     case "poll":
-      await pollSubscription(env, msg.subscription_id);
+      await pollSubscription(env, msg.subscription_id, msg.force ?? false);
       return;
     case "graph_build":
       await buildGraph(env, msg.force ?? false);
