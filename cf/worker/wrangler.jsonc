@@ -96,9 +96,24 @@
   "queues": {
     "producers": [
       { "binding": "PIPELINE", "queue": "stream-reduce-pipeline" },
+      { "binding": "ITEM_JOBS", "queue": "stream-reduce-items" },
       { "binding": "BULLETIN_JOBS", "queue": "stream-reduce-bulletins" }
     ],
     "consumers": [
+      {
+        // Item processing chain (`process` messages) only. On the shared
+        // pipeline queue each continuation waited behind ~17k polls, about 12
+        // hours, so only one item was ever in flight.
+        // Temporary backlog burst for the 152-channel follow on 2026-10-12
+        // (~660 queued items). RightCode's Gemini route sustained twelve
+        // concurrent jobs during the AI4 backlog. Reduce this to 2 and
+        // max_instances to 16 again after the backlog has drained.
+        "queue": "stream-reduce-items",
+        "max_batch_size": 1,
+        "max_concurrency": 10,
+        "max_retries": 5,
+        "dead_letter_queue": "stream-reduce-pipeline-dlq"
+      },
       {
         "queue": "stream-reduce-bulletins",
         "max_batch_size": 1,
@@ -119,11 +134,9 @@
         // "Maximum number of running container instances exceeded". (Capacity
         // errors are also self-healed now: the consumer re-queues the item
         // instead of failing it.)
-        // Temporary backlog burst for the 152-channel follow on 2026-10-12
-        // (~660 queued items). RightCode's Gemini route sustained twelve
-        // concurrent jobs during the AI4 backlog. Reduce this to 2 and
-        // max_instances to 16 again after the backlog has drained.
-        "max_concurrency": 12,
+        // Polls, translations, and side jobs. Raised while ~17k stacked
+        // duplicate polls drain; reduce to 2 afterwards.
+        "max_concurrency": 8,
         // The consumer gives up on the fifth content failure. Queue redelivery
         // must allow it to reach that terminal decision; three retries stopped
         // one attempt early and left items stranded in "summarizing".
@@ -158,7 +171,7 @@
       // for over an hour. Instances are billed only while running and the
       // account ceiling is far higher (6 TiB / 1,500 vCPU concurrent), so the
       // headroom is free unless it is actually used.
-      "max_instances": 24
+      "max_instances": 28
     }
   ],
 

@@ -486,7 +486,7 @@ itemsRoutes.post("/:id/retry", requireAuth, async (c) => {
        progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
      WHERE id = ?`,
   ).bind(id).run();
-  await c.env.PIPELINE.send({ kind: "process", item_id: id });
+  await c.env.ITEM_JOBS.send({ kind: "process", item_id: id });
   return c.json(toItemRead({ ...item, status: "queued", error: null }));
 });
 
@@ -512,7 +512,7 @@ itemsRoutes.post("/:id/regenerate", requireAuth, async (c) => {
          progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
        WHERE id = ?`,
     ).bind(id).run();
-    await c.env.PIPELINE.send({ kind: "process", item_id: id });
+    await c.env.ITEM_JOBS.send({ kind: "process", item_id: id });
   }
   return c.json(toItemRead(item));
 });

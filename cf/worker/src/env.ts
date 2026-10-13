@@ -21,6 +21,9 @@ export interface Env {
 
   // Queue + container
   PIPELINE: Queue<PipelineMessage>;
+  // Item processing only. Kept off PIPELINE so a backlog of polls and side
+  // jobs cannot delay the self-draining process chain.
+  ITEM_JOBS: Queue<PipelineMessage>;
   BULLETIN_JOBS: Queue<PipelineMessage>;
   PIPELINE_CONTAINER: DurableObjectNamespace<PipelineContainer>;
 

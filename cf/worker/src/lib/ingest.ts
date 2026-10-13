@@ -268,7 +268,7 @@ export async function addUrlToLibrary(
     env.DB.prepare("SELECT * FROM item WHERE id = ?").bind(item.id),
   );
   if (fresh && (fresh.status === "queued" || fresh.status === "error")) {
-    await env.PIPELINE.send({ kind: "process", item_id: item.id });
+    await env.ITEM_JOBS.send({ kind: "process", item_id: item.id });
   }
   return { item: fresh ?? item, created, newlySaved };
 }

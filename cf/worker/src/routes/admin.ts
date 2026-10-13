@@ -161,7 +161,7 @@ adminRoutes.post("/queue/:id/bump", async (c) => {
   );
   const score = (top?.m ?? 0) + 1000;
   await c.env.DB.prepare("UPDATE item SET priority_score = ? WHERE id = ?").bind(score, id).run();
-  await c.env.PIPELINE.send({ kind: "process", item_id: id });
+  await c.env.ITEM_JOBS.send({ kind: "process", item_id: id });
   return c.json({ ok: true, priority_score: score });
 });
 
@@ -174,7 +174,7 @@ adminRoutes.post("/queue/:id/retry", async (c) => {
        progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
      WHERE id = ?`,
   ).bind(id).run();
-  await c.env.PIPELINE.send({ kind: "process", item_id: id });
+  await c.env.ITEM_JOBS.send({ kind: "process", item_id: id });
   return c.json({ ok: true });
 });
 

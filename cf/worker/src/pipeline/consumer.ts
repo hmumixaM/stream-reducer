@@ -130,9 +130,8 @@ async function processNextQueuedItem(env: Env, preferredItemId = 0): Promise<voi
     await enqueueNextIfWork(env);
     return;
   }
-  // Enqueue the continuation BEFORE processing. concurrency=1 keeps it from
-  // overlapping, and it ensures the chain survives even if this invocation is
-  // evicted mid-job (which previously stalled the whole queue).
+  // Enqueue the continuation BEFORE processing so the chain survives even if
+  // this invocation is evicted mid-job (which previously stalled the queue).
   await enqueueNextIfWork(env);
   // A stale/errored item may already have streamed its transcript to D1 before
   // the Worker was evicted. Resume from that durable checkpoint instead of
@@ -144,23 +143,23 @@ async function processNextQueuedItem(env: Env, preferredItemId = 0): Promise<voi
 // Reclaim the next claimable item: a queued one, or one stuck in-progress past
 // the stale cutoff (orphaned by a restart). Uses a conditional UPDATE so two
 // concurrent claims can't grab the same item.
+const CLAIM_ORDER = `ORDER BY (CASE WHEN status = 'queued' THEN 0 ELSE 1 END),
+  priority_score DESC, request_count DESC, enqueued_at ASC`;
+
 async function claimNextQueuedItem(env: Env, preferredItemId = 0): Promise<ItemRow | null> {
   const cutoff = staleCutoff();
   const clause = claimableClause();
   for (let attempt = 0; attempt < 5; attempt++) {
-    const candidate = preferredItemId > 0
+    const preferred = preferredItemId > 0 && attempt === 0
       ? await first<ItemRow>(
           env.DB.prepare(`SELECT * FROM item WHERE id = ? AND ${clause} LIMIT 1`)
             .bind(preferredItemId, ...claimableBinds(cutoff)),
         )
-      : await first<ItemRow>(
-          env.DB.prepare(
-            `SELECT * FROM item WHERE ${clause}
-              ORDER BY (CASE WHEN status = 'queued' THEN 0 ELSE 1 END),
-                       priority_score DESC, request_count DESC, enqueued_at ASC
-              LIMIT 1`,
-          ).bind(...claimableBinds(cutoff)),
-        );
+      : null;
+    const candidate = preferred ?? await first<ItemRow>(
+      env.DB.prepare(`SELECT * FROM item WHERE ${clause} ${CLAIM_ORDER} LIMIT 1`)
+        .bind(...claimableBinds(cutoff)),
+    );
     if (!candidate) return null;
 
     // Reclaiming an orphaned in-progress item counts as an attempt (so it can't
@@ -218,9 +217,10 @@ async function hasTranscript(env: Env, itemId: number): Promise<boolean> {
 async function enqueueNextIfWork(env: Env): Promise<void> {
   const cutoff = staleCutoff();
   const more = await first<{ id: number }>(
-    env.DB.prepare(`SELECT id FROM item WHERE ${claimableClause()} LIMIT 1`).bind(...claimableBinds(cutoff)),
+    env.DB.prepare(`SELECT id FROM item WHERE ${claimableClause()} ${CLAIM_ORDER} LIMIT 1`)
+      .bind(...claimableBinds(cutoff)),
   );
-  if (more) await env.PIPELINE.send({ kind: "process", item_id: more.id });
+  if (more) await env.ITEM_JOBS.send({ kind: "process", item_id: more.id });
 }
 
 // Generate a shared, on-demand translation: re-summarize the original

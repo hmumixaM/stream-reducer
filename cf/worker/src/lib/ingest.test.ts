@@ -57,6 +57,7 @@ function fakeEnv() {
       DB,
       MEDIA: { put: vi.fn() },
       PIPELINE: { send: async (message: unknown) => { sends.push(message); } },
+      ITEM_JOBS: { send: async (message: unknown) => { sends.push(message); } },
     } as unknown as Env,
     queries,
     sends,

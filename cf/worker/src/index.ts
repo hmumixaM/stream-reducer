@@ -124,6 +124,6 @@ export default {
     }
     // Safety pump: kick the self-draining pipeline in case the continuation
     // chain ever stopped (e.g. a Worker eviction). A no-op when nothing claimable.
-    await env.PIPELINE.send({ kind: "process", item_id: 0 });
+    await env.ITEM_JOBS.send({ kind: "process", item_id: 0 });
   },
 };
