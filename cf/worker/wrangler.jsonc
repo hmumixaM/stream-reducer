@@ -119,7 +119,11 @@
         // "Maximum number of running container instances exceeded". (Capacity
         // errors are also self-healed now: the consumer re-queues the item
         // instead of failing it.)
-        "max_concurrency": 2,
+        // Temporary backlog burst for the 152-channel follow on 2026-10-12
+        // (~660 queued items). RightCode's Gemini route sustained twelve
+        // concurrent jobs during the AI4 backlog. Reduce this to 2 and
+        // max_instances to 16 again after the backlog has drained.
+        "max_concurrency": 12,
         // The consumer gives up on the fifth content failure. Queue redelivery
         // must allow it to reach that terminal decision; three retries stopped
         // one attempt early and left items stranded in "summarizing".
@@ -154,7 +158,7 @@
       // for over an hour. Instances are billed only while running and the
       // account ceiling is far higher (6 TiB / 1,500 vCPU concurrent), so the
       // headroom is free unless it is actually used.
-      "max_instances": 16
+      "max_instances": 24
     }
   ],
 
