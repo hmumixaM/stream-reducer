@@ -49,6 +49,7 @@ export async function buildGraph(env: Env, force: boolean): Promise<void> {
   const MAX_NODES = 4000;
 
   const chunkRows = await loadSummaryChunkRows(env, MAX_NODES);
+  if (chunkRows.length === MAX_NODES) await pruneOlderEmbeddings(env, chunkRows[chunkRows.length - 1].id);
   const fingerprint = graphFingerprint(chunkRows);
   if (!force && await cacheIsFresh(env, fingerprint)) return;
 
@@ -73,6 +74,20 @@ async function loadSummaryChunkRows(env: Env, maxNodes: number): Promise<ChunkRo
     .all<ChunkRow>();
 
   return rows.results ?? [];
+}
+
+// Vectors older than the graph window are never read again (search uses
+// Vectorize), so drop them to keep D1 under its size limit.
+async function pruneOlderEmbeddings(env: Env, oldestKeptId: number): Promise<void> {
+  for (;;) {
+    const res = await env.DB.prepare(
+      `UPDATE chunk SET embedding = NULL WHERE id IN (
+         SELECT id FROM chunk WHERE embedding IS NOT NULL AND id < ? ORDER BY id DESC LIMIT 1000)`,
+    )
+      .bind(oldestKeptId)
+      .run();
+    if ((res.meta.changes ?? 0) === 0) return;
+  }
 }
 
 function graphFingerprint(chunkRows: ChunkRow[]): string {

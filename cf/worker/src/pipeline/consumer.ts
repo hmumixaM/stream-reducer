@@ -956,8 +956,10 @@ async function persistResult(env: Env, itemId: number, r: PipelineResult): Promi
     .run();
 }
 
-// Embed each chunk with Workers AI and upsert into Vectorize + store the vector
-// back into the chunk row (so the nightly graph build can read vectors locally).
+// Embed each chunk with Workers AI and upsert into Vectorize. Only summary
+// vectors are also kept in the chunk row, for the nightly graph build. Vectors
+// stored as JSON text are ~21 KB each; keeping every chunk's filled D1's 10 GB
+// limit.
 async function embedChunks(env: Env, itemId: number): Promise<void> {
   const chunks = await env.DB.prepare("SELECT id, source, field, text FROM chunk WHERE item_id = ? ORDER BY id").bind(itemId).all<{ id: number; source: string; field: string; text: string }>();
   const rows = chunks.results ?? [];
@@ -986,8 +988,9 @@ async function embedChunks(env: Env, itemId: number): Promise<void> {
   }
 
   for (let i = 0; i < rows.length; i++) {
+    const embedding = rows[i].source === "summary" ? JSON.stringify(vectors[i]) : null;
     await env.DB.prepare("UPDATE chunk SET embedding = ?, embedding_model = ? WHERE id = ?")
-      .bind(JSON.stringify(vectors[i]), EMBEDDING_MODEL, rows[i].id)
+      .bind(embedding, EMBEDDING_MODEL, rows[i].id)
       .run();
   }
 }
