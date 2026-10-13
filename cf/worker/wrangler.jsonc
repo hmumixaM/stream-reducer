@@ -170,8 +170,10 @@
       // polled into "no Container instance available"/"suddenly disconnected"
       // for over an hour. Instances are billed only while running and the
       // account ceiling is far higher (6 TiB / 1,500 vCPU concurrent), so the
-      // headroom is free unless it is actually used.
-      "max_instances": 28
+      // headroom is free unless it is actually used. 28 still saturated while
+      // the 8-wide pipeline consumer drained a poll backlog (each poll spawns
+      // meta-* instances next to the 18 job slots).
+      "max_instances": 40
     }
   ],
 
