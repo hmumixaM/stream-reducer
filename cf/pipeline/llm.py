@@ -95,8 +95,9 @@ def _chat_once(model: str, messages: list[dict], temperature: float, max_tokens:
     # minutes without tripping it — which let a single summarize call overrun the
     # worker's stream budget and leave items stuck in 'summarizing'. Run the
     # request in a daemon thread and abandon it past the deadline so the caller
-    # can fall back. Normal calls finish in seconds.
-    deadline = float(os.environ.get("LLM_TIMEOUT", "60"))
+    # can fall back. A full-length map chunk streams ~100 tokens/s, so a
+    # 12k-token note takes about two minutes.
+    deadline = float(os.environ.get("LLM_TIMEOUT", "150"))
     box: dict = {}
 
     def _call() -> None:

@@ -51,7 +51,9 @@ logger = logging.getLogger("pipeline")
 
 # Tunables (env-overridable).
 SUMMARY_CHUNK_CHARS = int(os.environ.get("SUMMARY_CHUNK_CHARS", "12000"))
-SUMMARY_MAP_MAX_TOKENS = int(os.environ.get("SUMMARY_MAP_MAX_TOKENS", "8000"))
+# Gemini 3.8 writes near source-length notes for dense Chinese chunks and
+# counts reasoning against this cap: an 8.2k-char chunk needed ~8.4k tokens.
+SUMMARY_MAP_MAX_TOKENS = int(os.environ.get("SUMMARY_MAP_MAX_TOKENS", "16000"))
 SUMMARY_REDUCE_MAX_TOKENS = int(os.environ.get("SUMMARY_REDUCE_MAX_TOKENS", "16000"))
 SUMMARY_SECTION_SOURCE_CHARS = int(os.environ.get("SUMMARY_SECTION_SOURCE_CHARS", "50000"))
 SUMMARY_INDEX_CHUNK_CHARS = int(os.environ.get("SUMMARY_INDEX_CHUNK_CHARS", "30000"))
