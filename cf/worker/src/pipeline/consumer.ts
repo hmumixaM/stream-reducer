@@ -133,7 +133,27 @@ export async function failStrandedItems(env: Env): Promise<void> {
   for (const id of reaped) await releaseContainer(env, `job-${id}`);
 }
 
+// An item whose Worker invocation died (e.g. past the queue wall-clock limit)
+// stops reporting progress but keeps its container running. Claims prefer
+// 'queued' items, so during a backlog such items were never reclaimed and
+// their containers held the pool. Move them back to the retry state and free
+// the container as soon as their progress goes stale.
+export async function reapSilentItems(env: Env): Promise<void> {
+  const ph = IN_PROGRESS.map(() => "?").join(",");
+  const res = await env.DB.prepare(
+    `UPDATE item SET started_at = NULL, retry_count = retry_count + 1,
+       progress_stage = NULL, progress_pct = NULL, progress_detail = NULL, progress_updated_at = NULL
+     WHERE status IN (${ph}) AND started_at IS NOT NULL
+       AND COALESCE(progress_updated_at, started_at) < ?
+     RETURNING id`,
+  )
+    .bind(...IN_PROGRESS, staleCutoff())
+    .all<{ id: number }>();
+  for (const { id } of res.results ?? []) await releaseContainer(env, `job-${id}`);
+}
+
 async function processNextQueuedItem(env: Env, preferredItemId = 0): Promise<void> {
+  await reapSilentItems(env);
   // Clear out items that can never be reclaimed again (orphaned + over the
   // reclaim cap) before claiming fresh work, so they don't hang forever.
   await failStrandedItems(env);
