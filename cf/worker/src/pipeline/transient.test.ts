@@ -23,6 +23,9 @@ describe("isTransientCapacity", () => {
     expect(
       isTransientCapacity("Failed to start container: Maximum number of running container instances exceeded."),
     ).toBe(true);
+    expect(
+      isTransientCapacity("Error: pipeline container 500: Failed to start container: The operation was aborted"),
+    ).toBe(true);
     expect(isTransientCapacity("durable object reset because its code was updated")).toBe(true);
     expect(
       isTransientCapacity(

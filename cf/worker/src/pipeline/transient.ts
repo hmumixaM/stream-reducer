@@ -20,6 +20,7 @@ export function isTransientCapacity(msg: string): boolean {
     // The whole container pool is momentarily full (jobs + aux instances >
     // max_instances). The error literally says "Try again later" — re-queue.
     m.includes("maximum number of running container instances") ||
+    m.includes("failed to start container: the operation was aborted") ||
     m.includes("blockconcurrencywhile") ||
     m.includes("durable object was reset") ||
     m.includes("durable object reset because its code was updated") ||

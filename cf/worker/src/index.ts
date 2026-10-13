@@ -92,7 +92,9 @@ export default {
         message.ack();
       } catch (err) {
         console.error("pipeline message failed", message.body, err);
-        message.retry();
+        // Immediate redelivery burned all retries within seconds while the
+        // container pool was full; back off so a slot can free up.
+        message.retry({ delaySeconds: Math.min(60 * message.attempts, 300) });
       }
     }
   },

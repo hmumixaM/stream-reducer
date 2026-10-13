@@ -290,7 +290,14 @@ async function translateItem(env: Env, itemId: number, lang: string): Promise<vo
       console.error("automatic infographic enqueue failed", itemId, error);
     }
   } catch (err) {
-    await fail(err instanceof Error ? `${err.name}: ${err.message}` : String(err));
+    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    if (isTransientCapacity(msg)) {
+      await env.DB.prepare(
+        "UPDATE item_translation SET status = 'queued', error = NULL, updated_at = ? WHERE item_id = ? AND lang = ?",
+      ).bind(isoNow(), itemId, lang).run();
+    } else {
+      await fail(msg);
+    }
     throw err;
   }
 }
