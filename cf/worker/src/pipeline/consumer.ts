@@ -9,7 +9,15 @@ import {
   enqueueAutomaticInfographic,
   isInfographicContentReady,
 } from "../lib/autoInfographic";
-import { runPipeline, runPipelineStreaming, type JsonObject, type PipelineResult, type ProgressEvent } from "./container";
+import {
+  releaseContainer,
+  releaseContainerKey,
+  runPipeline,
+  runPipelineStreaming,
+  type JsonObject,
+  type PipelineResult,
+  type ProgressEvent,
+} from "./container";
 import { pollSubscription } from "./subscriptions";
 import { buildGraph } from "./graph_build";
 import { isTransientCapacity } from "./transient";
@@ -50,6 +58,9 @@ export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAtte
     }
     case "poll":
       await pollSubscription(env, msg.subscription_id, msg.force ?? false);
+      return;
+    case "release_containers":
+      for (const key of msg.keys) await releaseContainerKey(env, key);
       return;
     case "graph_build":
       await buildGraph(env, msg.force ?? false);
@@ -119,6 +130,7 @@ export async function failStrandedItems(env: Env): Promise<void> {
     .all<{ id: number }>();
   const reaped = (res.results ?? []).map((r) => r.id);
   if (reaped.length) console.error("failStrandedItems reaped stranded items to 'error'", reaped);
+  for (const id of reaped) await releaseContainer(env, `job-${id}`);
 }
 
 async function processNextQueuedItem(env: Env, preferredItemId = 0): Promise<void> {
@@ -517,9 +529,10 @@ async function processClaimedItem(env: Env, item: ItemRow, resummarize = false):
 
     if (result.excluded) {
       await persistExcludedResult(env, itemId, result);
-      return;
+    } else {
+      await persistCompletedPipeline(env, itemId, result);
     }
-    await persistCompletedPipeline(env, itemId, result);
+    await releaseContainer(env, `job-${itemId}`);
   } catch (err) {
     await handlePipelineFailure(env, itemId, runStart, err);
   }
@@ -785,6 +798,7 @@ async function handlePipelineFailure(
   const attempts = (row?.retry_count ?? 0) + 1;
   if (attempts < MAX_RETRIES) {
     await requeueForRetry(env, itemId, attempts, transcriptAvailable);
+    await releaseContainer(env, `job-${itemId}`);
     // Rethrow so this same queue message is redelivered. The redelivery path
     // detects the persisted transcript and resumes summarization. Do not enqueue
     // a second message here: the old behavior raced two jobs for one item,
@@ -794,6 +808,7 @@ async function handlePipelineFailure(
   }
 
   await markItemErrored(env, itemId, msg);
+  await releaseContainer(env, `job-${itemId}`);
   console.error(`pipeline item failed permanently item=${itemId} attempts=${attempts} ms=${Date.now() - runStart} msg=${msg}`);
 }
 

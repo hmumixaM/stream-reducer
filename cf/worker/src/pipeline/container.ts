@@ -150,32 +150,48 @@ export interface PipelineResult {
 // caused head-of-line blocking); instances spin down fast via `sleepAfter` to
 // stay under the max_instances cap.
 export async function runPipeline(env: Env, job: PipelineJob): Promise<PipelineResult> {
-  const key = containerKey(
-    env,
-    job.target_lang
-      ? `tr-${job.item_id}-${job.target_lang}`
-      : job.mode === "infographic"
-        ? `ig-${job.item_id}`
-        : `job-${job.item_id}`,
-  );
+  const base = job.target_lang
+    ? `tr-${job.item_id}-${job.target_lang}`
+    : job.mode === "infographic"
+      ? `ig-${job.item_id}`
+      : `job-${job.item_id}`;
   // Attach the freshest Bilibili cookie (from KV) so the container's yt-dlp uses
   // the auto-refreshed value rather than the static deploy-time env secret.
   if (job.platform === "bilibili" && !job.bilibili_cookie) {
     job = { ...job, bilibili_cookie: await getBilibiliCookie(env) };
   }
-  const instance = getContainer(env.PIPELINE_CONTAINER, key);
-  const res = await instance.fetch(
-    new Request("http://pipeline/process", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(job),
-    }),
-  );
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`pipeline container ${res.status}: ${text.slice(0, 500)}`);
+  const instance = getContainer(env.PIPELINE_CONTAINER, containerKey(env, base));
+  try {
+    const res = await instance.fetch(
+      new Request("http://pipeline/process", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(job),
+      }),
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`pipeline container ${res.status}: ${text.slice(0, 500)}`);
+    }
+    return (await res.json()) as PipelineResult;
+  } finally {
+    await releaseContainer(env, base);
   }
-  return (await res.json()) as PipelineResult;
+}
+
+// The library stops idle instances from a Durable Object alarm, and that alarm
+// does not survive the reset a deploy causes: finished jobs kept running and
+// held most of max_instances. Destroy an instance once its job is over.
+export async function releaseContainer(env: Env, base: string): Promise<void> {
+  await releaseContainerKey(env, containerKey(env, base));
+}
+
+export async function releaseContainerKey(env: Env, key: string): Promise<void> {
+  try {
+    await getContainer(env.PIPELINE_CONTAINER, key).destroy();
+  } catch (err) {
+    console.warn("container release failed", key, errorMessage(err));
+  }
 }
 
 // A streamed pipeline progress event (see cf/pipeline/server.py /process_stream).

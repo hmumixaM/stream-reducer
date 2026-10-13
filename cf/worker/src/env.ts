@@ -102,4 +102,6 @@ export type PipelineMessage =
   | { kind: "bulletin_drain" }
   | { kind: "reading_summary"; item_id: number; lang?: string }
   | { kind: "poll"; subscription_id: number; force?: boolean }
-  | { kind: "graph_build"; force?: boolean };
+  | { kind: "graph_build"; force?: boolean }
+  // Destroy container instances by full key (e.g. "job-4730-g35").
+  | { kind: "release_containers"; keys: string[] };
