@@ -33,6 +33,7 @@ type PollTestRow = SubscriptionRow & {
   channel_feed_url: string | null;
   channel_title: string | null;
   channel_image_url: string | null;
+  poll_queued_at: string | null;
 };
 
 function subscription(overrides: Partial<PollTestRow> = {}): PollTestRow {
@@ -55,6 +56,7 @@ function subscription(overrides: Partial<PollTestRow> = {}): PollTestRow {
     last_new_count: 0,
     consecutive_failures: 0,
     folder_id: 3,
+    poll_queued_at: null,
     created_at: "2026-01-01T00:00:00.000Z",
     channel_feed_url: null,
     channel_title: null,
@@ -384,6 +386,41 @@ describe("subscription channel polling", () => {
 
     expect(mocks.fetchFeed).not.toHaveBeenCalled();
     expect(queries.some((q) => q.sql.includes("SET poll_queued_at = NULL"))).toBe(true);
+  });
+
+  it("drops a stale poll request already satisfied by a later poll", async () => {
+    const { env, queries } = fakeEnv(subscription({
+      last_checked_at: new Date(Date.now() - 45 * 60_000).toISOString(),
+    }));
+
+    await expect(pollSubscription(env, 7, false, new Date(Date.now() - 3 * 3600_000))).resolves.toBe(0);
+
+    expect(mocks.fetchFeed).not.toHaveBeenCalled();
+    expect(queries.some((q) => q.sql.includes("SET poll_queued_at = NULL"))).toBe(false);
+  });
+
+  it("leaves the lease to a newer queued poll request", async () => {
+    const { env, queries } = fakeEnv(subscription({
+      last_checked_at: new Date(Date.now() - 90 * 60_000).toISOString(),
+      poll_queued_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+    }));
+
+    await expect(pollSubscription(env, 7, false, new Date(Date.now() - 80 * 60_000))).resolves.toBe(0);
+
+    expect(mocks.fetchFeed).not.toHaveBeenCalled();
+    expect(queries.some((q) => q.sql.includes("SET poll_queued_at = NULL"))).toBe(false);
+  });
+
+  it("runs the poll request that owns the lease", async () => {
+    const leasedAt = Date.now() - 10 * 60_000;
+    const { env } = fakeEnv(subscription({
+      last_checked_at: new Date(Date.now() - 90 * 60_000).toISOString(),
+      poll_queued_at: new Date(leasedAt).toISOString(),
+    }));
+
+    await expect(pollSubscription(env, 7, false, new Date(leasedAt + 50))).resolves.toBe(1);
+
+    expect(mocks.fetchFeed).toHaveBeenCalledTimes(1);
   });
 
   it("polls a just-checked follow when the user forces it", async () => {

@@ -25,7 +25,12 @@ import { enqueuePreferredBulletinTranslation } from "../lib/bulletin";
 import { processNextBulletin } from "../lib/bulletinScheduler";
 import { generateReadingSummary, type ReadingSource } from "../lib/readingSummary";
 
-export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAttempt = 1): Promise<void> {
+export async function handleMessage(
+  env: Env,
+  msg: PipelineMessage,
+  deliveryAttempt = 1,
+  enqueuedAt?: Date,
+): Promise<void> {
   switch (msg.kind) {
     case "process":
       if (deliveryAttempt > 1 && msg.item_id > 0) {
@@ -57,7 +62,7 @@ export async function handleMessage(env: Env, msg: PipelineMessage, deliveryAtte
       return;
     }
     case "poll":
-      await pollSubscription(env, msg.subscription_id, msg.force ?? false);
+      await pollSubscription(env, msg.subscription_id, msg.force ?? false, enqueuedAt);
       return;
     case "release_containers":
       for (const key of msg.keys) await releaseContainerKey(env, key);

@@ -28,6 +28,7 @@ type PollSubscriptionRow = ChannelFollowRow & {
   channel_feed_url: ChannelRow["feed_url"] | null;
   channel_title: ChannelRow["title"];
   channel_image_url: ChannelRow["image_url"];
+  poll_queued_at?: string | null;
 };
 
 // Pick the best processing URL + platform for a feed entry (prefer a supported
@@ -128,7 +129,12 @@ async function recordPollError(env: Env, subId: number, err: unknown): Promise<v
     .run();
 }
 
-export async function pollSubscription(env: Env, subId: number, force = false): Promise<number> {
+export async function pollSubscription(
+  env: Env,
+  subId: number,
+  force = false,
+  requestedAt?: Date,
+): Promise<number> {
   const sub = await first<PollSubscriptionRow>(
     env.DB.prepare(
       `SELECT subscription.*,
@@ -141,6 +147,14 @@ export async function pollSubscription(env: Env, subId: number, force = false): 
     ).bind(subId),
   );
   if (!sub) return 0;
+  // A poll already ran after this request, or a newer request is still queued
+  // and owns the lease: either way this message is redundant. The lease is
+  // stamped by the Worker just before send and the request time by Queues, so
+  // allow for clock skew between them.
+  if (!force && requestedAt && (
+    (sub.last_checked_at && Date.parse(sub.last_checked_at) >= requestedAt.getTime())
+    || (sub.poll_queued_at && Date.parse(sub.poll_queued_at) > requestedAt.getTime() + 60_000)
+  )) return 0;
   await env.DB.prepare("UPDATE subscription SET poll_queued_at = NULL WHERE id = ?").bind(subId).run();
   if (!force && polledRecently(sub)) return 0;
 
