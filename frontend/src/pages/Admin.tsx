@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Shield, ShieldOff, Trash2, ArrowUp, RefreshCw, Users, ListChecks } from "lucide-react";
+import { Shield, ShieldOff, Trash2, ArrowUp, ArrowDown, ArrowUpDown, RefreshCw, Users, ListChecks } from "lucide-react";
 import { api, type AdminUser, type AdminQueueItem, type FeedbackReport } from "@/lib/api";
 import { useMe } from "@/lib/auth";
 import { Button, Card, Spinner } from "@/components/ui";
@@ -20,8 +21,8 @@ export function Admin() {
         subtitle="Manage users and the global processing queue."
       />
       <FeedbackPanel />
-      <UsersPanel />
       <QueuePanel />
+      <UsersPanel />
     </div>
   );
 }
@@ -60,10 +61,43 @@ function FeedbackPanel() {
   );
 }
 
+type SortDir = "asc" | "desc";
+type UserSortKey = "email" | "last_online_at" | "library_count" | "queued_count" | "subscription_count" | "created_at";
+
+const dateValue = (value: string | null) => (value ? Date.parse(value) : null);
+
+const USER_COLUMNS: { key: UserSortKey; label: string; firstDir: SortDir; value: (u: AdminUser) => number | string | null }[] = [
+  { key: "email", label: "Email", firstDir: "asc", value: (u) => u.email.toLowerCase() },
+  { key: "last_online_at", label: "Last online", firstDir: "desc", value: (u) => dateValue(u.last_online_at) },
+  { key: "library_count", label: "Library", firstDir: "desc", value: (u) => u.library_count },
+  { key: "queued_count", label: "In queue", firstDir: "desc", value: (u) => u.queued_count },
+  { key: "subscription_count", label: "Subs", firstDir: "desc", value: (u) => u.subscription_count },
+  { key: "created_at", label: "Joined", firstDir: "desc", value: (u) => dateValue(u.created_at) },
+];
+
+function sortUsers(rows: AdminUser[], key: UserSortKey, dir: SortDir): AdminUser[] {
+  const value = USER_COLUMNS.find((column) => column.key === key)!.value;
+  return [...rows].sort((a, b) => {
+    const x = value(a);
+    const y = value(b);
+    // Missing values (e.g. never online) stay last in either direction.
+    if (x === null || y === null) return x === y ? a.id - b.id : x === null ? 1 : -1;
+    const order = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+    return (dir === "asc" ? order : -order) || a.id - b.id;
+  });
+}
+
 function UsersPanel() {
   const qc = useQueryClient();
   const me = useMe();
   const users = useQuery({ queryKey: ["admin", "users"], queryFn: api.adminListUsers, refetchInterval: 60_000 });
+  const [sort, setSort] = useState<{ key: UserSortKey; dir: SortDir }>({ key: "last_online_at", dir: "desc" });
+  const toggleSort = (key: UserSortKey) =>
+    setSort((current) =>
+      current.key === key
+        ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: USER_COLUMNS.find((column) => column.key === key)!.firstDir },
+    );
   const invalidate = () => qc.invalidateQueries({ queryKey: ["admin", "users"] });
 
   const setAdmin = useMutation({
@@ -76,7 +110,7 @@ function UsersPanel() {
     onSuccess: invalidate,
   });
 
-  const rows = users.data ?? [];
+  const rows = sortUsers(users.data ?? [], sort.key, sort.dir);
 
   return (
     <section>
@@ -94,13 +128,27 @@ function UsersPanel() {
           <table className="w-full text-sm">
             <thead className="border-b border-border text-left text-xs uppercase text-muted-foreground">
               <tr>
-                <th className="px-4 py-2 font-medium">Email</th>
-                <th className="whitespace-nowrap px-4 py-2 font-medium">Last online</th>
-                <th className="px-4 py-2 font-medium">Library</th>
-                <th className="px-4 py-2 font-medium">In&nbsp;queue</th>
-                <th className="px-4 py-2 font-medium">Subs</th>
-                <th className="px-4 py-2 font-medium">Joined</th>
-                <th className="px-4 py-2 text-right font-medium">Actions</th>
+                {USER_COLUMNS.map((column) => {
+                  const active = sort.key === column.key;
+                  const Icon = !active ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
+                  return (
+                    <th
+                      key={column.key}
+                      aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+                      className="whitespace-nowrap px-3 py-2 font-medium"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleSort(column.key)}
+                        className={`inline-flex items-center gap-1 uppercase hover:text-foreground ${active ? "text-foreground" : ""}`}
+                      >
+                        {column.label}
+                        <Icon className={`h-3.5 w-3.5 ${active ? "" : "opacity-40"}`} />
+                      </button>
+                    </th>
+                  );
+                })}
+                <th className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -111,14 +159,14 @@ function UsersPanel() {
                 const self = u.id === me.data?.user?.id;
                 return (
                   <tr key={u.id} className="border-b border-border/60 last:border-0">
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-2">
                       <span className="font-medium">{u.email}</span>
                       {u.is_admin && (
                         <span className="ml-2 rounded bg-primary/15 px-1.5 py-0.5 text-xs text-primary">admin</span>
                       )}
                       {self && <span className="ml-2 text-xs text-muted-foreground">(you)</span>}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2 tabular-nums">
+                    <td className="whitespace-nowrap px-3 py-2 tabular-nums">
                       {u.last_online_at ? <>
                         <time dateTime={u.last_online_at} title={new Date(u.last_online_at).toLocaleString()}>
                           {new Date(u.last_online_at).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" })}
@@ -126,11 +174,11 @@ function UsersPanel() {
                         <span className="mt-0.5 block text-xs text-muted-foreground">{timeAgo(u.last_online_at)}</span>
                       </> : <span className="text-muted-foreground" title="No recorded activity is available for this account.">Not recorded</span>}
                     </td>
-                    <td className="px-4 py-2 tabular-nums">{u.library_count}</td>
-                    <td className="px-4 py-2 tabular-nums">{u.queued_count}</td>
-                    <td className="px-4 py-2 tabular-nums">{u.subscription_count}</td>
-                    <td className="px-4 py-2 text-muted-foreground">{timeAgo(u.created_at)}</td>
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-2 tabular-nums">{u.library_count}</td>
+                    <td className="px-3 py-2 tabular-nums">{u.queued_count}</td>
+                    <td className="px-3 py-2 tabular-nums">{u.subscription_count}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{timeAgo(u.created_at)}</td>
+                    <td className="px-3 py-2">
                       <div className="flex justify-end gap-2">
                         <Button
                           variant="outline"
