@@ -245,9 +245,12 @@ order. Translation leases prevent duplicate model calls. Failed attempts use
 backoff, automatic retries stop after three attempts, and scheduled wake-ups
 recover interrupted processing.
 
-The second reading layer is generated on demand and cached in
-`reading_summary`. The frontend offers Summary, Deep dive, and Sources & quotes
-views, with browser-based PDF export.
+The second reading layer (精炼概括) is queued when a source finishes and
+cached in `reading_summary`. For a non-Chinese source, the Chinese brief in
+`reading_summary_lang` is queued at the same time whenever any user prefers
+Chinese. Opening an item only generates a brief that is still missing, such as
+one for an older source. The frontend offers Summary, Deep dive, and Sources &
+quotes views, with browser-based PDF export.
 
 Validation from the repository root:
 

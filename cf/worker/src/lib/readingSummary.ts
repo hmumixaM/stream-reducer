@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { first } from "../db";
+import { sourceAlreadyChinese } from "./chinese";
 import { isoNow, sha256 } from "./crypto";
 
 export const READING_VERSION = "reading-v1";
@@ -19,6 +20,20 @@ export function sourceText(source: ReadingSource): string {
     if (typeof structured.walkthrough === "string" && structured.walkthrough.trim()) return structured.walkthrough;
   } catch { /* Historical summaries can still have usable Markdown. */ }
   return source.summary_markdown || "";
+}
+
+/** Queue every brief a reader can open when a source finishes: the source
+ * language one, plus the Chinese one when the source isn't Chinese and someone
+ * reads in Chinese. */
+export async function enqueueReadingSummaries(env: Env, itemId: number): Promise<void> {
+  const messages: { body: { kind: "reading_summary"; item_id: number; lang?: string } }[] = [
+    { body: { kind: "reading_summary", item_id: itemId } },
+  ];
+  if (!await sourceAlreadyChinese(env, itemId)) {
+    const reader = await first<{ id: number }>(env.DB.prepare("SELECT id FROM user WHERE preferred_language = 'zh' LIMIT 1"));
+    if (reader) messages.push({ body: { kind: "reading_summary", item_id: itemId, lang: "zh" } });
+  }
+  await env.PIPELINE.sendBatch(messages);
 }
 
 export async function sourceHash(source: ReadingSource): Promise<string> {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../env";
-import { generateReadingSummary, parseJsonObject, parseReadingSummary, readCached, readingContext, READING_VERSION, sourceHash, type ReadingRow } from "./readingSummary";
+import { enqueueReadingSummaries, generateReadingSummary, parseJsonObject, parseReadingSummary, readCached, readingContext, READING_VERSION, sourceHash, type ReadingRow } from "./readingSummary";
 
 const source = { id: 1, title: "A source", author: "A speaker", source_url: "https://example.com/source", summary_structured: JSON.stringify({ walkthrough: "### [00:01:30] Evidence\nThe speaker projects 12% growth.\n### [00:04:00] Limits\nThe projection depends on demand." }), summary_markdown: "Original detailed content" };
 const brief = { lead: "The speaker projects growth subject to demand.", sections: [{ heading: "Growth", body: "The forecast is 12%.", timestamp: 90 }, { heading: "Limitations", body: "It depends on demand.", timestamp: 240 }], conclusion: "" };
@@ -78,5 +78,36 @@ describe("reading edition", () => {
     const { env, getRow } = environment();
     await expect(generateReadingSummary(env, source)).rejects.toThrow("503");
     expect(getRow()?.status).toBe("error");
+  });
+});
+
+describe("reading brief queueing", () => {
+  function queueEnv(sample: string, chineseReader: boolean) {
+    const sent: unknown[] = [];
+    const env = {
+      DB: { prepare(sql: string) {
+        return { bind() { return this; }, async first() {
+          if (sql.includes("AS sample")) return { sample };
+          return chineseReader ? { id: 7 } : null;
+        } };
+      } },
+      PIPELINE: { async sendBatch(messages: { body: unknown }[]) { sent.push(...messages.map((m) => m.body)); } },
+    } as unknown as Env;
+    return { env, sent };
+  }
+
+  it("prepares the Chinese brief with the source brief for non-Chinese sources", async () => {
+    const { env, sent } = queueEnv("An English talk about growth forecasts.", true);
+    await enqueueReadingSummaries(env, 5);
+    expect(sent).toEqual([{ kind: "reading_summary", item_id: 5 }, { kind: "reading_summary", item_id: 5, lang: "zh" }]);
+  });
+
+  it("only prepares the source brief when it is already Chinese or nobody reads Chinese", async () => {
+    const chinese = queueEnv("这是一段中文节目的详细内容，讨论增长预测和需求变化，以及其中的风险与限制。", true);
+    await enqueueReadingSummaries(chinese.env, 5);
+    expect(chinese.sent).toEqual([{ kind: "reading_summary", item_id: 5 }]);
+    const noReader = queueEnv("An English talk about growth forecasts.", false);
+    await enqueueReadingSummaries(noReader.env, 5);
+    expect(noReader.sent).toEqual([{ kind: "reading_summary", item_id: 5 }]);
   });
 });

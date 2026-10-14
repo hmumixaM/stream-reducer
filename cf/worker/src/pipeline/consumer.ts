@@ -23,7 +23,7 @@ import { buildGraph } from "./graph_build";
 import { isTransientCapacity } from "./transient";
 import { enqueuePreferredBulletinTranslation } from "../lib/bulletin";
 import { processNextBulletin } from "../lib/bulletinScheduler";
-import { generateReadingSummary, type ReadingSource } from "../lib/readingSummary";
+import { enqueueReadingSummaries, generateReadingSummary, type ReadingSource } from "../lib/readingSummary";
 
 export async function handleMessage(
   env: Env,
@@ -701,7 +701,7 @@ async function persistCompletedPipeline(env: Env, itemId: number, result: Pipeli
   await embedChunks(env, itemId);
   await markItemDone(env, itemId);
   try {
-    await env.PIPELINE.send({ kind: "reading_summary", item_id: itemId });
+    await enqueueReadingSummaries(env, itemId);
   } catch (error) {
     console.error("reading summary enqueue failed", itemId, error);
   }
