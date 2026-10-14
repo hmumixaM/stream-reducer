@@ -34,6 +34,7 @@ from app.pipeline.prompts import (
     MAP_SYSTEM,
     MAP_TEMPLATE,
     OVERVIEW_TEMPLATE,
+    QUOTE_REVIEW_TEMPLATE,
     QUOTES_ENTITIES_TEMPLATE,
     SECTION_SYSTEM,
     STRICT_JSON_SUFFIX,
@@ -41,6 +42,14 @@ from app.pipeline.prompts import (
     INFOGRAPHIC_SYSTEM,
     INFOGRAPHIC_TEMPLATE,
     language_directive,
+)
+from app.pipeline.quotes import (
+    MAX_QUOTES,
+    apply_review,
+    format_candidates,
+    printable,
+    public_quote,
+    verified_quotes,
 )
 from app.pipeline.summary_quality import map_notes_issue
 from app.zh import to_simplified
@@ -59,10 +68,11 @@ SUMMARY_SECTION_SOURCE_CHARS = int(os.environ.get("SUMMARY_SECTION_SOURCE_CHARS"
 SUMMARY_INDEX_CHUNK_CHARS = int(os.environ.get("SUMMARY_INDEX_CHUNK_CHARS", "30000"))
 SUMMARY_INDEX_MAX_TOKENS = int(os.environ.get("SUMMARY_INDEX_MAX_TOKENS", "6000"))
 SUMMARY_HEADLINE_MAX_TOKENS = int(os.environ.get("SUMMARY_HEADLINE_MAX_TOKENS", "1200"))
+SUMMARY_QUOTE_REVIEW_MAX_TOKENS = int(os.environ.get("SUMMARY_QUOTE_REVIEW_MAX_TOKENS", "4000"))
 TRANSCRIBE_CHUNK_SECONDS = int(os.environ.get("TRANSCRIBE_CHUNK_SECONDS", "300"))
 EMBED_CHUNK_CHARS = int(os.environ.get("EMBED_CHUNK_CHARS", "1500"))
 MEDIA_MAX_BYTES = int(os.environ.get("MEDIA_MAX_BYTES", str(25 * 1024 * 1024)))
-PROMPT_VERSION = os.environ.get("SUMMARY_PROMPT_VERSION", "v3-bulletin")
+PROMPT_VERSION = os.environ.get("SUMMARY_PROMPT_VERSION", "v4-quote-review")
 # Max danmaku (Bilibili bullet-comments) rendered into the mood-summary prompt.
 DANMAKU_MAX_PROMPT_ITEMS = int(os.environ.get("DANMAKU_MAX_PROMPT_ITEMS", "3000"))
 # Generous budget: gemini-flash spends tokens on thinking, and a tight cap left
@@ -627,6 +637,33 @@ def _generate_json_section(
     return defaults.copy()
 
 
+def _select_quotes(
+    st: Stage,
+    context: str,
+    candidates: object,
+    source: str,
+    section_system: str,
+    deadline: float | None = None,
+) -> list[dict]:
+    """Verify candidates against the notes' quoted spans, then have a blind
+    reviewer keep and rank only those that stand on their own."""
+    verified = verified_quotes(candidates if isinstance(candidates, list) else [], source)
+    if not verified:
+        return []
+    picks = _generate_json_section(
+        st,
+        QUOTE_REVIEW_TEMPLATE.format(context=context, candidates=format_candidates(verified), limit=MAX_QUOTES),
+        section_system,
+        {"quotes": None},
+        SUMMARY_QUOTE_REVIEW_MAX_TOKENS,
+        deadline,
+    )["quotes"]
+    if not isinstance(picks, list):
+        logger.warning("quote review unusable; keeping %d verified candidates unreviewed", len(verified))
+        return [public_quote(q) for q in verified if printable(q)][:MAX_QUOTES]
+    return apply_review(verified, picks)
+
+
 def _build_walkthrough_index(item: ItemView, walkthrough: str, lang: str, section_system: str, st: Stage, deadline: float | None = None, on_progress=None) -> str:
     parts = _chunk_text(walkthrough, SUMMARY_INDEX_CHUNK_CHARS)
     if not parts:
@@ -747,6 +784,8 @@ def _generate_structured_sections(
             SUMMARY_REDUCE_MAX_TOKENS,
             deadline,
         )
+        _emit("quote review")
+        quotes = _select_quotes(st, context, quotes_entities.get("quotes"), source, section_system, deadline)
         _emit("headline")
         headline = _generate_json_section(
             st,
@@ -764,7 +803,7 @@ def _generate_structured_sections(
             "atmosphere": overview.get("atmosphere") or existing.get("atmosphere", ""),
             "bulletin": key_points.get("bulletin") or existing.get("bulletin", []),
             "key_points": key_points.get("key_points") or existing.get("key_points", []),
-            "quotes": quotes_entities.get("quotes") or existing.get("quotes", []),
+            "quotes": quotes or existing.get("quotes", []),
             "entities": quotes_entities.get("entities") or existing.get("entities", []),
             "headline": headline.get("headline") or existing.get("headline", ""),
             "subhead": headline.get("subhead") or existing.get("subhead", ""),

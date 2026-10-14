@@ -284,6 +284,14 @@ then merged into a structured summary (TL;DR, timestamped outline, key points,
 quotes, entities). Timestamps render as deep links for YouTube/Bilibili and as
 `HH:MM:SS` references otherwise, so every claim traces back to the source.
 
+Quotes take two passes. The first picks candidates from the notes and states
+what each speaker meant in context. Code then drops any candidate that is not
+inside quotation marks in the notes (narration and paraphrase), too short to
+carry a claim, or a duplicate. A second, blind pass sees only the quote and
+the speaker's point, rejects lines that don't stand on their own (fragments,
+event reports, recited sayings, sarcasm), and ranks up to eight. See
+`app/pipeline/quotes.py` and `QUOTE_CRITERIA` in `app/pipeline/prompts.py`.
+
 The output language follows the source: Chinese-dominant transcripts are
 summarized in 简体中文 (English proper nouns/terms preserved), everything else in
 its own language. Downloads whose decodable audio is far shorter than the

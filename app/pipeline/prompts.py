@@ -4,7 +4,9 @@ Strategy: the MAP step turns each transcript chunk into a *rich, detailed
 chronological walkthrough* that preserves concrete details, anecdotes, numbers,
 names and the section's mood. The structured sections are generated separately
 from that walkthrough so long programs do not force every summary field through
-one oversized reduce prompt.
+one oversized reduce prompt. Quotes take two passes: one picks candidates with
+the speaker's point in context, a second reviews them blind (quote only) so
+fragments, narration, and context-dependent lines do not reach the card.
 """
 
 from __future__ import annotations
@@ -63,7 +65,13 @@ Write a detailed, faithful walkthrough of THIS part as Markdown:
   plain code fence. For genuinely tabular comparisons, use a standard Markdown
   table instead. If neither format can express the source cleanly, explain it
   in prose.
-- Weave in memorable verbatim quotes inline using "quotation marks".
+- Quote the speakers directly. When a speaker states a view, judgement,
+  prediction, or lesson, quote the WHOLE sentence verbatim inside “quotation
+  marks” and say who said it, rather than clipping a 2-4 word fragment of it.
+  In every subsection where someone argues a point, include at least one such
+  full-sentence quote, choosing the line where they put it most sharply. Only
+  the speakers' actual words go inside quotation marks; never put your own
+  paraphrase or summary inside them.
 - IMPORTANT: Put a [HH:MM:SS] timestamp ONLY on the section headings. Do NOT add
   timestamps inside the prose sentences or bullets — the prose must read cleanly
   with no inline timestamps. Start a new `###` subsection when a clearly distinct
@@ -99,14 +107,17 @@ without reading the full walkthrough.
 Return STRICT JSON with this exact shape:
 {{
   "topics": [{{"timestamp": <seconds as number or null>, "heading": "...", "claims": ["concrete claim, argument, example, number, or conclusion"]}}],
-  "quotes": [{{"text": "short verbatim quote", "timestamp": <seconds as number or null>, "speaker": "name or null"}}],
+  "quotes": [{{"text": "a speaker's complete sentence, copied exactly from inside quotation marks", "timestamp": <seconds as number or null>, "speaker": "name or null"}}],
   "entities": ["people, products, companies, works mentioned"]
 }}
 
 Rules:
 - Keep topic headings short but specific.
 - Preserve enough concrete claims that a later overview can identify what this program uniquely contributes.
-- Include only quotes that appear verbatim in the excerpt.
+- `quotes`: only words the excerpt puts inside quotation marks and attributes
+  to a speaker, copied exactly, and only complete sentences that state a view,
+  judgement, or lesson. Skip fragments, labels, slogans, and the note-taker's
+  narration.
 - LANGUAGE: {language_instruction}
 """
 
@@ -159,6 +170,44 @@ Rules:
 - LANGUAGE: {language_instruction}
 """
 
+# Shared bar for every prompt that selects quotes. Concatenated into
+# str.format templates, so it must not contain braces.
+QUOTE_CRITERIA = """## What makes a quote
+A quote earns its place only if it works on its own as a pull quote: a reader
+who sees nothing but the quote and the speaker's name understands what is
+being claimed and could agree or disagree with it. Every quote must be:
+- The speaker's own words: text the notes put inside quotation marks and
+  attribute to a speaker. Never the note-taker's narration or paraphrase
+  ("他认为……", "the host argues that…"), however well it reads.
+- A complete statement: a full sentence (or two) with its own subject and
+  predicate. No fragments, labels, nicknames, slogans, or catchphrases
+  (e.g. "草包", "断臂求生", "Amazing"), and no dangling references ("这个",
+  "他们", "that one") whose meaning depends on what came before.
+- A point of view: a judgement, argument, principle, prediction, causal
+  insight, or hard-won lesson. Not a report of what happened, a status update,
+  a statistic with no lesson attached, an open question (a rhetorical one that
+  plainly asserts something is fine), a greeting, a joke that needs its setup,
+  or a logistics remark.
+- The speaker's own formulation: not a proverb, idiom, classical line, poem,
+  lyric, or famous saying the speaker merely recites, and not a policy slogan
+  read out from a document.
+- Sincere: not sarcasm, mockery, or a position the speaker voices only to
+  ridicule or rebut it. Out of context those read as the opposite of what the
+  speaker believes.
+- Short enough to print: one or two sentences, roughly at most 80 Chinese
+  characters or 40 English words.
+
+Calibration:
+- Reject "每小时都会有东西坏掉好几次": it reports an event and makes no claim.
+- Accept "规模大了以后，故障不是意外而是常态，系统得按每一层都会坏来设计":
+  it states a principle and the reason behind it.
+- Reject "天下英雄唯使君与操耳": a classical line, not the speaker's own view.
+- Reject "对对对，AI 马上就能取代所有程序员了": sarcasm; read alone it asserts
+  the opposite of what the speaker means.
+- Reject "We shipped it on a Friday." Accept "If deploying scares you, you
+  will deploy less, and every deploy gets scarier."
+"""
+
 QUOTES_ENTITIES_TEMPLATE = """## Page background
 {context}
 
@@ -166,20 +215,64 @@ QUOTES_ENTITIES_TEMPLATE = """## Page background
 {source}
 
 ---
-Extract notable verbatim quotes and mentioned entities.
+Pick candidate pull quotes for this program, and list the entities mentioned.
 
+""" + QUOTE_CRITERIA + """
 Return STRICT JSON with this exact shape:
 {{
-  "quotes": [{{"text": "notable verbatim quote", "timestamp": <seconds or null>, "speaker": "name or null"}}],
+  "quotes": [{{"text": "exact words copied from inside the quotation marks", "timestamp": <seconds or null>, "speaker": "name or null", "claim": "one plain sentence: what the speaker is actually asserting with these words, given the context"}}],
   "entities": ["people, products, companies, works mentioned"]
 }}
 
 Rules:
-- Include the most striking 8-15 verbatim quotes.
-- Do not paraphrase quotes.
+- Return up to 15 candidates, strongest first; aim for 8 or more when the notes
+  allow. A reviewer keeps only the best, so include borderline candidates, but
+  never one that clearly fails the bar above. Return fewer, or none, when the
+  notes hold nothing that qualifies; never pad with fragments or narration.
+- Copy each quote character for character from inside its quotation marks.
+  You may drop leading filler ("所以说", "I mean") or stop at a sentence
+  boundary, but never reword, splice, or merge separate passages.
+- `claim` states the speaker's real position in context. If the quote's own
+  words do not convey that claim, the quote does not qualify.
+- `speaker`: who said it, from the notes; null when unclear.
 - Keep entities concise and deduplicated.
-- timestamps are numbers of seconds (e.g. 95 for 00:01:35), parsed from [HH:MM:SS] markers.
-- LANGUAGE: {language_instruction}
+- timestamps are numbers of seconds (e.g. 95 for 00:01:35), parsed from the
+  [HH:MM:SS] heading of the section that contains the quote.
+- LANGUAGE: {language_instruction} Quotes stay exactly as written in the notes.
+"""
+
+QUOTE_REVIEW_TEMPLATE = """## Page background
+{context}
+
+## Candidate quotes
+{candidates}
+
+---
+You are the final editor choosing the pull quotes printed on this program's
+summary card. Readers see each quote with only the speaker's name and none of
+the surrounding notes. Under each candidate, "Speaker's point" is what the
+speaker meant in context, written by an editor who read the full notes.
+
+""" + QUOTE_CRITERIA + """
+Review every candidate as a reader who sees only the quote:
+1. Read the quote alone. Does it, by itself, get the speaker's point across?
+   If a reader would miss the point, need the backstory, or take it the
+   opposite way, reject it.
+2. Check it against every requirement above. One failure rejects it.
+3. When several candidates make the same point, keep only the best-worded one.
+Then rank the survivors from most to least quotable: a sharp, specific,
+memorable claim beats a generic truism.
+
+Return STRICT JSON with this exact shape:
+{{"quotes": [{{"id": <candidate number>, "text": "the candidate's text, or a contiguous excerpt of it"}}]}}
+
+Rules:
+- Keep at most {limit}. Two excellent quotes beat padding to {limit}. Return
+  an empty list when nothing passes.
+- `text` may drop a leading or trailing clause that leans on missing context,
+  or cut an over-long candidate down to one contiguous passage that still
+  stands alone; otherwise copy the candidate exactly. Never reword, and never
+  join pieces from different parts of the candidate.
 """
 
 HEADLINE_TEMPLATE = """## Page background (includes the original platform title)
@@ -266,10 +359,12 @@ Rules:
   or two sentences. Keep it skimmable and strictly grounded in the walkthrough.
 - `key_points`: 8-20 of the most important cross-cutting takeaways (the big ideas
   and conclusions), NOT a full replay of every detail.
-- `quotes`: include the most striking 8-15 verbatim quotes from the walkthrough.
+- `quotes`: up to 8 quotes from the walkthrough that meet the bar below, best
+  first. Fewer, or none, is better than padding.
 - timestamps are numbers of seconds (e.g. 95 for 00:01:35), parsed from [HH:MM:SS] markers.
 - LANGUAGE: {language_instruction}
-"""
+
+""" + QUOTE_CRITERIA
 
 # Appended to the reduce system prompt on a retry when the first attempt didn't
 # return parseable JSON (the model wrapped it in prose or a fence).
