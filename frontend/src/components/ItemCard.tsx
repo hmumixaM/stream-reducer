@@ -34,18 +34,20 @@ export interface ItemCardActions {
 export function ItemCard({
   item,
   channel,
+  href = `/items/${item.id}`,
   ...actions
 }: {
   item: Item;
   /** Shown on the timeline, where "which channel surfaced this" matters. */
   channel?: { id: number; title?: string | null } | null;
+  href?: string;
 } & ItemCardActions) {
   return (
     <Card interactive className="group relative h-full overflow-hidden">
       {/* The whole card links to the item via an overlay, so nested links
           (the channel byline) stay valid HTML and clickable. */}
       <Link
-        to={`/items/${item.id}`}
+        to={href}
         aria-label={item.title || item.source_url}
         draggable={!MIRROR}
         onDragStart={

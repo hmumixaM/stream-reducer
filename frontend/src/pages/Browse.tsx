@@ -16,6 +16,7 @@ import {
   SkeletonRows,
 } from "@/components/shell";
 import { nextPageError } from "@/lib/useInfiniteScroll";
+import { readerHref } from "@/lib/bulletin";
 import { PLATFORM_LABELS, PlatformBadge, StatusBadge, WaitingBadge } from "@/components/badges";
 import { cn, formatCount } from "@/lib/utils";
 
@@ -188,7 +189,7 @@ function BrowseCard({
 }) {
   return (
     <Card interactive className="group relative flex h-full flex-col overflow-hidden">
-      <Link to={`/items/${item.id}`} className="block">
+      <Link to={readerHref(item, "/browse")} className="block">
         <div className="aspect-video w-full overflow-hidden bg-muted">
           {item.thumbnail ? (
             <img src={item.thumbnail} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
@@ -205,7 +206,7 @@ function BrowseCard({
           <StatusBadge status={item.status} />
           {item.personal_status === "waiting" && item.status !== "done" && <WaitingBadge />}
         </div>
-        <Link to={`/items/${item.id}`} className="mb-2 line-clamp-2 font-medium leading-snug hover:underline">
+        <Link to={readerHref(item, "/browse")} className="mb-2 line-clamp-2 font-medium leading-snug hover:underline">
           {item.title || item.source_url}
         </Link>
         <div className="mb-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -254,7 +255,7 @@ function HeadlineRow({
   return (
     <Card interactive className="group overflow-hidden p-3">
       <div className="flex flex-col gap-3 sm:flex-row">
-        <Link to={`/items/${item.id}`} className="block aspect-video w-full shrink-0 overflow-hidden rounded-md bg-muted sm:w-32">
+        <Link to={readerHref(item, "/browse")} className="block aspect-video w-full shrink-0 overflow-hidden rounded-md bg-muted sm:w-32">
           {item.thumbnail ? (
             <img src={item.thumbnail} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
           ) : (
@@ -269,7 +270,7 @@ function HeadlineRow({
             <StatusBadge status={item.status} />
             {item.personal_status === "waiting" && item.status !== "done" && <WaitingBadge />}
           </div>
-          <Link to={`/items/${item.id}`} className="line-clamp-2 text-base font-semibold leading-snug hover:underline">
+          <Link to={readerHref(item, "/browse")} className="line-clamp-2 text-base font-semibold leading-snug hover:underline">
             {headline}
           </Link>
           {item.subhead && (

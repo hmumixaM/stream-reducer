@@ -9,6 +9,7 @@ import { readJson } from "../lib/request";
 import { includeSummaryDescription } from "../lib/summaryDescription";
 import { isInfographicContentReady } from "../lib/autoInfographic";
 import { sourceAlreadyChinese } from "../lib/chinese";
+import { itemChannel } from "../lib/itemChannel";
 import { readBulletinTranslation, translateBulletinEdition, type BulletinTranslationRow } from "../lib/bulletinTranslation";
 import {
   LIBRARY_SORT_COLUMNS,
@@ -340,6 +341,7 @@ itemsRoutes.get("/:id", async (c) => {
 
   return c.json({
     ...toItemRead(item, ui, { is_interested: interested != null }),
+    channel: await itemChannel(c.env, id),
     localized_bulletin: localizedBulletin,
     summary: summaryContent
       ? { ...summary, ...summaryContent }

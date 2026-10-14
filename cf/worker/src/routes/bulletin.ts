@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppContext } from "../auth";
 import { requireAuth, resolveUser } from "../auth";
 import { all, first } from "../db";
+import { itemChannel } from "../lib/itemChannel";
 import { generateReadingSummary, readCached, sourceHash, type ReadingRow } from "../lib/readingSummary";
 
 import { serializeBulletin, type BulletinRow, bulletinMetadata as metadata, bulletinSortDate as sortDate, shortSummarySql } from "../lib/bulletinPresentation";
@@ -81,6 +82,7 @@ bulletinRoutes.get("/:id", async (c) => {
     reading_summary: readCached(cached, hash),
     reading_summary_zh: readCached(chinese, hash),
     content_translations: contentTranslations,
+    channel: await itemChannel(c.env, id),
   });
 });
 

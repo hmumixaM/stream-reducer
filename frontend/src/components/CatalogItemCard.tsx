@@ -17,12 +17,14 @@ export function CatalogItemCard({
   onAdd,
   channel,
   canAdd = true,
+  href = `/items/${item.id}`,
 }: {
   item: ChannelItemRead;
   adding: boolean;
   onAdd: () => void;
   channel?: { id: number; title?: string | null } | null;
   canAdd?: boolean;
+  href?: string;
 }) {
   return (
     <Card interactive className="group relative flex h-full flex-col overflow-hidden">
@@ -47,7 +49,7 @@ export function CatalogItemCard({
           </Link>
         )}
       </div>
-      <Link to={`/items/${item.id}`} className="block">
+      <Link to={href} className="block">
         <div className="aspect-video w-full overflow-hidden bg-muted">
           {item.thumbnail ? (
             <img
@@ -70,7 +72,7 @@ export function CatalogItemCard({
           {item.personal_status === "waiting" && item.status !== "done" && <WaitingBadge />}
         </div>
         <Link
-          to={`/items/${item.id}`}
+          to={href}
           className="line-clamp-2 font-medium leading-snug hover:text-primary hover:underline"
         >
           {item.title || item.source_url}

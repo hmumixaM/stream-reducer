@@ -1,3 +1,14 @@
+/** Finished sources open in the bulletin reader; anything still processing
+ * opens its item page, where progress is shown. `from` is where "back" leads. */
+export function readerHref(item: { id: number; status: string }, from?: "/browse" | `/channels/${number}`): string {
+  if (item.status !== "done") return `/items/${item.id}`;
+  return from ? `/bulletin/${item.id}?${new URLSearchParams({ from })}` : `/bulletin/${item.id}`;
+}
+
+export function bulletinBackPath(from: string | null): string | null {
+  return from && /^\/(browse|channels\/\d+)$/.test(from) ? from : null;
+}
+
 export function timestampLabel(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds));
   const h = Math.floor(total / 3600);

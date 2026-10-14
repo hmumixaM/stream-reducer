@@ -33,6 +33,7 @@ import {
   SectionHeader,
   SkeletonGrid,
 } from "@/components/shell";
+import { readerHref } from "@/lib/bulletin";
 import { CHANNEL_ITEM_SORTS } from "@/lib/sorts";
 import { nextPageError } from "@/lib/useInfiniteScroll";
 import {
@@ -321,11 +322,12 @@ export function ChannelDetail() {
             <ItemGrid>
               {rows.map((item) =>
                 item.in_library ? (
-                  <ItemCard key={item.id} item={item} {...actions} />
+                  <ItemCard key={item.id} item={item} href={readerHref(item, `/channels/${channelId}`)} {...actions} />
                 ) : (
                   <CatalogItemCard
                     key={item.id}
                     item={item}
+                    href={readerHref(item, `/channels/${channelId}`)}
                     adding={
                       addToLibrary.isPending && addToLibrary.variables?.id === item.id
                     }

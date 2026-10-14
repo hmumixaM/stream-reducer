@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  Radio,
   RefreshCw,
   Trash2,
   ExternalLink,
@@ -200,7 +201,19 @@ export function ItemDetail() {
             <StatusBadge status={d.status} />
           </div>
           <h1 className="text-display font-semibold leading-tight">{d.title || d.source_url}</h1>
-          {d.author && <p className="mt-1 text-sm text-muted-foreground">{d.author}</p>}
+          {d.channel ? (
+            <Link
+              to={`/channels/${d.channel.id}`}
+              className="mt-1 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary"
+            >
+              <Radio className="h-3.5 w-3.5 shrink-0" />
+              <span>{d.author || d.channel.title}</span>
+              <span aria-hidden="true">·</span>
+              <span className="underline-offset-2 hover:underline">All from this source</span>
+            </Link>
+          ) : (
+            d.author && <p className="mt-1 text-sm text-muted-foreground">{d.author}</p>
+          )}
         </div>
         {/* Capped so a long action row wraps instead of squeezing the title. */}
         <div className="flex flex-wrap gap-2 md:max-w-[55%] md:justify-end">

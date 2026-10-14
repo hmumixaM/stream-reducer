@@ -2,11 +2,11 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, ArrowUpRight, BookOpen, Clock3, ExternalLink, FileDown, List, RefreshCw } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, BookOpen, Clock3, ExternalLink, FileDown, List, Radio, RefreshCw } from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, type BulletinItem, type ReadingSummary } from "@/lib/api";
 import { useMe } from "@/lib/auth";
-import { dateLabel, readingMinutes, sourceAt, timestampLabel } from "@/lib/bulletin";
+import { bulletinBackPath, dateLabel, readingMinutes, sourceAt, timestampLabel } from "@/lib/bulletin";
 import { cn } from "@/lib/utils";
 import { Button, Select } from "@/components/ui";
 import { ContentLanguageBar, languageLabel } from "@/components/ContentLanguage";
@@ -57,7 +57,15 @@ export function BulletinDetail() {
   const collection = params.get("collection");
   const returnParams = new URLSearchParams({ view: "bulletin" });
   for (const key of ["section", "track_id"]) if (params.get(key)) returnParams.set(key, params.get(key)!);
-  const backTo = collection ? `/collections/${encodeURIComponent(collection)}?${returnParams}` : authed ? "/bulletin" : "/browse";
+  const backPath = bulletinBackPath(params.get("from"));
+  const backTo = collection ? `/collections/${encodeURIComponent(collection)}?${returnParams}` : backPath ?? (authed ? "/bulletin" : "/browse");
+  const backLabel = collection
+    ? (zh ? "返回 Collection 简报" : "Back to collection")
+    : backPath?.startsWith("/channels/")
+      ? (zh ? "返回该来源" : "Back to source")
+      : backPath === "/browse" || !authed
+        ? (zh ? "返回目录" : "Back to catalog")
+        : (zh ? "返回 Bulletin" : "Back to Bulletin");
   const selected = params.get("view");
   const view: View = selected === "notes" || selected === "sources" ? selected : "summary";
   const [printFull, setPrintFull] = useState(false);
@@ -181,14 +189,14 @@ export function BulletinDetail() {
   return <div className="reading-edition mx-auto max-w-6xl">
     <div className="reader-screen screen-only">
       <div className="mb-7 flex flex-wrap items-center justify-between gap-3">
-        <Link to={backTo} className="desk-utility"><ArrowLeft size={15} />{collection ? (zh ? "返回 Collection 简报" : "Back to collection") : authed ? (zh ? "返回 Bulletin" : "Back to Bulletin") : (zh ? "返回目录" : "Back to catalog")}</Link>
+        <Link to={backTo} className="desk-utility"><ArrowLeft size={15} />{backLabel}</Link>
         <div className="flex items-center gap-2"><Select value={printFull ? "full" : "summary"} onChange={(event) => setPrintFull(event.target.value === "full")} aria-label={zh ? "PDF 内容" : "PDF contents"} className="w-auto bg-transparent text-xs"><option value="summary">{zh ? "简报 + 精炼概括" : "Bulletin + summary"}</option><option value="full">{zh ? "包含完整逐段内容" : "Include deep dive"}</option></Select><Button variant="outline" aria-label={zh ? "导出 PDF" : "Export PDF"} disabled={printing || waitingEdition || (lang == null && zh && !item.bulletin_intro_ready) || (lang == null && !summary && !printFull)} onClick={exportPdf}>{printing ? <RefreshCw size={14} className="animate-spin" /> : <FileDown size={14} />}<span className="hidden sm:inline">{zh ? "导出 PDF" : "Export PDF"}</span></Button></div>
       </div>
       {printError && <p role="alert" className="mb-4 text-sm text-muted-foreground">{zh ? "完整内容尚未加载完毕，请稍后重试导出。" : "The full edition is still loading. Please try exporting again in a moment."}</p>}
       <div className="reader-heading">
         <p className="desk-eyebrow">{item.author || item.platform}<span className="text-border">/</span>{dateLabel(item.published_at || item.created_at, zh)}</p>
         <h1>{pageTitle}</h1>
-        <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Clock3 size={13} />{readingMinutes(edition?.markdown || summaryText)} {zh ? "分钟精读" : "min read"}</span><span>{lang == null ? (zh ? "正文为原文" : "Summary in the source language") : waitingEdition ? (zh ? `正在生成${languageLabel(lang)}全文` : `Preparing the ${languageLabel(lang)} edition`) : failedEdition ? (zh ? "全文翻译失败" : "Translation failed") : (zh ? `全文为${languageLabel(lang)}` : `Full summary in ${languageLabel(lang)}`)}</span><a href={item.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 hover:text-primary">{zh ? "原始来源" : "Original source"}<ExternalLink size={12} /></a></div>
+        <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Clock3 size={13} />{readingMinutes(edition?.markdown || summaryText)} {zh ? "分钟精读" : "min read"}</span><span>{lang == null ? (zh ? "正文为原文" : "Summary in the source language") : waitingEdition ? (zh ? `正在生成${languageLabel(lang)}全文` : `Preparing the ${languageLabel(lang)} edition`) : failedEdition ? (zh ? "全文翻译失败" : "Translation failed") : (zh ? `全文为${languageLabel(lang)}` : `Full summary in ${languageLabel(lang)}`)}</span><a href={item.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 hover:text-primary">{zh ? "原始来源" : "Original source"}<ExternalLink size={12} /></a>{item.channel && <Link to={`/channels/${item.channel.id}`} className="inline-flex items-center gap-1.5 hover:text-primary"><Radio size={12} />{zh ? "该来源全部内容" : "More from this source"}</Link>}</div>
       </div>
       <ContentLanguageBar active={lang} translations={translations} authed={authed} zhUi={zh} nativeChinese={nativeChinese} busy={requestEdition.isPending} onSelect={(code) => { picked.current = true; setLang(code); }} onRequest={requestLanguage} />
       <div className="reader-columns">

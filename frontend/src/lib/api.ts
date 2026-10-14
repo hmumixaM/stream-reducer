@@ -250,7 +250,13 @@ export interface Infographic {
   image_url?: string | null;
 }
 
+export interface SourceChannel {
+  id: number;
+  title: string | null;
+}
+
 export interface ItemDetail extends Item {
+  channel?: SourceChannel | null;
   localized_bulletin?: LocalizedBulletin | null;
   summary?: Summary | null;
   transcript?: Transcript | null;
@@ -487,6 +493,7 @@ export interface BulletinItem {
   reading_summary: ReadingSummaryResult;
   reading_summary_zh?: ReadingSummaryResult;
   content_translations?: { lang: string; status: string }[];
+  channel?: SourceChannel | null;
 }
 
 export type BulletinCardItem = Pick<BulletinItem, "id" | "title" | "source_title" | "subhead" | "author" | "source_url" | "published_at" | "created_at" | "platform" | "duration_s" | "saved" | "bulletin" | "bulletin_points" | "bulletin_language" | "localization_status" | "summary" | "bulletin_overview" | "bulletin_intro_ready">;

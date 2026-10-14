@@ -5,6 +5,7 @@
 // never end up with a feed row but no channel — the split that left 337 items
 // orphaned and three followed channels looking empty.
 import type { Env } from "../env";
+import { first } from "../db";
 import {
   linkChannelItem,
   resolveChannelIdentity,
@@ -221,4 +222,17 @@ export async function attachItemChannelBestEffort(
     console.warn("channel attribution failed", { item_id: item.id, err: String(err) });
     return null;
   }
+}
+
+export interface ItemChannel {
+  id: number;
+  title: string | null;
+}
+
+/** The channel whose feed first surfaced this item, for "all from this source" links. */
+export function itemChannel(env: Env, itemId: number): Promise<ItemChannel | null> {
+  return first<ItemChannel>(env.DB.prepare(
+    `SELECT c.id, c.title FROM channel_item ci JOIN channel c ON c.id = ci.channel_id
+      WHERE ci.item_id = ? ORDER BY ci.discovered_at, c.id LIMIT 1`,
+  ).bind(itemId));
 }
