@@ -1,7 +1,7 @@
 # Stateless pipeline service deps. Kept lean: no DB/queue/embedding stack —
 # the Worker owns D1/Vectorize/R2; this container only fetches + transcribes +
 # summarizes and returns JSON.
-fastapi>=0.115.0
+fastapi>=0.141.1
 uvicorn[standard]>=0.32.0
 # [socks] pulls socksio so the cookie-refresh client can egress via the WARP
 # SOCKS5 proxy; cryptography provides RSA-OAEP for the refresh correspondPath.
