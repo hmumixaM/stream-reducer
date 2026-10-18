@@ -248,6 +248,20 @@ rssRoutes.get("/articles/:id", async (c) => {
   )
     .bind(article.id, article.body_hash)
     .all<{ lang: string; content: string; model: string; tokens: number }>();
+  const requested = c.req.query("lang") || c.get("user").preferred_language;
+  if (
+    requested === "zh" &&
+    article.status === "done" &&
+    !editions.results.some((e) => e.lang === "zh")
+  ) {
+    const changed = await c.env.DB.prepare(
+      "UPDATE rss_article SET status='queued',attempts=0,next_attempt_at='' WHERE id=? AND status='done'",
+    )
+      .bind(article.id)
+      .run();
+    if (changed.meta.changes) await c.env.RSS_JOBS.send({ kind: "rss_drain" });
+    article.status = "queued";
+  }
   const read = await c.env.DB.prepare(
     "SELECT read_at,saved FROM rss_read WHERE user_id=? AND article_id=?",
   )

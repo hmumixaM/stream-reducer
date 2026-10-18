@@ -46,6 +46,21 @@ jobs:
         working-directory: cf/worker
         run: npm ci
 
+      - name: Validate Worker and RSS reader
+        working-directory: cf/worker
+        run: |
+          npm run typecheck
+          npm test
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate RSS extraction
+        run: |
+          pip install -r cf/rss/requirements.txt pytest httpx
+          pytest cf/rss/test_service.py
+
       # 3. Apply D1 migrations (idempotent)
       - name: Apply D1 migrations
         uses: cloudflare/wrangler-action@v3

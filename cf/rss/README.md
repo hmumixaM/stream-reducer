@@ -63,14 +63,19 @@ Unchanged content reuses editions; manual body retry and fuller feed updates can
 upgrade excerpts. Long documents process every paragraph through persisted
 section evidence (at most two new evidence calls per invocation), then synthesize
 the two reading layers. Original-language and requested Chinese editions are
-stored independently. Briefs can have no explanation section; articles, reports
+stored independently; a Chinese original is reused for the Chinese edition.
+Opening a completed article in Chinese queues a missing edition from its saved
+body. Verified same-host canonical URLs merge source links, URL aliases and
+personal state without losing old article IDs. Briefs can have no explanation section; articles, reports
 and digests are classified by information structure, not mandatory word counts.
 Source references address saved paragraphs, including PDF page headings.
 
 DB leases prevent duplicate work; abandoned jobs recover after lease expiry.
 Failures back off and stop after four automatic article attempts. Manual retry
 resets attempts; the admin can pause all RSS processing without disabling saved
-reading. Backfill can be paused independently per source. Two queue consumers
+reading. Backfill can be paused independently per source. Four container slots allow two old and two new instances during releases; idle
+instances sleep after 30 seconds. Provisioning failures retry without spending
+article attempts or source failure counts. Two queue consumers
 select newest unprocessed articles before older history. Model calls and token
 usage are recorded in `rss_llm_usage`; per-source provider, poll counts, success
 counts, errors, authentication state and earliest available date remain visible

@@ -169,6 +169,7 @@ def parse_feed(data: bytes, base: str):
         entries.append({"url": link, "external_id": e.get("id", link), "title": plain(e.get("title", "")) or link,
                         "published_at": iso(e.get("published_parsed") or e.get("updated_parsed")),
                         "author": e.get("author"), "content": content or e.get("summary", ""),
+                        "description": e.get("summary", ""),
                         "content_is_full": bool(content and plain(content) != plain(e.get("summary", ""))), "folo_entry_id": None})
     return {"title": plain(parsed.feed.get("title", "")) or base, "entries": entries}
 
@@ -252,6 +253,7 @@ def poll(req: PollRequest):
                                 "external_id": str(e["id"]), "folo_entry_id": str(e["id"]),
                                 "published_at": iso(e.get("publishedAt")), "author": e.get("author"),
                                 "content": e.get("content") or e.get("description") or "",
+                                "description": e.get("description") or "",
                                 "content_is_full": bool(e.get("content") and plain(e["content"]) != plain(e.get("description", "")))})
             dates = [e["published_at"] for e in entries if e["published_at"]]
             oldest = min(dates) if dates else None

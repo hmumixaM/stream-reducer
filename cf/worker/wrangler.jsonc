@@ -151,7 +151,7 @@
   // --- Container: Python pipeline (yt-dlp + ffmpeg + summarize) ---
   // Controlled per-instance through the PipelineContainer Durable Object.
   "containers": [
-    { "class_name": "RssContainer", "image": "../rss/Dockerfile", "image_build_context": "../rss", "instance_type": "basic", "max_instances": 2 },
+    { "class_name": "RssContainer", "image": "../rss/Dockerfile", "image_build_context": "../rss", "instance_type": "basic", "max_instances": 4 },
     {
       "class_name": "PipelineContainer",
       "image": "../pipeline/Dockerfile",
@@ -202,7 +202,7 @@
 
   "vars": {
     "RSS_ENABLED": "true",
-    "RSS_CONTAINER_GEN": "2",
+    "RSS_CONTAINER_GEN": "3",
     "RSSHUB_BASE_URL": "https://rsshub.app",
     "FOLO_OWNER_EMAIL": "huyangmax@gmail.com",
     "APP_ORIGIN": "https://reducer.xgoose.org",

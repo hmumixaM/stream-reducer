@@ -411,3 +411,55 @@ describe("verified canonical identities", () => {
     ).toMatchObject({ status: "queued", body_key: null });
   });
 });
+
+describe("RSS Chinese editions", () => {
+  it("reuses a Chinese original instead of making the same model request twice", async () => {
+    const s = setup();
+    await add(s);
+    const text =
+      "这是完整的中文文章，包含明确的事实、具体数字和必要的背景信息，没有要求补充原文之外的内容。";
+    containerFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({ ...body, text, paragraphs: [{ id: 1, text }] }),
+      ),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              choices: [{ message: { content: JSON.stringify(edition) } }],
+            }),
+          ),
+      ),
+    );
+    await drainRss(s.env);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(s.db.prepare("SELECT count(*) n FROM rss_edition").get().n).toBe(2);
+  });
+});
+
+describe("RSS deployment capacity recovery", () => {
+  it("does not spend article attempts or source failure counts on container provisioning", async () => {
+    const s = setup();
+    const source = await add(s);
+    containerFetch.mockRejectedValue(
+      new Error(
+        "There is no container instance that can be provided to this Durable Object, try again later",
+      ),
+    );
+    await pollRss(s.env, source.id);
+    expect(s.db.prepare("SELECT failures FROM rss_source").get().failures).toBe(
+      0,
+    );
+    await drainRss(s.env);
+    expect(
+      s.db.prepare("SELECT status,attempts FROM rss_article").get(),
+    ).toMatchObject({ status: "queued", attempts: 0 });
+    expect(s.env.RSS_JOBS.send).toHaveBeenLastCalledWith(
+      { kind: "rss_drain" },
+      { delaySeconds: 60 },
+    );
+  });
+});

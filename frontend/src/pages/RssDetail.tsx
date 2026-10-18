@@ -29,11 +29,12 @@ export function RssDetail() {
     me.data?.user?.preferred_language === "zh" ? "zh" : "original",
   );
   const [showBody, setShowBody] = useState(false);
+  const [reference, setReference] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const article = useQuery({
-    queryKey: ["rss", "article", id],
-    queryFn: () => rssApi<Detail>(`/articles/${id}`),
+    queryKey: ["rss", "article", id, lang],
+    queryFn: () => rssApi<Detail>(`/articles/${id}?lang=${lang}`),
     refetchInterval: (q) =>
       ["done", "missing"].includes(q.state.data?.status || "") ? false : 10000,
   });
@@ -60,15 +61,20 @@ export function RssDetail() {
       setBusy(false);
     }
   };
+  useEffect(() => {
+    if (reference !== null && showBody && body.data) {
+      document.getElementById(`rss-p-${reference}`)?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+        block: "center",
+      });
+      setReference(null);
+    }
+  }, [reference, showBody, body.data]);
   const reveal = (ref: number) => {
     setShowBody(true);
-    window.setTimeout(
-      () =>
-        document
-          .getElementById(`rss-p-${ref}`)
-          ?.scrollIntoView({ behavior: "smooth", block: "center" }),
-      300,
-    );
+    setReference(ref);
   };
   if (article.isLoading)
     return (
@@ -163,6 +169,13 @@ export function RssDetail() {
             {error}
           </p>
         )}
+        {lang === "zh" &&
+          !a.editions.some((e) => e.lang === "zh") &&
+          edition && (
+            <p role="status" className="mt-4 text-sm text-muted-foreground">
+              中文版本正在准备，当前显示原文语言。
+            </p>
+          )}
         {edition ? (
           <>
             <section className="mt-7" aria-label="文章简报">
@@ -218,7 +231,7 @@ export function RssDetail() {
                         {s.text}
                       </p>
                       <div className="mt-2 flex flex-wrap gap-2">
-                        {s.references.map((ref) => (
+                        {[...new Set(s.references)].slice(0, 6).map((ref) => (
                           <button
                             key={ref}
                             className="min-h-8 rounded border px-2 text-xs text-muted-foreground hover:text-primary"
