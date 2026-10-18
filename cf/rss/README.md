@@ -1,15 +1,23 @@
-# Independent RSS reader
+# RSS article acquisition and reading
 
-`/rss` is an authenticated article reader, with its own articles, bulletin and
-sources views. It uses `rss_*` D1 tables, `rss/` R2 objects and the two-consumer
-`stream-reduce-rss` queue. It does not add articles to media item tables, media
-queues, global Browse, media Bulletin, search or knowledge graphs.
+Articles appear alongside videos and podcasts in the main `/bulletin` feed.
+`/subscriptions?tab=articles` discovers public article sources and manages each
+user's own follows; `/rss/articles/:id` opens the saved article reading page.
+Legacy `/rss` links redirect to Bulletin or Sources. Article cards share the
+media reading interface, with no read/unread tracking controls. Website logos
+use publisher-declared site icons or favicon, never article covers.
+
+Acquisition still uses separate `rss_*` D1 tables, `rss/` R2 objects and the
+two-consumer `stream-reduce-rss` queue. Articles stay outside global Browse,
+media item tables, media queues, search and knowledge graphs. The Bulletin feed
+merges lightweight cards with a date/type/id cursor, preserving equal-date and
+same-ID entries across both content types.
 
 The reader accepts RSS/Atom, website feed discovery, full RSSHub URLs,
 `rsshub://` routes, Folo feed/share URLs, and OPML. If direct resolution
 fails (including RSSHub 403), public Folo catalog lookup can recover a cached
 source using GET requests without subscribing the account. Multiple website feeds are
-presented for selection. Follow categories, saved and read state are per user.
+presented for selection. Follow categories and saved state are per user. Public catalog responses never include another user's categories or account state. Any signed-in user can follow an existing source by ID without a Folo connection; only the owner can import their Folo account.
 The Folo import is bound to `FOLO_OWNER_EMAIL` and only imports public feeds in
 Articles (view 0). New follows exist exclusively in reducer; the integration
 never calls Folo subscription creation or changes its read state. A free Folo
@@ -21,7 +29,7 @@ bypassed.
 
 ## Deployment
 
-The main Cloudflare workflow applies `0028_rss_reader.sql`, builds the frontend,
+The main Cloudflare workflow applies `0028_rss_reader.sql` and `0029_rss_source_branding.sql`, builds the frontend,
 and deploys the RSS container alongside the existing media container. Before
 first deploy, create the queue:
 

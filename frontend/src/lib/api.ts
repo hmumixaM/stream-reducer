@@ -496,7 +496,7 @@ export interface BulletinItem {
   channel?: SourceChannel | null;
 }
 
-export type BulletinCardItem = Pick<BulletinItem, "id" | "title" | "source_title" | "subhead" | "author" | "source_url" | "published_at" | "created_at" | "platform" | "duration_s" | "saved" | "bulletin" | "bulletin_points" | "bulletin_language" | "localization_status" | "summary" | "bulletin_overview" | "bulletin_intro_ready">;
+export type BulletinCardItem = { content_type?: "article" | "media"; based_on_excerpt?: boolean } & Pick<BulletinItem, "id" | "title" | "source_title" | "subhead" | "author" | "source_url" | "published_at" | "created_at" | "platform" | "duration_s" | "saved" | "bulletin" | "bulletin_points" | "bulletin_language" | "localization_status" | "summary" | "bulletin_overview" | "bulletin_intro_ready">;
 
 export interface BulletinFeed {
   items: BulletinCardItem[];
@@ -1166,12 +1166,13 @@ export const api = {
   listResearchBriefs: (limit = 40) =>
     req<ResearchBrief[]>(`/api/research/feed?limit=${Math.min(Math.max(limit, 1), 100)}`),
   getResearchBrief: (id: number) => req<ResearchBriefDetail>(`/api/research/briefs/${id}`),
-  listBulletins: (params: { cursor?: string; q?: string; platform?: string; saved?: boolean } = {}) => {
+  listBulletins: (params: { cursor?: string; q?: string; platform?: string; saved?: boolean; source?: string } = {}) => {
     const sp = new URLSearchParams({ limit: "24" });
     if (params.cursor) sp.set("cursor", params.cursor);
     if (params.q) sp.set("q", params.q);
     if (params.platform) sp.set("platform", params.platform);
     if (params.saved) sp.set("saved", "true");
+    if (params.source) sp.set("source", params.source);
     return req<BulletinFeed>(`/api/bulletin/feed?${sp}`);
   },
   getBulletin: (id: number) => req<BulletinItem>(`/api/bulletin/${id}`),

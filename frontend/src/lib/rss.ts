@@ -9,6 +9,8 @@ export interface RssEdition {
   based_on_excerpt: boolean;
 }
 export interface RssSource {
+  image_url: string | null;
+  site_url: string | null;
   id: number;
   title: string;
   category: string;

@@ -293,6 +293,27 @@ export async function pollRss(
       sourceId,
     );
     await persistEntries(env, source, page.entries);
+    // Branding is optional; an unavailable logo must never stop article updates.
+    const branded = await env.DB.prepare(
+      "SELECT branding_checked_at FROM rss_source WHERE id=?",
+    )
+      .bind(sourceId)
+      .first<{ branding_checked_at: string | null }>();
+    if (!branded?.branding_checked_at && page.entries[0]?.url) {
+      try {
+        const brand = await rssCall<{
+          image_url: string | null;
+          site_url: string;
+        }>(env, "/branding", { url: page.entries[0].url }, sourceId);
+        await env.DB.prepare(
+          "UPDATE rss_source SET image_url=?,site_url=?,branding_checked_at=? WHERE id=?",
+        )
+          .bind(brand.image_url, brand.site_url, now(), sourceId)
+          .run();
+      } catch {
+        /* Try again on the next poll, without changing feed health. */
+      }
+    }
     const earliest =
       page.entries
         .map((e) => e.published_at)

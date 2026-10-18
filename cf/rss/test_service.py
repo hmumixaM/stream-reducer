@@ -133,3 +133,21 @@ def test_history_uses_folo_older_page_cursor_despite_parameter_name(monkeypatch)
     assert calls[0]["publishedAfter"]=="2026-09-02T12:00:00.381Z"
     assert "publishedBefore" not in calls[0]
     assert r["entries"][0]["published_at"].startswith("2026-08-01")
+
+
+def test_source_branding_uses_declared_site_icon_not_article_cover(monkeypatch):
+    calls=[]
+    def download(url, **kwargs):
+        calls.append(url)
+        if url.endswith('/story'):
+            return b'<html><link rel="apple-touch-icon" href="/brand.png"><meta property="og:image" content="/cover.jpg"></html>', 'text/html', url
+        return b'icon-bytes', 'image/png', url
+    monkeypatch.setattr(s, 'download', download)
+    result=s.branding(s.BrandingRequest(url='https://publisher.example/story'))
+    assert result == {'site_url':'https://publisher.example/', 'image_url':'https://publisher.example/brand.png'}
+    assert not any('cover' in url for url in calls)
+
+
+def test_source_branding_falls_back_without_blocking_articles(monkeypatch):
+    monkeypatch.setattr(s,'download',lambda *a,**k:(_ for _ in ()).throw(s.UpstreamError(404)))
+    assert s.branding(s.BrandingRequest(url='https://publisher.example/story'))['image_url'] is None

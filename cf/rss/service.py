@@ -30,6 +30,38 @@ class UpstreamError(ValueError):
         self.retry_after = retry_after
         super().__init__(f"来源返回 HTTP {status}")
 
+
+class BrandingRequest(BaseModel):
+    url: str
+
+
+@app.post("/branding")
+def branding(req: BrandingRequest):
+    """Use the publisher's declared site icons, never an article cover image."""
+    address = public_url(req.url)
+    parts = urlsplit(address)
+    site = urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
+    candidates = []
+    try:
+        data, ctype, final = download(site if parts.path.lower().endswith(".pdf") else address)
+        if "html" in ctype:
+            soup = BeautifulSoup(data, "html.parser")
+            for rel in ("apple-touch-icon", "icon"):
+                for link in soup.find_all("link", href=True):
+                    if rel in (link.get("rel") or []):
+                        candidates.append(public_url(urljoin(final, link["href"])))
+    except Exception:
+        pass
+    candidates.append(urljoin(site, "favicon.ico"))
+    for candidate in list(dict.fromkeys(candidates))[:4]:
+        try:
+            data, ctype, final = download(candidate)
+            if data and len(data) <= 1_000_000 and ctype.lower().startswith("image/"):
+                return {"site_url": site, "image_url": final}
+        except Exception:
+            continue
+    return {"site_url": site, "image_url": None}
+
 def feed_address(raw):
     return RSSHUB + "/" + raw[len("rsshub://"):].lstrip("/") if raw.startswith("rsshub://") else raw
 
@@ -437,7 +469,7 @@ def subscriptions(req: SourceRequest):
         sources, skipped = [], 0
         for row in rows:
             feed = row.get("feeds") or {}
-            if row.get("view") != 0 or row.get("isPrivate") or feed.get("type") != "feed" or not feed.get("url"):
+            if row.get("view") != 0 or row.get("isPrivate") or feed.get("isPrivate") or feed.get("type") != "feed" or not feed.get("url"):
                 skipped += 1
                 continue
             try:

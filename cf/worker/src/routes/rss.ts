@@ -82,6 +82,29 @@ rssRoutes.get("/sources", async (c) => {
     .all();
   return c.json(rows.results);
 });
+// A catalog of public sources, never other users' follows/categories or account data.
+rssRoutes.get("/catalog", async (c) => {
+  const q = `%${(c.req.query("q") || "").trim().slice(0, 200)}%`;
+  const rows = await c.env.DB.prepare(
+    `SELECT s.id,s.title,s.url,s.feed_url,s.image_url,s.site_url,
+    EXISTS(SELECT 1 FROM rss_follow f WHERE f.source_id=s.id AND f.user_id=?) following,
+    (SELECT count(*) FROM rss_source_article sa WHERE sa.source_id=s.id) article_count,
+    (SELECT max(a.published_at) FROM rss_source_article sa JOIN rss_article a ON a.id=sa.article_id WHERE sa.source_id=s.id) latest_published_at
+    FROM rss_source s WHERE s.title LIKE ? OR s.feed_url LIKE ? ORDER BY s.title LIMIT 500`,
+  )
+    .bind(c.get("user").id, q, q)
+    .all();
+  return c.json(rows.results);
+});
+rssRoutes.post("/sources/:id/follow", async (c) => {
+  const source = await c.env.DB.prepare("SELECT * FROM rss_source WHERE id=?")
+    .bind(positiveId(c.req.param("id")))
+    .first<RssSource>();
+  if (!source) return c.json({ error: "来源不存在" }, 404);
+  await followRss(c.env, c.get("user").id, source);
+  await c.env.RSS_JOBS.send({ kind: "rss_poll", source_id: source.id });
+  return c.json({ id: source.id }, 201);
+});
 rssRoutes.post("/resolve", async (c) => {
   const body = await c.req.json<{ url: string }>();
   if (typeof body.url !== "string" || body.url.length > 4096)

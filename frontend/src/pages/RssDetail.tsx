@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
@@ -42,18 +42,15 @@ export function RssDetail() {
     queryFn: () => rssApi<RssBody>(`/articles/${id}/body`),
     enabled: showBody,
   });
-  useEffect(() => {
-    if (article.data && !article.data.read.read_at)
-      void rssApi(`/articles/${id}`, { read: true }, "PATCH")
-        .then(() => client.invalidateQueries({ queryKey: ["rss", "articles"] }))
-        .catch(() => {});
-  }, [id, !!article.data, client]);
   const action = async (fn: () => Promise<void>) => {
     setBusy(true);
     setError("");
     try {
       await fn();
-      await client.invalidateQueries({ queryKey: ["rss"] });
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["rss"] }),
+        client.invalidateQueries({ queryKey: ["bulletin", "feed"] }),
+      ]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -80,18 +77,18 @@ export function RssDetail() {
   return (
     <div className="mx-auto max-w-4xl pb-16">
       <Link
-        to="/rss"
+        to="/bulletin"
         className="mb-6 inline-flex min-h-11 items-center gap-2 text-sm text-muted-foreground hover:text-primary"
       >
         <ArrowLeft size={16} />
-        RSS 文章
+        Bulletin
       </Link>
       <article className="rounded-lg border bg-card px-5 py-7 sm:px-10 sm:py-10">
         <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
           {a.sources.map((s) => (
             <Link
               key={s.id}
-              to={`/rss?source=${s.id}`}
+              to={`/subscriptions?tab=articles&source=${s.id}`}
               className="hover:text-primary"
             >
               {s.title}

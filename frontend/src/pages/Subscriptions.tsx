@@ -1,3 +1,4 @@
+import { ArticleSources } from "./Rss";
 import { useEffect, useMemo, useState } from "react";
 import {
   useInfiniteQuery,
@@ -55,7 +56,11 @@ export function Subscriptions() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const tab =
-    requestedTab === "following" && canFollow ? "following" : "discover";
+    requestedTab === "articles"
+      ? "articles"
+      : requestedTab === "following" && canFollow
+        ? "following"
+        : "discover";
   const groups = useQuery({
     queryKey: ["groups"],
     queryFn: () => api.listGroups(),
@@ -64,6 +69,7 @@ export function Subscriptions() {
 
   useEffect(() => {
     if (
+      requestedTab === "articles" ||
       requestedTab === "discover" ||
       (requestedTab === "following" && canFollow)
     ) {
@@ -74,7 +80,7 @@ export function Subscriptions() {
     setSearchParams(params, { replace: true });
   }, [canFollow, requestedTab, searchParams, setSearchParams]);
 
-  const setTab = (next: "discover" | "following") => {
+  const setTab = (next: "discover" | "following" | "articles") => {
     const params = new URLSearchParams(searchParams);
     params.set("tab", next);
     setSearchParams(params);
@@ -83,11 +89,14 @@ export function Subscriptions() {
   return (
     <div>
       <PageHeader
-        title="Channels"
-        subtitle="Discover known channels and follow the ones you care about — new episodes arrive summarised."
+        title="Sources"
+        subtitle="Follow video, podcast and article sources. New content arrives summarised in Bulletin."
       />
 
-      <nav className="mb-6 flex border-b border-border" aria-label="Channel views">
+      <nav
+        className="mb-6 flex flex-wrap border-b border-border"
+        aria-label="Channel views"
+      >
         <TabLink
           active={tab === "discover"}
           icon={<Compass className="h-4 w-4" />}
@@ -104,9 +113,18 @@ export function Subscriptions() {
             Following
           </TabLink>
         )}
+        <TabLink
+          active={tab === "articles"}
+          icon={<Rss className="h-4 w-4" />}
+          onClick={() => setTab("articles")}
+        >
+          文章 / RSS
+        </TabLink>
       </nav>
 
-      {tab === "discover" ? (
+      {tab === "articles" ? (
+        <ArticleSources />
+      ) : tab === "discover" ? (
         <DiscoverChannels groups={groups.data ?? []} canFollow={canFollow} />
       ) : (
         <FollowingChannels
@@ -198,7 +216,9 @@ function DiscoverChannels({
           onResolved={(channel) => {
             setPreview(channel);
             setAddOpen(false);
-            queryClient.invalidateQueries({ queryKey: ["channels", "catalog"] });
+            queryClient.invalidateQueries({
+              queryKey: ["channels", "catalog"],
+            });
           }}
         />
       )}
@@ -210,7 +230,11 @@ function DiscoverChannels({
             title="Channel preview"
             subtitle="Resolved from the URL you pasted."
             actions={
-              <Button size="sm" variant="ghost" onClick={() => setPreview(null)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setPreview(null)}
+              >
                 Dismiss
               </Button>
             }
@@ -243,19 +267,18 @@ function DiscoverChannels({
                 : "Paste a channel or feed URL to add the first one to the catalog."
             }
             action={
-              !filtering && (
-                canFollow ? (
-                  <Button size="sm" onClick={() => setAddOpen(true)}>
-                    <Link2 className="h-4 w-4" /> Add by URL
+              !filtering &&
+              (canFollow ? (
+                <Button size="sm" onClick={() => setAddOpen(true)}>
+                  <Link2 className="h-4 w-4" /> Add by URL
+                </Button>
+              ) : (
+                <Link to="/login">
+                  <Button size="sm" variant="outline">
+                    Sign in to follow
                   </Button>
-                ) : (
-                  <Link to="/login">
-                    <Button size="sm" variant="outline">
-                      Sign in to follow
-                    </Button>
-                  </Link>
-                )
-              )
+                </Link>
+              ))
             }
           />
         ) : (
@@ -302,11 +325,15 @@ function AddChannelDialog({
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-24 animate-fade-in"
       onClick={onClose}
     >
-      <Card className="w-full max-w-lg p-5" onClick={(event) => event.stopPropagation()}>
+      <Card
+        className="w-full max-w-lg p-5"
+        onClick={(event) => event.stopPropagation()}
+      >
         <h2 className="mb-1 text-lg font-semibold">Add a channel by URL</h2>
         <p className="mb-4 text-sm text-muted-foreground">
-          Paste a YouTube channel, Bilibili space, Apple Podcasts show, 小宇宙 podcast,
-          or any RSS feed. We resolve it to a shared channel you can then follow.
+          Paste a YouTube channel, Bilibili space, Apple Podcasts show, 小宇宙
+          podcast, or any RSS feed. We resolve it to a shared channel you can
+          then follow.
         </p>
         <form
           className="space-y-3"
@@ -328,7 +355,11 @@ function AddChannelDialog({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={resolve.isPending} aria-busy={resolve.isPending}>
+            <Button
+              type="submit"
+              disabled={resolve.isPending}
+              aria-busy={resolve.isPending}
+            >
               {resolve.isPending ? (
                 <>
                   <Spinner /> Previewing…
@@ -365,12 +396,17 @@ function FollowingChannels({
   const [filter, setFilter] = useState<FollowFilter>("all");
   const [query, setQuery] = useState("");
   const [polling, setPolling] = useState(0);
-  const refetchInterval = polling > 0 ? FOLLOW_REFETCH_ACTIVE_MS : FOLLOW_REFETCH_MS;
+  const refetchInterval =
+    polling > 0 ? FOLLOW_REFETCH_ACTIVE_MS : FOLLOW_REFETCH_MS;
 
   const channels = useInfiniteQuery({
     queryKey: ["channels", "following"],
     queryFn: ({ pageParam }) =>
-      api.listChannels({ following: true, limit: PAGE_SIZE, offset: pageParam }),
+      api.listChannels({
+        following: true,
+        limit: PAGE_SIZE,
+        offset: pageParam,
+      }),
     initialPageParam: 0,
     getNextPageParam: (lastPage, pages) =>
       lastPage.length === PAGE_SIZE ? pages.length * PAGE_SIZE : undefined,
@@ -381,13 +417,15 @@ function FollowingChannels({
   const counts = useMemo(
     () => ({
       all: rows.length,
-      errors: rows.filter((channel) => channel.follow?.last_status === "error").length,
+      errors: rows.filter((channel) => channel.follow?.last_status === "error")
+        .length,
     }),
     [rows],
   );
   const search = query.trim().toLowerCase();
   const visible = rows.filter((channel) => {
-    if (filter === "errors" && channel.follow?.last_status !== "error") return false;
+    if (filter === "errors" && channel.follow?.last_status !== "error")
+      return false;
     if (!search) return true;
     return (channel.title || channel.feed_url).toLowerCase().includes(search);
   });
@@ -417,11 +455,14 @@ function FollowingChannels({
     <div className="space-y-4">
       <Toolbar className="mb-0">
         <p className="px-1 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">{counts.all}</span> following
+          <span className="font-medium text-foreground">{counts.all}</span>{" "}
+          following
           {counts.errors > 0 && (
             <>
               {" · "}
-              <span className="font-medium text-danger">{counts.errors} with errors</span>
+              <span className="font-medium text-danger">
+                {counts.errors} with errors
+              </span>
             </>
           )}
         </p>
