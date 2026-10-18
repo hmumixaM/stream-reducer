@@ -29,6 +29,8 @@ interface PublicSource {
   following: number;
   article_count: number;
   latest_published_at: string | null;
+  provider?: string;
+  connection_label?: string | null;
 }
 function SourceAvatar({ source }: { source: PublicSource | RssSource }) {
   const [failed, setFailed] = useState(false);
@@ -167,7 +169,7 @@ export function ArticleSources() {
         </div>
       </div>
       <p className="text-sm leading-7 text-muted-foreground">
-        关注公开文章来源后，新文章会自动获取并概括，与视频、播客一起出现在{" "}
+        关注文章来源后，新文章会自动获取并概括，与视频、播客一起出现在{" "}
         <Link to="/bulletin" className="text-primary underline">
           Bulletin
         </Link>
@@ -335,7 +337,7 @@ export function ArticleSources() {
                   <SourceAvatar source={s} />
                   <div className="min-w-0 flex-1">
                     <p className="mb-1 text-xs text-muted-foreground">
-                      文章来源
+                      {s.provider === "substack" ? `Substack${s.connection_label ? ` · ${s.connection_label}` : ""}` : "文章来源"}
                     </p>
                     <Link
                       to={`/bulletin?platform=article&source=${s.id}`}

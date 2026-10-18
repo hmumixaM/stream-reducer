@@ -1,4 +1,5 @@
 import { rssRoutes } from "./routes/rss";
+import { substackRoutes } from "./routes/substack";
 import { wakeRss, drainRss, pollRss, type RssMessage } from "./lib/rss";
 export { RssContainer } from "./lib/rss";
 import { Hono } from "hono";
@@ -38,6 +39,7 @@ app.get("/api/health", (c) => c.json({ status: "ok", llm_model: c.env.LLM_MODEL,
 
 app.route("/api/auth", authRoutes);
 app.route("/api/rss", rssRoutes);
+app.route("/api/substack", substackRoutes);
 // Folders live under /api/items/groups; register before the /:id catch-all.
 app.route("/api/items/groups", folderRoutes);
 // Comments/highlights (/api/items/:id/...) + the /api/annotations feed.

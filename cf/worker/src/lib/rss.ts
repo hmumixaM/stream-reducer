@@ -1,6 +1,7 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import type { Env } from "../env";
 import { sha256 } from "./crypto";
+import { extractSubstackArticle, getSubstackConnection, substackCall } from "./substack";
 
 export class RssContainer extends Container<Env> {
   defaultPort = 8080;
@@ -32,6 +33,12 @@ export interface RssSource {
   auth_error: number;
   poll_count: number;
   success_count: number;
+  substack_connection_id?: string | null;
+  substack_publication_id?: string | null;
+  substack_subdomain?: string | null;
+  backfill_cursor?: string | null;
+  image_url?: string | null;
+  site_url?: string | null;
 }
 export interface RssArticle {
   id: number;
@@ -50,6 +57,7 @@ export interface RssArticle {
   attempts: number;
   error: string | null;
   lease_token: string | null;
+  substack_post_id?: string | null;
 }
 export interface RssEntry {
   url: string;
@@ -60,6 +68,7 @@ export interface RssEntry {
   folo_entry_id?: string;
   content: string;
   content_is_full: boolean;
+  substack_post_id?: string;
 }
 export interface RssBody {
   text: string;
@@ -157,9 +166,11 @@ export async function followRss(
     (Omit<RssSource, "id"> & { category?: string }) | Record<string, unknown>,
 ): Promise<number> {
   const row = await env.DB.prepare(
-    `INSERT INTO rss_source(identity,provider,url,feed_url,folo_id,title,backfill_since)
-    VALUES(?,?,?,?,?,?,?) ON CONFLICT(identity) DO UPDATE SET
-    folo_id=COALESCE(excluded.folo_id,rss_source.folo_id),title=excluded.title
+    `INSERT INTO rss_source(identity,provider,url,feed_url,folo_id,title,backfill_since,
+      substack_connection_id,substack_publication_id,substack_subdomain,image_url,site_url,branding_checked_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(identity) DO UPDATE SET
+    folo_id=COALESCE(excluded.folo_id,rss_source.folo_id),title=excluded.title,
+    image_url=COALESCE(excluded.image_url,rss_source.image_url),site_url=COALESCE(excluded.site_url,rss_source.site_url)
     RETURNING id`,
   )
     .bind(
@@ -170,6 +181,12 @@ export async function followRss(
       source.folo_id ?? null,
       source.title,
       monthsAgo(),
+      source.substack_connection_id ?? null,
+      source.substack_publication_id ?? null,
+      source.substack_subdomain ?? null,
+      source.image_url ?? null,
+      source.site_url ?? null,
+      source.image_url ? now() : null,
     )
     .first<{ id: number }>();
   if (!row) throw new Error("未能保存来源");
@@ -218,8 +235,8 @@ export async function persistEntries(
       });
     if (!id) {
       const article = await env.DB.prepare(
-        `INSERT INTO rss_article(url,title,author,published_at,folo_entry_id,seed_key)
-        VALUES(?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET
+        `INSERT INTO rss_article(url,title,author,published_at,folo_entry_id,seed_key,substack_post_id)
+        VALUES(?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET
         folo_entry_id=COALESCE(excluded.folo_entry_id,rss_article.folo_entry_id)
         RETURNING id`,
       )
@@ -230,16 +247,30 @@ export async function persistEntries(
           entry.published_at,
           entry.folo_entry_id ?? null,
           key,
+          entry.substack_post_id ?? null,
         )
         .first<{ id: number }>();
       id = article!.id;
     }
+    if (entry.substack_post_id) {
+      // First discovery through a new connection can upgrade an existing public
+      // preview. Repeated polls never repeatedly invalidate a completed full body.
+      await env.DB.prepare(`UPDATE rss_article SET substack_post_id=?,
+        status=CASE WHEN completeness!='full' THEN 'queued' ELSE status END,
+        body_key=CASE WHEN completeness!='full' THEN NULL ELSE body_key END,
+        attempts=CASE WHEN completeness!='full' THEN 0 ELSE attempts END,next_attempt_at=''
+        WHERE id=? AND (lease_until IS NULL OR lease_until<?) AND NOT EXISTS(
+          SELECT 1 FROM rss_source_article WHERE source_id=? AND article_id=?)`)
+        .bind(entry.substack_post_id, id, now(), source.id, id).run();
+      await env.DB.prepare("UPDATE rss_article SET substack_post_id=COALESCE(substack_post_id,?) WHERE id=?")
+        .bind(entry.substack_post_id, id).run();
+    }
     if (upgraded)
       await env.DB.prepare(
         `UPDATE rss_article SET status='queued',body_key=NULL,seed_key=?,attempts=0,next_attempt_at=''
-      WHERE id=? AND (lease_until IS NULL OR lease_until<?)`,
+      WHERE id=? AND (lease_until IS NULL OR lease_until<?) AND (completeness!='full' OR ?=1)`,
       )
-        .bind(key, id, now())
+        .bind(key, id, now(), Number(entry.content_is_full))
         .run();
     await env.DB.batch([
       env.DB.prepare(
@@ -260,6 +291,7 @@ interface PollResult {
   entries: RssEntry[];
   provider: string;
   next_before: string | null;
+  next_cursor?: string | null;
   coverage: string;
   warning: string | null;
   auth_error?: boolean;
@@ -276,13 +308,20 @@ export async function pollRss(
     `UPDATE rss_source SET lease_token=?,lease_until=?
     WHERE id=? AND (lease_until IS NULL OR lease_until<?)
       AND EXISTS(SELECT 1 FROM rss_follow WHERE source_id=rss_source.id)
+      AND (substack_connection_id IS NULL OR EXISTS(SELECT 1 FROM substack_connection c
+        WHERE c.id=rss_source.substack_connection_id AND c.enabled=1 AND c.status!='needs_auth'))
       AND (?=0 OR backfill_status IN ('pending','running')) RETURNING *`,
   )
     .bind(token, later(600), sourceId, now(), Number(backfill))
     .first<RssSource>();
   if (!source) return;
   try {
-    const page = await rssCall<PollResult>(
+    const page = source.substack_connection_id ? await substackCall<PollResult>(
+      env, await getSubstackConnection(env, source.substack_connection_id), "poll", {
+        subdomain: source.substack_subdomain, publication_id: source.substack_publication_id,
+        cursor: backfill ? source.backfill_cursor : null, since: source.backfill_since,
+      },
+    ) : await rssCall<PollResult>(
       env,
       "/poll",
       {
@@ -329,12 +368,14 @@ export async function pollRss(
     const cursor = page.next_before
       ? new Date(Date.parse(page.next_before) + 1).toISOString()
       : null;
-    const stalled = backfill && cursor === source.backfill_before;
+    const stalled = backfill && (source.substack_connection_id
+      ? !!page.next_cursor && page.next_cursor === source.backfill_cursor
+      : cursor === source.backfill_before);
     const status = stalled
       ? "gap"
       : page.next_before
         ? "running"
-        : page.coverage === "reached_since"
+        : page.coverage === "reached_since" || page.coverage === "archive_end"
           ? "complete"
           : "gap";
     const retryAfter = Number(page.retry_after);
@@ -347,6 +388,7 @@ export async function pollRss(
       auth_error=?,failures=0,poll_count=poll_count+1,success_count=success_count+1,
       earliest_at=CASE WHEN earliest_at IS NULL OR ?<earliest_at THEN ? ELSE earliest_at END,
       backfill_before=CASE WHEN ? THEN ? ELSE backfill_before END,
+      backfill_cursor=CASE WHEN ? THEN ? ELSE backfill_cursor END,
       backfill_status=CASE WHEN ? THEN ? ELSE backfill_status END,
       lease_until=NULL,lease_token=NULL WHERE id=? AND lease_token=?`,
     )
@@ -362,6 +404,8 @@ export async function pollRss(
         earliest,
         Number(backfill || source.backfill_status === "pending"),
         cursor,
+        Number(backfill || source.backfill_status === "pending"),
+        page.next_cursor ?? null,
         Number(backfill || source.backfill_status === "pending"),
         status,
         sourceId,
@@ -391,10 +435,11 @@ export async function pollRss(
       return;
     }
     await env.DB.prepare(
-      `UPDATE rss_source SET last_error=?,failures=failures+1,poll_count=poll_count+1,next_poll_at=?,lease_until=NULL,lease_token=NULL WHERE id=? AND lease_token=?`,
+      `UPDATE rss_source SET last_error=?,auth_error=?,failures=failures+1,poll_count=poll_count+1,next_poll_at=?,lease_until=NULL,lease_token=NULL WHERE id=? AND lease_token=?`,
     )
       .bind(
         String(error).slice(0, 250),
+        Number(/登录已失效|需要重新连接/.test(String(error))),
         later(Math.min(300 * 2 ** Math.min(source.failures, 8), 86400)),
         sourceId,
         token,
@@ -415,7 +460,8 @@ export async function wakeRss(env: Env): Promise<void> {
     .run();
   const due = await env.DB.prepare(
     `SELECT id FROM rss_source WHERE next_poll_at<=? AND (lease_until IS NULL OR lease_until<?)
-    AND EXISTS(SELECT 1 FROM rss_follow WHERE source_id=rss_source.id) ORDER BY next_poll_at LIMIT 50`,
+    AND EXISTS(SELECT 1 FROM rss_follow WHERE source_id=rss_source.id)
+    AND (substack_connection_id IS NULL OR EXISTS(SELECT 1 FROM substack_connection c WHERE c.id=rss_source.substack_connection_id AND c.enabled=1 AND c.status!='needs_auth')) ORDER BY next_poll_at LIMIT 50`,
   )
     .bind(now(), now())
     .all<{ id: number }>();
@@ -428,7 +474,8 @@ export async function wakeRss(env: Env): Promise<void> {
   // Resume persisted history cursors independently of new-entry polling.
   const history = await env.DB.prepare(
     `SELECT id FROM rss_source WHERE backfill_status IN ('pending','running') AND next_poll_at<=?
-    AND EXISTS(SELECT 1 FROM rss_follow WHERE source_id=rss_source.id) LIMIT 50`,
+    AND EXISTS(SELECT 1 FROM rss_follow WHERE source_id=rss_source.id)
+    AND (substack_connection_id IS NULL OR EXISTS(SELECT 1 FROM substack_connection c WHERE c.id=rss_source.substack_connection_id AND c.enabled=1 AND c.status!='needs_auth')) LIMIT 50`,
   )
     .bind(now())
     .all<{ id: number }>();
@@ -712,7 +759,8 @@ export async function drainRss(env: Env): Promise<void> {
         ? await env.MEDIA.get(article.seed_key)
         : null;
       const seed = seedObject ? await seedObject.json<RssEntry>() : {};
-      body = await rssCall<RssBody>(
+      body = article.substack_post_id ? await extractSubstackArticle(env, article.id, article.substack_post_id) : null;
+      body ??= await rssCall<RssBody>(
         env,
         "/extract",
         {

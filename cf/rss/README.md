@@ -49,6 +49,59 @@ without it. `POST /api/rss/import/folo` previews public subscriptions;
 `{"execute":true}` imports them idempotently. OPML is the credential-free
 alternative. The import endpoints never return authentication material.
 
+## Direct Substack sources
+
+`/subscriptions?tab=substack` lists shared account connections, imports their
+newsletter subscription directories, and follows individual publications by
+URL (including custom domains and author profiles with publication choices).
+Subscriptions are reducer follows: upstream account subscriptions/read state
+are not modified. Every reducer user can use any enabled connection; acquired
+articles, full bodies, editions, and translations remain globally shared and
+URL-deduplicated. Multiple account connections can unlock different posts. A
+preview can be upgraded by another connected account without duplicating the
+article or invalidating an already saved full body.
+
+Migration `0030_substack_sources.sql` adds encrypted connections, references on
+sources, archive cursors, and Substack post IDs. Configure
+`SUBSTACK_CREDENTIAL_KEY` using `wrangler secret put`: a random 32-byte AES-GCM
+key encoded as 64 hex characters. Keep the key stable across deployments;
+replacing it requires re-encrypting stored connections or reconnecting them.
+Session cookies are AES-GCM encrypted in D1 with the connection ID as associated
+data. They never belong in Wrangler vars, Git, source URLs, queue messages,
+article snapshots, model prompts, or API responses.
+
+Admins create/update/disable connections in the Substack tab. The credential
+field accepts `substack.sid=...` or `connect.sid=...`; only those session names
+are retained. The API validates the session before saving it and exposes only
+a connection label, status, check time, and optional browser expiry. Account
+profiles and subscription-specific identifiers/private podcast URLs are
+discarded. Browser expiry is informational, not a guarantee of server validity.
+Confirmed authentication failures pause acquisition until an admin reconnects;
+403/anti-bot failures remain transient. Saved articles remain readable.
+
+The RSS container only sends login cookies to `https://substack.com` reader
+endpoints. Subscription discovery uses `/subscriptions/page_v2`; the older
+`/subscriptions?tvOnly=false` excludes normal newsletters in current live tests.
+Archives and custom domains are requested anonymously; full article retrieval
+uses the main site's `/posts/by-id/:id`. Cookies never follow an origin-changing
+redirect. Only published article content enters extraction; account state,
+comments, draft previews, and raw authenticated API responses are not stored.
+Paywall/entitlement checks distinguish previews from verified full content.
+An account without paid subscriptions cannot validate the real paid-content
+success path; mocked entitlement coverage is separate from live verification.
+
+Archive offsets persist after article discovery and source links, and continue
+across equal timestamps. Backfill covers three calendar months or the available
+archive end. Existing independent article queues and cached summary/translation
+stages are reused. Bump `RSS_CONTAINER_GEN` when deploying container changes.
+
+Browser verification (use a running Vite server; Playwright may be supplied via
+`PLAYWRIGHT_MODULE`):
+
+```bash
+FRONTEND_URL=http://127.0.0.1:5174 node frontend/tests/substack.browser.mjs
+```
+
 ## Durability and processing
 
 Polling runs every 30 minutes (on the existing 15-minute scheduler), first reads

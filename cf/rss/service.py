@@ -1,4 +1,4 @@
-"""RSS-only acquisition service. No media pipeline, cookies, or browser runtime."""
+"""Article acquisition service, including bounded Substack reader requests."""
 from __future__ import annotations
 
 import ipaddress
@@ -474,6 +474,246 @@ def extract(req: ExtractRequest):
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "rss"}
+
+
+# Substack authentication is only attached to its fixed reader API origin.
+# Publication archives/metadata (including custom domains) are read anonymously.
+SUBSTACK = "https://substack.com"
+
+
+class SubstackRequest(BaseModel):
+    cookie: str = Field(default="", repr=False)
+    url: str = ""
+    subdomain: str = ""
+    publication_id: str = ""
+    post_id: str = ""
+    cursor: str | None = None
+    since: str = ""
+
+
+def substack_cookie(raw):
+    if not isinstance(raw, str) or len(raw) > 16000 or re.search(r"[\r\n]", raw):
+        raise ValueError("SUBSTACK_AUTH")
+    values = []
+    for part in raw.split(";"):
+        if re.fullmatch(r"(?:substack\.sid|connect\.sid)=[^\s;]+", part.strip()):
+            values.append(part.strip())
+    if not values:
+        raise ValueError("SUBSTACK_AUTH")
+    return "; ".join(values)
+
+
+def substack_json(path, cookie="", subdomain=""):
+    if subdomain and not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", subdomain):
+        raise ValueError("无效的 Substack 刊物")
+    origin = f"https://{subdomain}.substack.com" if subdomain else SUBSTACK
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+    if cookie:
+        if subdomain:
+            raise ValueError("Substack 登录仅用于主站阅读接口")
+        headers["Cookie"] = substack_cookie(cookie)
+    try:
+        raw, ctype, final = download(origin + "/api/v1/" + path, headers=headers)
+        if cookie and (urlsplit(final).netloc != "substack.com" or "/sign-in" in final):
+            raise ValueError("SUBSTACK_AUTH")
+        data = json.loads(raw)
+        if not isinstance(data, (dict, list)):
+            raise ValueError("Substack 返回无效数据")
+        return data
+    except UpstreamError as exc:
+        if exc.status == 401:
+            raise ValueError("SUBSTACK_AUTH") from None
+        if exc.status == 429:
+            raise ValueError("SUBSTACK_RATE_LIMIT") from None
+        # A 403 can be anti-bot/egress blocking, not necessarily session expiry.
+        raise ValueError(f"Substack 访问暂时失败（HTTP {exc.status}）") from None
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise ValueError("Substack 返回无效数据或需要浏览器验证") from None
+
+
+def substack_source(publication):
+    pub_id = str(publication.get("id", ""))
+    subdomain = publication.get("subdomain", "")
+    if not pub_id.isdigit() or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", subdomain):
+        raise ValueError("Substack 刊物资料不完整")
+    site = f"https://{subdomain}.substack.com"
+    custom = publication.get("custom_domain")
+    if custom and re.fullmatch(r"[a-zA-Z0-9.-]+", custom):
+        site = public_url("https://" + custom).rstrip("/")
+    image = publication.get("logo_url")
+    try:
+        image = public_url(image) if image else None
+    except ValueError:
+        image = None
+    # Intentionally whitelist publication fields; never emit subscription IDs,
+    # account emails, podcast RSS tokens, reader state, or raw API responses.
+    return {"provider": "substack", "title": plain(publication.get("name") or subdomain),
+            "url": site, "feed_url": None, "folo_id": None, "image_url": image, "site_url": site,
+            "substack_publication_id": pub_id, "substack_subdomain": subdomain}
+
+
+def substack_endpoint(fn):
+    # Exceptions crossing the internal RPC boundary contain only safe messages.
+    from functools import wraps
+    @wraps(fn)
+    def wrapped(req: SubstackRequest):
+        try:
+            return fn(req)
+        except HTTPException:
+            raise
+        except ValueError as exc:
+            message = str(exc)
+            if "SUBSTACK_AUTH" in message:
+                raise HTTPException(401, "SUBSTACK_AUTH") from None
+            if "SUBSTACK_RATE_LIMIT" in message:
+                raise HTTPException(429, "SUBSTACK_RATE_LIMIT") from None
+            raise HTTPException(422, "Substack 暂时不可用，请检查刊物链接或稍后重试") from None
+        except Exception:
+            raise HTTPException(502, "Substack 暂时不可用，请稍后重试") from None
+    return wrapped
+
+
+@app.post("/substack/check")
+@substack_endpoint
+def substack_check(req: SubstackRequest):
+    profile = substack_json("user/profile/self", req.cookie)
+    if not isinstance(profile, dict) or not profile.get("id"):
+        raise ValueError("SUBSTACK_AUTH")
+    return {"authenticated": True}
+
+
+@app.post("/substack/subscriptions")
+@substack_endpoint
+def substack_subscriptions(req: SubstackRequest):
+    substack_check(req)
+    # /subscriptions?tvOnly=false excludes normal newsletter subscriptions.
+    data = substack_json("subscriptions/page_v2", req.cookie)
+    if not isinstance(data, dict) or not isinstance(data.get("subscriptions"), list):
+        raise ValueError("Substack 返回无效订阅目录")
+    subscribed = {str(row.get("publication_id")) for row in data["subscriptions"]}
+    sources, skipped = [], 0
+    for publication in data.get("publications", []):
+        if str(publication.get("id")) not in subscribed:
+            continue
+        try:
+            sources.append(substack_source(publication))
+        except ValueError:
+            skipped += 1
+    return {"sources": sources, "skipped": skipped}
+
+
+@app.post("/substack/resolve")
+@substack_endpoint
+def substack_resolve(req: SubstackRequest):
+    address = public_url(req.url)
+    p = urlsplit(address)
+    if p.hostname == "substack.com" and re.match(r"/@[\w-]+(?:/|$)", p.path):
+        handle = p.path.split("/")[1][1:]
+        profile = substack_json("user/" + handle + "/public_profile")
+        pubs = [u["publication"] for u in profile.get("publicationUsers", []) if u.get("publication")]
+        if not pubs:
+            raise ValueError("该个人主页没有刊物，请使用刊物网址")
+        if len(pubs) > 1:
+            return {"choices": [{"title": p.get("name"), "url": "https://" + p["subdomain"] + ".substack.com"} for p in pubs]}
+        return substack_source(pubs[0])
+    # No credential is sent to a caller-supplied origin or a custom domain.
+    origin = urlunsplit((p.scheme, p.netloc, "", "", ""))
+    # /publication is a creator endpoint on some publications (403 for readers).
+    # Resolve a published archive ID through the main reader API instead.
+    raw, _, _ = download(origin + "/api/v1/archive?sort=new&offset=0&limit=1", headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+    archive = json.loads(raw)
+    if not isinstance(archive, list) or not archive or not str(archive[0].get("id", "")).isdigit():
+        raise ValueError("刊物暂无可导入的文章")
+    detail = substack_json("posts/by-id/" + str(archive[0]["id"]), req.cookie)
+    verified = detail.get("publication", {})
+    if str(verified.get("id")) != str(archive[0].get("publication_id")):
+        raise ValueError("刊物身份不匹配")
+    result = substack_source(verified)
+    expected_hosts = {urlsplit(result["url"]).hostname, result["substack_subdomain"] + ".substack.com"}
+    if p.hostname.removeprefix("www.") not in {h.removeprefix("www.") for h in expected_hosts}:
+        raise ValueError("刊物域名不匹配")
+    return result
+
+
+@app.post("/substack/poll")
+@substack_endpoint
+def substack_poll(req: SubstackRequest):
+    substack_check(req)
+    offset = int(req.cursor or "0")
+    if offset < 0 or offset > 1_000_000 or not req.publication_id.isdigit():
+        raise ValueError("Substack 分页参数无效")
+    rows = substack_json("archive?" + urlencode({"sort": "new", "offset": offset, "limit": 50}), subdomain=req.subdomain)
+    if not isinstance(rows, list):
+        raise ValueError("Substack 返回无效文章列表")
+    entries, dates = [], []
+    for post in rows:
+        if str(post.get("publication_id")) != req.publication_id or not str(post.get("id", "")).isdigit():
+            continue
+        date = iso(post.get("post_date"))
+        if date:
+            dates.append(date)
+        if date and date < req.since:
+            continue
+        entries.append({"url": clean_url(post["canonical_url"]), "title": plain(post.get("title") or post["canonical_url"]),
+                        "author": ", ".join(b.get("name", "") for b in post.get("publishedBylines", [])) or None,
+                        "published_at": date, "external_id": str(post["id"]), "substack_post_id": str(post["id"]),
+                        "content": post.get("description") or post.get("subtitle") or "", "content_is_full": False})
+    oldest = min(dates) if dates else None
+    reached = bool(oldest and oldest <= req.since)
+    more = bool(len(rows) >= 50 and not reached)
+    return {"entries": entries, "provider": "substack", "next_before": oldest if more else None,
+            "next_cursor": str(offset + len(rows)) if more else None,
+            "coverage": "reached_since" if reached else "archive_end", "warning": None, "auth_error": False}
+
+
+@app.post("/substack/extract")
+@substack_endpoint
+def substack_extract(req: SubstackRequest):
+    if not req.post_id.isdigit():
+        raise ValueError("Substack 文章编号无效")
+    substack_check(req)
+    data = substack_json("posts/by-id/" + req.post_id, req.cookie)
+    post = data.get("post", {})
+    if str(post.get("id")) != req.post_id:
+        raise ValueError("Substack 文章不匹配")
+    if post.get("is_published") is False or post.get("is_editor_preview"):
+        raise ValueError("仅导入已发布文章")
+    url = clean_url(post["canonical_url"])
+    html = post.get("body_html") or ""
+    soup = BeautifulSoup(html, "html.parser")
+    gated = bool(soup.select('.paywall, .paywall-content, .subscribe-widget, [data-component-name="Paywall"]'))
+    # Only article markup reaches extraction. No account/profile/API snapshot is
+    # returned or persisted, including embedded state and personalized actions.
+    for tag in soup(["script", "style", "form", "iframe"]):
+        tag.decompose()
+    for a in soup.select("a[href]"):
+        try:
+            href = urljoin(url, a["href"])
+            if re.search(r"/(?:unsubscribe|sign-in|login|account)(?:/|\?|$)", href, re.I):
+                a.unwrap()
+                continue
+            parts = urlsplit(href)
+            query = [(k, v) for k, v in parse_qsl(parts.query) if not re.search(r"token|auth|signature|email|subscriber|user_id|^utm_|^r$", k, re.I)]
+            a["href"] = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
+        except ValueError:
+            a.unwrap()
+    text = html_body(str(soup), url) or plain(post.get("description") or "")
+    audience = post.get("audience") or "unknown"
+    subscription = data.get("subscription") or {}
+    state = subscription.get("membership_state")
+    expiry = iso(subscription.get("expiry"))
+    current = not expiry or expiry > datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    entitled = audience == "everyone" or (audience in ("free", "subscribers") and bool(subscription)) or (
+        audience in ("only_paid", "paid", "founding") and current and state in ("subscribed", "comp", "lifetime")
+        and (audience != "founding" or subscription.get("is_founding")))
+    full = bool(html and entitled and not gated and not post.get("is_geoblocked"))
+    if len(text) > MAX_TEXT:
+        text, full = text[:MAX_TEXT], False
+    words = len(re.findall(r"[\u3400-\u9fff]|\b[\w'-]+\b", text))
+    return {"text": text, "paragraphs": [{"id": i + 1, "text": t.strip()} for i, t in enumerate(re.split(r"\n\s*\n", text)) if t.strip()],
+            "completeness": "full" if full else "partial" if text else "missing", "method": "substack_api",
+            "word_count": words, "source_url": url, "canonical_url": url,
+            "warning": None if full else "当前连接仅取得预览，未确认完整文章权限", "snapshot": None}
 
 
 @app.post("/subscriptions")

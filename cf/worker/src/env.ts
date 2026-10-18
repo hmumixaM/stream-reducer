@@ -35,6 +35,9 @@ export interface Env {
   RSSHUB_BASE_URL?: string;
   FOLO_TOKEN?: string;
   FOLO_OWNER_EMAIL?: string;
+  // 32-byte AES-GCM key encoded as 64 hex characters; per-connection cookies
+  // are encrypted in D1 and never returned by reader/discovery endpoints.
+  SUBSTACK_CREDENTIAL_KEY?: string;
 
   // Email (magic link)
   EMAIL: SendEmail;

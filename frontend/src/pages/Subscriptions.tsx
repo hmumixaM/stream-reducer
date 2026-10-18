@@ -1,4 +1,5 @@
 import { ArticleSources } from "./Rss";
+import { SubstackSources } from "./Substack";
 import { useEffect, useMemo, useState } from "react";
 import {
   useInfiniteQuery,
@@ -44,7 +45,7 @@ export function Subscriptions() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const tab =
-    requestedTab === "articles"
+    requestedTab === "substack" ? "substack" : requestedTab === "articles"
       ? "articles"
       : requestedTab === "following" && canFollow
         ? "following"
@@ -58,6 +59,7 @@ export function Subscriptions() {
   useEffect(() => {
     if (
       requestedTab === "articles" ||
+      requestedTab === "substack" ||
       requestedTab === "discover" ||
       (requestedTab === "following" && canFollow)
     ) {
@@ -68,7 +70,7 @@ export function Subscriptions() {
     setSearchParams(params, { replace: true });
   }, [canFollow, requestedTab, searchParams, setSearchParams]);
 
-  const setTab = (next: "discover" | "following" | "articles") => {
+  const setTab = (next: "discover" | "following" | "articles" | "substack") => {
     const params = new URLSearchParams(searchParams);
     params.set("tab", next);
     setSearchParams(params);
@@ -108,9 +110,10 @@ export function Subscriptions() {
         >
           文章 / RSS
         </TabLink>
+        <TabLink active={tab === "substack"} icon={<Rss className="h-4 w-4" />} onClick={() => setTab("substack")}>Substack</TabLink>
       </nav>
 
-      {tab === "articles" ? (
+      {tab === "substack" ? <SubstackSources /> : tab === "articles" ? (
         <ArticleSources />
       ) : tab === "discover" ? (
         <DiscoverChannels groups={groups.data ?? []} canFollow={canFollow} />

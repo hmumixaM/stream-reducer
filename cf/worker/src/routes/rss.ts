@@ -86,7 +86,8 @@ rssRoutes.get("/sources", async (c) => {
 rssRoutes.get("/catalog", async (c) => {
   const q = `%${(c.req.query("q") || "").trim().slice(0, 200)}%`;
   const rows = await c.env.DB.prepare(
-    `SELECT s.id,s.title,s.url,s.feed_url,s.image_url,s.site_url,
+    `SELECT s.id,s.title,s.url,s.feed_url,s.image_url,s.site_url,s.provider,
+    (SELECT label FROM substack_connection c WHERE c.id=s.substack_connection_id) connection_label,
     EXISTS(SELECT 1 FROM rss_follow f WHERE f.source_id=s.id AND f.user_id=?) following,
     (SELECT count(*) FROM rss_source_article sa WHERE sa.source_id=s.id) article_count,
     (SELECT max(a.published_at) FROM rss_source_article sa JOIN rss_article a ON a.id=sa.article_id WHERE sa.source_id=s.id) latest_published_at

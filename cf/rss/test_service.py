@@ -9,6 +9,106 @@ spec = importlib.util.spec_from_file_location("rss_service", pathlib.Path(__file
 s = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(s)
 
+
+def substack_profile_api(path, cookie="", subdomain=""):
+    if path == "user/profile/self":
+        return {"id": 7, "email": "never-return@example.com"}
+    raise AssertionError(path)
+
+
+def test_substack_auth_discards_profile_and_restricts_cookie_names(monkeypatch):
+    monkeypatch.setattr(s, "substack_json", substack_profile_api)
+    assert s.substack_check(s.SubstackRequest(cookie="substack.sid=session")) == {"authenticated": True}
+    assert s.substack_cookie("tracking=private; substack.sid=session; email=private; connect.sid=other") == "substack.sid=session; connect.sid=other"
+    with pytest.raises(ValueError): s.substack_cookie("substack.sid=a\r\nInjected: header")
+    with pytest.raises(ValueError): s.substack_cookie("email=private")
+
+
+def test_substack_credentials_only_reach_fixed_origin(monkeypatch):
+    calls = []
+    def download(url, **kwargs):
+        calls.append((url, kwargs.get("headers", {})))
+        return b'{"id":7}', "application/json", url
+    monkeypatch.setattr(s, "download", download)
+    s.substack_json("user/profile/self", "substack.sid=session")
+    s.substack_json("archive?limit=50", subdomain="example")
+    assert calls[0][0].startswith("https://substack.com/api/v1/")
+    assert calls[0][1]["Cookie"] == "substack.sid=session"
+    assert "Cookie" not in calls[1][1]
+    with pytest.raises(ValueError): s.substack_json("publication", "substack.sid=session", "evil.example")
+
+
+def test_substack_subscription_directory_strips_account_and_private_feed_data(monkeypatch):
+    def api(path, cookie="", subdomain=""):
+        if path == "user/profile/self": return {"id": 7}
+        assert path == "subscriptions/page_v2"
+        return {"subscriptions": [{"publication_id": 42, "user_id": 7, "podcast_rss_token": "PRIVATE"}],
+                "publications": [{"id": 42, "name": "News", "subdomain": "news", "owner_email": "PRIVATE"}, {"id": 99, "name": "Not subscribed", "subdomain": "other"}]}
+    monkeypatch.setattr(s, "substack_json", api)
+    result = s.substack_subscriptions(s.SubstackRequest(cookie="substack.sid=session"))
+    assert len(result["sources"]) == 1
+    assert result["sources"][0]["substack_publication_id"] == "42"
+    assert "PRIVATE" not in str(result) and "user_id" not in str(result)
+
+
+def test_substack_resolve_custom_domain_never_sends_cookies(monkeypatch):
+    publication = {"id": 42, "name": "News", "subdomain": "news", "custom_domain": "news.example"}
+    calls = []
+    def download(url, **kwargs):
+        calls.append(kwargs)
+        return b'[{"id":123,"publication_id":42}]', "application/json", url
+    monkeypatch.setattr(s, "download", download)
+    monkeypatch.setattr(s, "substack_json", lambda *args, **kwargs: {"publication": publication})
+    result = s.substack_resolve(s.SubstackRequest(cookie="substack.sid=secret", url="https://news.example/p/story"))
+    assert result["substack_subdomain"] == "news"
+    assert all("Cookie" not in call.get("headers", {}) for call in calls)
+
+
+def test_substack_archive_paginates_posts_with_equal_dates_and_preserves_boundary(monkeypatch):
+    calls = []
+    def api(path, cookie="", subdomain=""):
+        if path == "user/profile/self": return {"id": 7}
+        calls.append((path, cookie))
+        return [{"id": i+1, "publication_id": 42, "title": "Story", "canonical_url": f"https://news.substack.com/p/{i}", "post_date": "2026-10-01T00:00:00Z", "description": "Preview"} for i in range(50)]
+    monkeypatch.setattr(s, "substack_json", api)
+    req = s.SubstackRequest(cookie="substack.sid=session", subdomain="news", publication_id="42", cursor="50", since="2026-07-18")
+    result = s.substack_poll(req)
+    assert result["next_cursor"] == "100" and len(result["entries"]) == 50
+    assert "offset=50" in calls[0][0] and not calls[0][1]
+    assert not result["entries"][0]["content_is_full"]
+    assert result["entries"][0]["substack_post_id"] == "1"
+    req.since = "2026-10-02"
+    result = s.substack_poll(req)
+    assert result["next_cursor"] is None and result["coverage"] == "reached_since" and not result["entries"]
+
+
+@pytest.mark.parametrize("state,expected", [("subscribed", "full"), ("free_signup", "partial"), (None, "partial")])
+def test_substack_paid_content_requires_entitlement_signal_and_removes_private_markup(monkeypatch, state, expected):
+    def api(path, cookie="", subdomain=""):
+        if path == "user/profile/self": return {"id": 7}
+        return {"post": {"id": 123, "audience": "only_paid", "is_published": True,
+                "canonical_url": "https://news.example/p/story", "body_html": '<p>Complete original evidence and results are documented in this source article with detailed limitations.</p><p><a href="https://news.example/p/other?utm_source=email&amp;token=PRIVATE&amp;r=PRIVATE">Related article</a></p><script>PRIVATE</script><form>PRIVATE</form>'},
+                "subscription": {"membership_state": state, "user_email": "PRIVATE", "podcast_rss_token": "PRIVATE"} if state else None}
+    monkeypatch.setattr(s, "substack_json", api)
+    result = s.substack_extract(s.SubstackRequest(cookie="substack.sid=session", post_id="123"))
+    assert result["completeness"] == expected
+    assert "PRIVATE" not in str(result) and "token=" not in result["text"]
+    assert result["snapshot"] is None
+
+
+def test_substack_invalid_session_is_not_misreported_as_empty_subscriptions(monkeypatch):
+    monkeypatch.setattr(s, "substack_json", lambda *args, **kwargs: {"subscriptions": [], "publications": []})
+    with pytest.raises(HTTPException) as caught:
+        s.substack_subscriptions(s.SubstackRequest(cookie="substack.sid=expired"))
+    assert caught.value.status_code == 401 and caught.value.detail == "SUBSTACK_AUTH"
+
+
+def test_substack_403_is_not_automatically_session_expiration(monkeypatch):
+    monkeypatch.setattr(s, "download", lambda *args, **kwargs: (_ for _ in ()).throw(s.UpstreamError(403)))
+    with pytest.raises(HTTPException) as caught:
+        s.substack_check(s.SubstackRequest(cookie="substack.sid=session"))
+    assert caught.value.status_code == 422 and "SUBSTACK_AUTH" not in caught.value.detail
+
 @pytest.mark.parametrize("url", ["http://localhost/a", "http://example.local/x", "ftp://example.com", "https://user:pw@example.com", "https://example.com/?token=secret", "https://example.com:8080/feed"])
 def test_reject_unsafe_urls(url):
     with pytest.raises(ValueError): s.public_url(url)
