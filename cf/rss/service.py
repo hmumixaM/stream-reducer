@@ -626,7 +626,7 @@ def media_feed(req: SourceRequest):
         lookups.append({"url": "rsshub://" + parts.path.lstrip("/") + ("?" + parts.query if parts.query else "")})
     for lookup in lookups:
         try:
-            data = folo_api("/feeds?" + urlencode({**lookup, "entriesLimit": 100}), req.token)
+            data = folo_api("/feeds?" + urlencode({**lookup, "entriesLimit": 20}), req.token)
         except Exception:
             continue
         feed = data.get("feed") or {}
@@ -635,14 +635,15 @@ def media_feed(req: SourceRequest):
         rows = []
         for record in data.get("entries", []):
             e = record.get("entries", record)
-            audio = next((m.get("url") for m in (e.get("media") or []) + (e.get("attachments") or [])
-                          if re.match(r"^audio(/|$)", m.get("type") or m.get("mime_type") or "")), None)
+            attachment = next((m for m in (e.get("media") or []) + (e.get("attachments") or [])
+                               if re.match(r"^audio(/|$)", m.get("type") or m.get("mime_type") or "")), {})
+            audio = attachment.get("url")
             link = e.get("url")
             if not audio and not (link and re.match(r"https://(?:www\.)?xiaoyuzhoufm.com/episode/[a-f0-9]+", link)):
                 continue
             rows.append({"title": e.get("title"), "link": public_url(link) if link else None,
                          "guid": str(e.get("id", link)), "published": iso(e.get("publishedAt")),
-                         "audio": public_url(audio) if audio else None, "duration_s": None})
+                         "audio": public_url(audio) if audio else None, "duration_s": attachment.get("duration_in_seconds")})
         if rows:
             return {"title": feed.get("title"), "entries": rows}
     raise HTTPException(422, "来源没有可轮询的公开播客内容")

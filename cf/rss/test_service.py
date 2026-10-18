@@ -209,3 +209,13 @@ def test_media_feed_can_validate_by_folo_identity(monkeypatch):
     monkeypatch.setattr(s, "folo_api", cached)
     assert s.media_feed(s.SourceRequest(url="https://app.folo.is/feed/123"))["entries"][0]["audio"].endswith(".mp3")
     assert "id=123" in calls[0]
+
+
+def test_media_feed_uses_public_catalog_page_limit_and_preserves_audio_duration(monkeypatch):
+    def cached(path, token=""):
+        assert "entriesLimit=20" in path
+        return {"feed": {"title": "Podcast"}, "entries": [{"id": "1", "url": "https://example.com/episode", "attachments": [{"url": "https://example.com/audio.m4a", "mime_type": "audio/mpeg", "duration_in_seconds": 1200}]}]}
+    monkeypatch.setattr(s, "folo_api", cached)
+    result = s.media_feed(s.SourceRequest(url="https://app.folo.is/feed/123"))
+    assert result["entries"][0]["audio"].endswith(".m4a")
+    assert result["entries"][0]["duration_s"] == 1200

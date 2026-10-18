@@ -223,6 +223,15 @@ export async function fetchFeed(env: Env, feedUrl: string): Promise<ParsedFeed> 
     return { title: null, entries };
   }
 
+  // Older provider-ID channels retain the Xiaoyuzhou podcast page as their
+  // canonical URL. Poll its public RSS bridge while preserving that identity.
+  const address = new URL(feedUrl);
+  const podcast = isHostOrSubdomain(address.hostname.toLowerCase(), "xiaoyuzhoufm.com")
+    ? address.pathname.match(/^\/podcast\/([a-f\d]{24})(?:\/|$)/i) : null;
+  if (podcast) {
+    return fetchFeed(env, `${(env.RSSHUB_BASE_URL || "https://rsshub.app").replace(/\/$/, "")}/xiaoyuzhou/podcast/${podcast[1]}`);
+  }
+
   const ytChannel = feedUrl.match(YT_CHANNEL_FEED_RE);
   if (ytChannel) {
     const channelUrl = `https://www.youtube.com/channel/${ytChannel[1]}/videos`;

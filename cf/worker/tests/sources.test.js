@@ -166,3 +166,14 @@ it("filters Folo platforms before limiting results and never returns the service
   expect(body.results).toHaveLength(1); expect(body.results[0].provider_id).toBe("999");
   expect(JSON.stringify(body)).not.toContain("server-only-secret");
 });
+
+it("polls legacy Xiaoyuzhou page identities through their public RSS bridge", async () => {
+  const { env } = setup();
+  const { fetchFeed } = await import("../src/lib/feed");
+  fetch.mockImplementation(async url => {
+    expect(url).toBe("https://rsshub.app/xiaoyuzhou/podcast/5e4ee557418a84a0466737b7");
+    return new Response('<rss><channel><title>Podcast</title><item><title>Episode</title><link>https://www.xiaoyuzhoufm.com/episode/123456789012345678901234</link><enclosure url="https://example.com/audio.mp3" type="audio/mpeg" /></item></channel></rss>');
+  });
+  const feed = await fetchFeed(env, "https://www.xiaoyuzhoufm.com/podcast/5e4ee557418a84a0466737b7");
+  expect(feed.entries).toHaveLength(1); expect(feed.entries[0].audio).toBe("https://example.com/audio.mp3");
+});
