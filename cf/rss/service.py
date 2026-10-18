@@ -368,6 +368,21 @@ def extract(req: ExtractRequest):
             errors.append(str(exc)[:160])
             if report_url:
                 completeness = "partial"
+    canonical_url = req.url
+    if "raw" in locals() and locals().get("kind") == "web" and completeness == "full":
+        canonical_url = final
+        tag = BeautifulSoup(raw, "html.parser").find("link", rel="canonical")
+        if tag and tag.get("href"):
+            try:
+                candidate_url = clean_url(urljoin(final, tag["href"]))
+                if urlsplit(candidate_url).hostname == urlsplit(final).hostname and candidate_url != clean_url(final):
+                    check, ctype2, verified_url = download(candidate_url)
+                    check_text, check_quality, _ = document(check, ctype2, verified_url)
+                    normalize = lambda value: re.sub(r"\s+", " ", value).strip()
+                    if check_quality == "full" and normalize(check_text) == normalize(text):
+                        canonical_url = verified_url
+            except Exception:
+                pass
     if len(text) > MAX_TEXT:
         # Never summarize a silently truncated document as complete.
         text, completeness = text[:MAX_TEXT], "partial"
@@ -376,7 +391,7 @@ def extract(req: ExtractRequest):
     # A webpage that extraction cannot identify is never silently promoted to full.
     paragraphs = [{"id": i + 1, "text": t.strip()} for i, t in enumerate(re.split(r"\n\s*\n", text)) if t.strip()]
     return {"text": text, "paragraphs": paragraphs, "completeness": completeness, "method": method,
-            "word_count": words, "source_url": locals().get("final", req.url),
+            "word_count": words, "source_url": locals().get("final", req.url), "canonical_url": canonical_url,
             "warning": "; ".join(errors) or None,
             "snapshot": raw.decode("utf-8", errors="replace")[:MAX_TEXT] if "raw" in locals() and "pdf" not in locals().get("ctype", "") else None}
 

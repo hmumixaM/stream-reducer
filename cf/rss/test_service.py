@@ -92,3 +92,15 @@ def test_opml_categories_and_private_urls():
 @pytest.mark.parametrize("url",["https://app.folo.is/timeline/articles/all/123","https://app.folo.is/timeline/articles/all/pending","https://app.folo.is/list/123"])
 def test_folo_article_and_list_links_not_feed(url):
     with pytest.raises(ValueError):s.folo_id(url)
+
+def test_unstructured_folo_content_is_verified_instead_of_assumed_full(monkeypatch):
+    monkeypatch.setattr(s,"folo_api",lambda *a,**k:(_ for _ in ()).throw(s.UpstreamError(403)))
+    monkeypatch.setattr(s,"download",lambda *a,**k:(_ for _ in ()).throw(s.UpstreamError(403)))
+    r=s.extract(s.ExtractRequest(url="https://example.com/a",content="A polished teaser without truncation markers.",content_is_full=True,folo_entry_id="123"))
+    assert r["completeness"]=="partial"
+
+def test_canonical_requires_same_host_and_matching_saved_body(monkeypatch):
+    html=b'<html><head><link rel="canonical" href="https://example.com/canonical"/></head><body><article><p>Original evidence and methods are documented with ten detailed factual observations.</p><p>The report explains the limits of these observations.</p></article></body></html>'
+    monkeypatch.setattr(s,"download",lambda url,**k:(html,"text/html",url))
+    r=s.extract(s.ExtractRequest(url="https://example.com/old"))
+    assert r["canonical_url"]=="https://example.com/canonical"

@@ -355,3 +355,59 @@ describe("RSS access boundaries", () => {
     expect(other.read.saved).toBe(0);
   });
 });
+
+describe("verified canonical identities", () => {
+  it("merges aliases, source links and personal state while preserving old IDs", async () => {
+    const { linkCanonical } = await import("../src/lib/rss");
+    const s = setup();
+    await add(s, 1);
+    await add(s, 2);
+    s.db.exec(
+      "UPDATE rss_article SET lease_token='owner' WHERE id=2; INSERT INTO rss_read(user_id,article_id,saved) VALUES(1,2,1)",
+    );
+    const article = await s.env.DB.prepare(
+      "SELECT * FROM rss_article WHERE id=2",
+    ).first();
+    expect(await linkCanonical(s.env, article, "https://example.com/1")).toBe(
+      true,
+    );
+    expect(
+      s.db.prepare("SELECT count(*) n FROM rss_source_article").get().n,
+    ).toBe(1);
+    expect(
+      s.db
+        .prepare("SELECT saved FROM rss_read WHERE user_id=1 AND article_id=1")
+        .get().saved,
+    ).toBe(1);
+    expect(
+      s.db
+        .prepare(
+          "SELECT article_id FROM rss_alias WHERE alias='url:https://example.com/2'",
+        )
+        .get().article_id,
+    ).toBe(1);
+    expect(
+      s.db.prepare("SELECT status FROM rss_article WHERE id=2").get().status,
+    ).toBe("merged");
+  });
+  it("resumes a changed full seed without regenerating unchanged content", async () => {
+    const s = setup();
+    const source = await add(s, 1);
+    await persistEntries(s.env, source, [entry(1)]);
+    const before = s.env.MEDIA.put.mock.calls.length;
+    await persistEntries(s.env, source, [entry(1)]);
+    expect(s.env.MEDIA.put.mock.calls.length).toBe(before);
+    s.db.exec(
+      "UPDATE rss_article SET status='done',body_key='old',completeness='partial'",
+    );
+    await persistEntries(s.env, source, [
+      {
+        ...entry(1),
+        content: entry(1).content + " Another new and detailed paragraph.",
+      },
+    ]);
+    expect(
+      s.db.prepare("SELECT status,body_key FROM rss_article").get(),
+    ).toMatchObject({ status: "queued", body_key: null });
+  });
+});

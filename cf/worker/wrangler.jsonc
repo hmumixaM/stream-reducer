@@ -202,7 +202,7 @@
 
   "vars": {
     "RSS_ENABLED": "true",
-    "RSS_CONTAINER_GEN": "1",
+    "RSS_CONTAINER_GEN": "2",
     "RSSHUB_BASE_URL": "https://rsshub.app",
     "FOLO_OWNER_EMAIL": "huyangmax@gmail.com",
     "APP_ORIGIN": "https://reducer.xgoose.org",

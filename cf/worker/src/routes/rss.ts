@@ -24,10 +24,11 @@ const positiveId = (value: string) => {
 };
 async function ownsArticle(c: Parameters<typeof requireAuth>[0], id: number) {
   return c.env.DB.prepare(
-    `SELECT a.* FROM rss_article a WHERE a.id=? AND EXISTS(
+    `SELECT a.* FROM rss_article a WHERE a.id=COALESCE((SELECT x.article_id FROM rss_alias x
+      JOIN rss_article original ON x.alias='url:'||original.url WHERE original.id=?),?) AND EXISTS(
     SELECT 1 FROM rss_source_article sa JOIN rss_follow f ON f.source_id=sa.source_id WHERE sa.article_id=a.id AND f.user_id=?)`,
   )
-    .bind(id, c.get("user").id)
+    .bind(id, id, c.get("user").id)
     .first<RssArticle>();
 }
 async function ownsSource(c: Parameters<typeof requireAuth>[0], id: number) {
@@ -231,12 +232,10 @@ rssRoutes.get("/articles", async (c) => {
     .bind(lang, ...args, page * 50)
     .all<Record<string, unknown>>();
   return c.json({
-    articles: rows.results
-      .slice(0, 50)
-      .map((r) => ({
-        ...r,
-        edition: r.edition ? JSON.parse(String(r.edition)) : null,
-      })),
+    articles: rows.results.slice(0, 50).map((r) => ({
+      ...r,
+      edition: r.edition ? JSON.parse(String(r.edition)) : null,
+    })),
     has_more: rows.results.length > 50,
     page,
   });

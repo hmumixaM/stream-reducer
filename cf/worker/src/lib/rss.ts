@@ -68,6 +68,7 @@ export interface RssBody {
   method: string;
   word_count: number;
   source_url: string;
+  canonical_url?: string;
   warning?: string;
   snapshot?: string;
 }
@@ -356,6 +357,15 @@ export async function pollRss(
 }
 export async function wakeRss(env: Env): Promise<void> {
   if (!(await rssActive(env))) return;
+  // Excerpts and unavailable bodies get a bounded daily opportunity to upgrade.
+  await env.DB.prepare(
+    `UPDATE rss_article SET status='queued',body_key=NULL,next_attempt_at=''
+    WHERE completeness IN ('partial','missing') AND status IN ('done','missing')
+    AND attempts<4 AND updated_at<? AND EXISTS(SELECT 1 FROM rss_source_article sa
+      JOIN rss_follow f ON f.source_id=sa.source_id WHERE sa.article_id=rss_article.id)`,
+  )
+    .bind(later(-86400))
+    .run();
   const due = await env.DB.prepare(
     `SELECT id FROM rss_source WHERE next_poll_at<=? AND (lease_until IS NULL OR lease_until<?)
     AND EXISTS(SELECT 1 FROM rss_follow WHERE source_id=rss_source.id) ORDER BY next_poll_at LIMIT 50`,
@@ -560,6 +570,70 @@ Classify by independent facts, topic count and argument structure, not length al
     )
     .run();
 }
+// Only extractor-verified canonical URLs participate. A tombstone keeps old
+// article IDs resolvable while all source links and personal state move atomically.
+export async function linkCanonical(
+  env: Env,
+  article: RssArticle,
+  canonical: string,
+): Promise<boolean> {
+  const url = normalizeArticleUrl(canonical);
+  const direct = await env.DB.prepare(
+    "SELECT id FROM rss_article WHERE url=? AND status!='merged'",
+  )
+    .bind(url)
+    .first<{ id: number }>();
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO rss_alias(alias,article_id) VALUES(?,?)",
+  )
+    .bind(`url:${url}`, direct?.id ?? article.id)
+    .run();
+  const target = await env.DB.prepare(
+    "SELECT article_id FROM rss_alias WHERE alias=?",
+  )
+    .bind(`url:${url}`)
+    .first<{ article_id: number }>();
+  if (!target || target.article_id === article.id) return false;
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE rss_article SET
+      body_key=(SELECT body_key FROM rss_article WHERE id=?),
+      body_hash=(SELECT body_hash FROM rss_article WHERE id=?),
+      completeness='full',extraction_method=(SELECT extraction_method FROM rss_article WHERE id=?),
+      word_count=(SELECT word_count FROM rss_article WHERE id=?),body_version=body_version+1,
+      status='queued',attempts=0,next_attempt_at=''
+      WHERE id=? AND completeness!='full' AND (lease_until IS NULL OR lease_until<?)`,
+    ).bind(
+      article.id,
+      article.id,
+      article.id,
+      article.id,
+      target.article_id,
+      now(),
+    ),
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO rss_source_article(source_id,article_id,external_id)
+      SELECT source_id,?,external_id FROM rss_source_article WHERE article_id=?`,
+    ).bind(target.article_id, article.id),
+    env.DB.prepare(
+      `INSERT INTO rss_read(user_id,article_id,read_at,saved)
+      SELECT user_id,?,read_at,saved FROM rss_read WHERE article_id=? AND 1
+      ON CONFLICT(user_id,article_id) DO UPDATE SET saved=MAX(saved,excluded.saved),read_at=COALESCE(read_at,excluded.read_at)`,
+    ).bind(target.article_id, article.id),
+    env.DB.prepare("UPDATE rss_alias SET article_id=? WHERE article_id=?").bind(
+      target.article_id,
+      article.id,
+    ),
+    env.DB.prepare("DELETE FROM rss_source_article WHERE article_id=?").bind(
+      article.id,
+    ),
+    env.DB.prepare(
+      "UPDATE rss_article SET status='merged',lease_until=NULL,lease_token=NULL WHERE id=? AND lease_token=?",
+    ).bind(article.id, article.lease_token),
+  ]);
+  return true;
+}
+
 export async function drainRss(env: Env): Promise<void> {
   if (!(await rssActive(env))) return;
   const token = crypto.randomUUID();
@@ -626,6 +700,14 @@ export async function drainRss(env: Env): Promise<void> {
         )
         .run();
       article.body_hash = hash;
+    }
+    if (
+      body.completeness === "full" &&
+      body.canonical_url &&
+      (await linkCanonical(env, article, body.canonical_url))
+    ) {
+      await env.RSS_JOBS.send({ kind: "rss_drain" });
+      return;
     }
     if (body.word_count < 10) {
       await env.DB.prepare(
