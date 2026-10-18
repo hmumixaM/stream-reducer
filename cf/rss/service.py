@@ -33,6 +33,7 @@ class UpstreamError(ValueError):
 
 class BrandingRequest(BaseModel):
     url: str
+    folo_id: str | None = None
 
 
 @app.post("/branding")
@@ -60,6 +61,18 @@ def branding(req: BrandingRequest):
                 return {"site_url": site, "image_url": final}
         except Exception:
             continue
+    # Folo's public catalog may retain the site's declared logo when an origin
+    # blocks server requests. Reading metadata never creates a subscription.
+    if req.folo_id and re.fullmatch(r"\d+", req.folo_id):
+        try:
+            feed = folo_api("/feeds?" + urlencode({"id": req.folo_id, "entriesLimit": 0})).get("feed", {})
+            image = feed.get("image")
+            if image and not feed.get("isPrivate"):
+                data, ctype, final = download(public_url(image))
+                if data and len(data) <= 1_000_000 and ctype.lower().startswith("image/"):
+                    return {"site_url": site, "image_url": final}
+        except Exception:
+            pass
     return {"site_url": site, "image_url": None}
 
 def feed_address(raw):

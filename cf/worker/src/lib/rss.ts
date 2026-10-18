@@ -304,7 +304,12 @@ export async function pollRss(
         const brand = await rssCall<{
           image_url: string | null;
           site_url: string;
-        }>(env, "/branding", { url: page.entries[0].url }, sourceId);
+        }>(
+          env,
+          "/branding",
+          { url: page.entries[0].url, folo_id: source.folo_id },
+          sourceId,
+        );
         await env.DB.prepare(
           "UPDATE rss_source SET image_url=?,site_url=?,branding_checked_at=? WHERE id=?",
         )

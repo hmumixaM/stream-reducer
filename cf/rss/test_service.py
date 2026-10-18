@@ -151,3 +151,17 @@ def test_source_branding_uses_declared_site_icon_not_article_cover(monkeypatch):
 def test_source_branding_falls_back_without_blocking_articles(monkeypatch):
     monkeypatch.setattr(s,'download',lambda *a,**k:(_ for _ in ()).throw(s.UpstreamError(404)))
     assert s.branding(s.BrandingRequest(url='https://publisher.example/story'))['image_url'] is None
+
+
+def test_source_branding_recovers_public_catalog_logo_without_subscribing(monkeypatch):
+    calls=[]
+    def download(url, **kwargs):
+        if url == 'https://publisher.example/logo.png': return b'logo', 'image/png', url
+        raise s.UpstreamError(403)
+    def catalog(path, token='', body=None):
+        calls.append((path,token,body))
+        return {'feed':{'image':'https://publisher.example/logo.png'}}
+    monkeypatch.setattr(s,'download',download)
+    monkeypatch.setattr(s,'folo_api',catalog)
+    assert s.branding(s.BrandingRequest(url='https://publisher.example/story',folo_id='123'))['image_url'].endswith('/logo.png')
+    assert all(path.startswith('/feeds?') and not token and body is None for path,token,body in calls)
