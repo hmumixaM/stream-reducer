@@ -165,3 +165,47 @@ def test_source_branding_recovers_public_catalog_logo_without_subscribing(monkey
     monkeypatch.setattr(s,'folo_api',catalog)
     assert s.branding(s.BrandingRequest(url='https://publisher.example/story',folo_id='123'))['image_url'].endswith('/logo.png')
     assert all(path.startswith('/feeds?') and not token and body is None for path,token,body in calls)
+
+
+def test_search_proxy_rejects_arbitrary_targets():
+    with pytest.raises(HTTPException) as e:
+        s.source_search(s.SearchRequest(provider="https://localhost", q="a"))
+    assert e.value.status_code == 400
+
+
+def test_source_inspect_routes_enclosure_feed_to_media(monkeypatch):
+    monkeypatch.setattr(s, "resolve", lambda req: {"identity": "feed:https://example.com/podcast", "provider": "rss", "feed_url": "https://example.com/podcast"})
+    monkeypatch.setattr(s, "download", lambda *a, **k: (b'<rss version="2.0"><channel><title>Podcast</title><item><enclosure url="https://example.com/audio.mp3" type="audio/mpeg"/></item></channel></rss>', "application/rss+xml", "https://example.com/podcast"))
+    assert s.source_inspect(s.SourceRequest(url="https://example.com/podcast"))["kind"] == "media"
+
+
+def test_source_inspect_will_not_promote_unverified_podcast_to_article(monkeypatch):
+    monkeypatch.setattr(s, "resolve", lambda req: {"identity": "feed:https://example.com/podcast", "provider": "rss", "feed_url": "https://example.com/podcast"})
+    monkeypatch.setattr(s, "download", lambda *a, **k: (_ for _ in ()).throw(ValueError("offline")))
+    with pytest.raises(HTTPException): s.source_inspect(s.SourceRequest(url="https://example.com/podcast"))
+
+
+def test_media_feed_rejects_private_cache(monkeypatch):
+    monkeypatch.setattr(s, "folo_api", lambda *a, **k: {"feed": {"isPrivate": True}, "entries": []})
+    with pytest.raises(HTTPException): s.media_feed(s.SourceRequest(url="https://example.com/podcast"))
+
+
+def test_media_feed_recovers_rsshub_scheme_alias(monkeypatch):
+    def cached(path, token=""):
+        if "rsshub%3A%2F%2F" not in path:
+            raise ValueError("not found")
+        return {"feed": {"title": "Podcast"}, "entries": [{"entries": {"id": "1", "title": "Episode", "url": "https://www.xiaoyuzhoufm.com/episode/123456789012345678901234", "publishedAt": "2026-10-18T00:00:00Z"}}]}
+    monkeypatch.setattr(s, "folo_api", cached)
+    result = s.media_feed(s.SourceRequest(url="https://rsshub.app/xiaoyuzhou/podcast/123456789012345678901234"))
+    assert len(result["entries"]) == 1
+    assert result["entries"][0]["link"].startswith("https://www.xiaoyuzhoufm.com/episode/")
+
+
+def test_media_feed_can_validate_by_folo_identity(monkeypatch):
+    calls = []
+    def cached(path, token=""):
+        calls.append(path)
+        return {"feed": {"title": "Podcast"}, "entries": [{"id": "1", "url": "https://example.com/episode", "media": [{"type": "audio", "url": "https://example.com/audio.mp3"}]}]}
+    monkeypatch.setattr(s, "folo_api", cached)
+    assert s.media_feed(s.SourceRequest(url="https://app.folo.is/feed/123"))["entries"][0]["audio"].endswith(".mp3")
+    assert "id=123" in calls[0]

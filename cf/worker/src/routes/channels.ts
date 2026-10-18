@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import type { AppContext } from "../auth";
 import { requireAuth, resolveUser } from "../auth";
 import {
@@ -76,10 +77,10 @@ async function enqueueFollowPoll(
   env: AppContext["Bindings"],
   followId: number,
 ): Promise<void> {
+  await env.PIPELINE.send({ kind: "poll", subscription_id: followId, force: true });
   await env.DB.prepare(
     "UPDATE subscription SET last_checked_at = ? WHERE id = ?",
   ).bind(isoNow(), followId).run();
-  await env.PIPELINE.send({ kind: "poll", subscription_id: followId, force: true });
 }
 
 async function folderBelongsToUser(
@@ -262,27 +263,26 @@ channelRoutes.get("/:id", async (c) => {
   return c.json(toChannelRead(row, latest.get(channelId) ?? []));
 });
 
-channelRoutes.put("/:id/follow", requireAuth, async (c) => {
-  const userId = c.get("user").id;
-  const channelId = Number(c.req.param("id"));
-  const body = await readJson<FollowBody>(c);
+export async function followKnownChannel(
+  env: AppContext["Bindings"], userId: number, channelId: number, body: FollowBody = {},
+) {
   const error = validateFollowBody(body);
-  if (error) return c.json({ error }, 400);
+  if (error) throw new HTTPException(400, { message: error });
   const channel = await first<ChannelRow>(
-    c.env.DB.prepare("SELECT * FROM channel WHERE id = ?").bind(channelId),
+    env.DB.prepare("SELECT * FROM channel WHERE id = ?").bind(channelId),
   );
-  if (!channel) return c.json({ error: "channel not found" }, 404);
+  if (!channel) throw new HTTPException(404, { message: "channel not found" });
   const requestedFolderId = body.folder_id ?? null;
   if (
     body.folder_id !== undefined &&
     requestedFolderId !== null &&
-    !(await folderBelongsToUser(c.env, requestedFolderId, userId))
+    !(await folderBelongsToUser(env, requestedFolderId, userId))
   ) {
-    return c.json({ error: "folder not found" }, 400);
+    throw new HTTPException(400, { message: "folder not found" });
   }
 
-  const linked = await findUserFollow(c.env, userId, channelId);
-  const aliases = await findUnmigratedUserFollowsByIdentity(c.env, userId, {
+  const linked = await findUserFollow(env, userId, channelId);
+  const aliases = await findUnmigratedUserFollowsByIdentity(env, userId, {
     platform: channel.platform,
     channelKey: channel.channel_key,
   });
@@ -301,14 +301,14 @@ channelRoutes.put("/:id/follow", requireAuth, async (c) => {
   const windowDays =
     body.window_days ??
     merged?.windowDays ??
-    defaultWindowDays(c.env);
+    defaultWindowDays(env);
   const intervalMinutes = body.interval_minutes ?? survivor?.interval_minutes ?? 60;
   const cutoff =
     body.window_days !== undefined || !merged
       ? minPublishedAt(windowDays)
       : merged.minPublishedAt;
   if (candidates.length) {
-    await mergeFollowsIntoChannel(c.env, channel, candidates, {
+    await mergeFollowsIntoChannel(env, channel, candidates, {
       enabled: 1,
       folderId,
       windowDays,
@@ -316,7 +316,7 @@ channelRoutes.put("/:id/follow", requireAuth, async (c) => {
       intervalMinutes,
     });
   } else {
-    await c.env.DB.prepare(
+    await env.DB.prepare(
       `INSERT OR IGNORE INTO subscription
          (user_id, channel_id, platform, feed_url, interval_minutes, window_days,
           min_published_at, folder_id, enabled)
@@ -333,15 +333,27 @@ channelRoutes.put("/:id/follow", requireAuth, async (c) => {
       1,
     ).run();
   }
-  let updated = await findUserFollow(c.env, userId, channelId);
+  let updated = await findUserFollow(env, userId, channelId);
   if (!updated) throw new Error("failed to read channel follow");
-  await recomputeChannelPriorities(c.env, channel);
-  if (!wasEnabled && updated.enabled) {
-    await enqueueFollowPoll(c.env, updated.id);
-    updated = await findUserFollow(c.env, userId, channelId);
+  await recomputeChannelPriorities(env, channel);
+  if (updated.enabled && (!wasEnabled || !updated.last_checked_at)) {
+    if (!wasEnabled) {
+      await env.DB.prepare("UPDATE subscription SET last_checked_at = NULL WHERE id = ?").bind(updated.id).run();
+    }
+    await enqueueFollowPoll(env, updated.id);
+    updated = await findUserFollow(env, userId, channelId);
     if (!updated) throw new Error("failed to refresh channel follow");
   }
-  return c.json(toChannelFollowRead(updated, channel));
+  return toChannelFollowRead(updated, channel);
+}
+
+channelRoutes.put("/:id/follow", requireAuth, async (c) => {
+  try {
+    return c.json(await followKnownChannel(c.env, c.get("user").id, Number(c.req.param("id")), await readJson<FollowBody>(c)));
+  } catch (error) {
+    if (error instanceof HTTPException) return c.json({ error: error.message }, error.status);
+    throw error;
+  }
 });
 
 channelRoutes.patch("/:id/follow", requireAuth, async (c) => {

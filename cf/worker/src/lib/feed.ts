@@ -242,8 +242,17 @@ export async function fetchFeed(env: Env, feedUrl: string): Promise<ParsedFeed> 
     return { title: null, entries };
   }
 
-  const res = await fetch(feedUrl, { headers: { "user-agent": "stream-reduce/1.0" } });
-  return parseFeed(await res.text());
+  try {
+    const res = await fetch(feedUrl, { headers: { "user-agent": "stream-reduce/1.0" } });
+    if (!res.ok) throw new Error(`feed HTTP ${res.status}`);
+    const xml = await res.text();
+    if (!/<(?:rss|feed)(?:\s|>)/i.test(xml)) throw new Error("invalid feed");
+    return parseFeed(xml);
+  } catch (error) {
+    if (!env.RSS_CONTAINER) throw error;
+    const { rssCall } = await import("./rss");
+    return rssCall<ParsedFeed>(env, "/media-feed", { url: feedUrl });
+  }
 }
 
 function youtubeFeed(channelId: string): string {

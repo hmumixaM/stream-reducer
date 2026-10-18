@@ -118,6 +118,7 @@ export async function rssCall<T>(
   path: string,
   data: unknown,
   shard = 0,
+  signal?: AbortSignal,
 ): Promise<T> {
   const container = getContainer(
     env.RSS_CONTAINER,
@@ -128,6 +129,7 @@ export async function rssCall<T>(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(data),
+      signal,
     }),
   );
   if (!response.ok) {

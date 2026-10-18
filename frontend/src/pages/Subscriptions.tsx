@@ -6,32 +6,28 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Compass, Link2, Rss, Search } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Compass, Rss, Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { ChannelCard } from "@/components/ChannelCard";
 import { ChannelRow } from "@/components/ChannelRow";
-import { ChannelTile } from "@/components/ChannelTile";
-import { Button, Card, Input, Select, Spinner } from "@/components/ui";
+import { SourceDiscovery } from "@/components/SourceDiscovery";
+import { Button, Card, Input, Spinner } from "@/components/ui";
 import {
   ChipRow,
   EmptyState,
   ErrorState,
   FilterChip,
   InfiniteScrollSentinel,
-  ItemGrid,
   LoadingState,
   PageHeader,
   SectionHeader,
-  SkeletonGrid,
   Toolbar,
 } from "@/components/shell";
 import { nextPageError } from "@/lib/useInfiniteScroll";
 import {
   api,
-  type ChannelFollowRead,
   type ChannelRead,
   type Group,
-  type Platform,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useMe } from "@/lib/auth";
@@ -41,14 +37,6 @@ const PAGE_SIZE = 24;
 // flight temporarily tightens it (see FollowingChannels).
 const FOLLOW_REFETCH_MS = 15000;
 const FOLLOW_REFETCH_ACTIVE_MS = 3000;
-const PLATFORMS: { value: Platform; label: string }[] = [
-  { value: "youtube", label: "YouTube" },
-  { value: "bilibili", label: "Bilibili" },
-  { value: "apple_podcast", label: "Apple Podcasts" },
-  { value: "xiaoyuzhou", label: "小宇宙" },
-  { value: "rss", label: "RSS / podcast" },
-  { value: "unknown", label: "Other" },
-];
 
 export function Subscriptions() {
   const me = useMe();
@@ -144,167 +132,19 @@ function DiscoverChannels({
   canFollow: boolean;
 }) {
   const queryClient = useQueryClient();
-  const [query, setQuery] = useState("");
-  const [platform, setPlatform] = useState<Platform | "">("");
   const [addOpen, setAddOpen] = useState(false);
   const [preview, setPreview] = useState<ChannelRead | null>(null);
-  const debouncedQuery = useDebouncedValue(query.trim(), 300);
-
-  const channels = useInfiniteQuery({
-    queryKey: ["channels", "catalog", { q: debouncedQuery, platform }],
-    queryFn: ({ pageParam }) =>
-      api.listChannels({
-        q: debouncedQuery || undefined,
-        platform: platform || undefined,
-        limit: PAGE_SIZE,
-        offset: pageParam,
-      }),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, pages) =>
-      lastPage.length === PAGE_SIZE ? pages.length * PAGE_SIZE : undefined,
-  });
-  const rows = channels.data?.pages.flat() ?? [];
-  const filtering = Boolean(debouncedQuery || platform);
-
-  const updatePreviewFollow = (follow: ChannelFollowRead | null) => {
-    setPreview((channel) => (channel ? { ...channel, follow } : channel));
-  };
-
-  return (
-    <div className="space-y-6">
-      <Toolbar className="mb-0">
-        <label className="relative min-w-[200px] flex-1">
-          <span className="sr-only">Search channel names</span>
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            name="q"
-            value={query}
-            maxLength={100}
-            placeholder="Search known channels"
-            className="pl-9"
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
-        <Select
-          name="platform"
-          className="w-auto min-w-[160px]"
-          title="Platform"
-          value={platform}
-          onChange={(event) => setPlatform(event.target.value as Platform | "")}
-        >
-          <option value="">All platforms</option>
-          {PLATFORMS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
-        {canFollow ? (
-          <Button variant="outline" onClick={() => setAddOpen(true)}>
-            <Link2 className="h-4 w-4" /> Add by URL
-          </Button>
-        ) : (
-          <Link to="/login">
-            <Button variant="outline">Sign in to follow</Button>
-          </Link>
-        )}
-      </Toolbar>
-
-      {addOpen && (
-        <AddChannelDialog
-          onClose={() => setAddOpen(false)}
-          onResolved={(channel) => {
-            setPreview(channel);
-            setAddOpen(false);
-            queryClient.invalidateQueries({
-              queryKey: ["channels", "catalog"],
-            });
-          }}
-        />
-      )}
-
-      {preview && (
-        <section aria-labelledby="channel-preview-title">
-          <SectionHeader
-            id="channel-preview-title"
-            title="Channel preview"
-            subtitle="Resolved from the URL you pasted."
-            actions={
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setPreview(null)}
-              >
-                Dismiss
-              </Button>
-            }
-          />
-          <ChannelCard
-            channel={preview}
-            groups={groups}
-            canFollow={canFollow}
-            onFollowChanged={updatePreviewFollow}
-          />
-        </section>
-      )}
-
-      <section aria-labelledby="known-channels-title">
-        <SectionHeader id="known-channels-title" title="Known channels" />
-        {channels.isLoading ? (
-          <SkeletonGrid count={8} />
-        ) : channels.isError ? (
-          <ErrorState
-            message={`Channels could not be loaded: ${channels.error.message}`}
-            onRetry={() => channels.refetch()}
-          />
-        ) : rows.length === 0 ? (
-          <EmptyState
-            icon={<Compass className="h-5 w-5" />}
-            title={filtering ? "No matching channels" : "No known channels yet"}
-            description={
-              filtering
-                ? "Try another name or platform."
-                : "Paste a channel or feed URL to add the first one to the catalog."
-            }
-            action={
-              !filtering &&
-              (canFollow ? (
-                <Button size="sm" onClick={() => setAddOpen(true)}>
-                  <Link2 className="h-4 w-4" /> Add by URL
-                </Button>
-              ) : (
-                <Link to="/login">
-                  <Button size="sm" variant="outline">
-                    Sign in to follow
-                  </Button>
-                </Link>
-              ))
-            }
-          />
-        ) : (
-          <>
-            <ItemGrid>
-              {rows.map((channel) => (
-                <ChannelTile
-                  key={channel.id}
-                  channel={channel}
-                  groups={groups}
-                  canFollow={canFollow}
-                />
-              ))}
-            </ItemGrid>
-            <InfiniteScrollSentinel
-              hasNextPage={!!channels.hasNextPage}
-              isFetchingNextPage={channels.isFetchingNextPage}
-              fetchNextPage={() => channels.fetchNextPage()}
-              error={nextPageError(channels)}
-              totalLabel={`${rows.length} channel${rows.length === 1 ? "" : "s"}`}
-            />
-          </>
-        )}
-      </section>
-    </div>
-  );
+  return <div className="space-y-6">
+    <SourceDiscovery onAdd={() => setAddOpen(true)} />
+    {addOpen && <AddChannelDialog onClose={() => setAddOpen(false)} onResolved={channel => {
+      setPreview(channel); setAddOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["source-search"] });
+    }} />}
+    {preview && <section aria-labelledby="channel-preview-title">
+      <SectionHeader id="channel-preview-title" title="Channel preview" actions={<Button size="sm" variant="ghost" onClick={() => setPreview(null)}>Dismiss</Button>} />
+      <ChannelCard channel={preview} groups={groups} canFollow={canFollow} onFollowChanged={follow => setPreview(channel => channel ? { ...channel, follow } : channel)} />
+    </section>}
+  </div>;
 }
 
 function AddChannelDialog({
@@ -552,13 +392,4 @@ function TabLink({
       {children}
     </button>
   );
-}
-
-function useDebouncedValue<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timeout = window.setTimeout(() => setDebounced(value), delay);
-    return () => window.clearTimeout(timeout);
-  }, [delay, value]);
-  return debounced;
 }

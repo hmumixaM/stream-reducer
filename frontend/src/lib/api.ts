@@ -731,6 +731,39 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export type SourceProvider = "known" | "youtube" | "bilibili" | "apple_podcast" | "folo";
+export type SourcePlatform = "youtube" | "bilibili" | "apple_podcast" | "xiaoyuzhou" | "rss" | "article";
+export interface SourceSearchResult {
+  key: string;
+  provider: SourceProvider;
+  provider_id: string;
+  kind: "media" | "article";
+  platform: SourcePlatform;
+  title: string;
+  image_url: string | null;
+  description: string | null;
+  url: string;
+  feed_url: string | null;
+  aliases: string[];
+  channel_id: number | null;
+  rss_source_id: number | null;
+  following: boolean;
+}
+export interface SourceSearchPage { results: SourceSearchResult[]; next_offset: number | null }
+export function searchSources(params: { provider: SourceProvider; q: string; platform?: string; offset?: number }, signal?: AbortSignal) {
+  const sp = new URLSearchParams({ provider: params.provider, q: params.q, limit: "24" });
+  if (params.platform) sp.set("platform", params.platform);
+  if (params.offset) sp.set("offset", String(params.offset));
+  return req<SourceSearchPage>(`/api/sources/search?${sp}`, { signal });
+}
+export function followSource(source: SourceSearchResult, q: string) {
+  return req<SourceSearchResult>("/api/sources/follow", { method: "POST", body: JSON.stringify(
+    source.channel_id || source.rss_source_id
+      ? { provider: "known", channel_id: source.channel_id ?? undefined, rss_source_id: source.rss_source_id ?? undefined }
+      : { provider: source.provider, provider_id: source.provider_id, q },
+  ) });
+}
+
 async function optionalSession(): Promise<{ user: User | null }> {
   const pending = window.__srSessionResponse;
   delete window.__srSessionResponse;

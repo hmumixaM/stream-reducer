@@ -7,6 +7,8 @@ import os
 import xml.etree.ElementTree as ET
 import re
 import socket
+import urllib.request
+import uuid
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlsplit, urlunsplit, parse_qsl, urlencode
 
@@ -526,3 +528,121 @@ def opml(req: OpmlRequest):
         return {"sources": sources[:1000], "skipped": skipped + max(0, len(sources)-1000)}
     except ET.ParseError as exc:
         raise HTTPException(422, "OPML 文件格式不正确") from exc
+
+
+class SearchRequest(BaseModel):
+    provider: str
+    q: str = Field(min_length=1, max_length=100)
+    token: str = ""
+
+
+@app.post("/source-search")
+def source_search(req: SearchRequest):
+    """Bounded search fallback; no caller-supplied URL, headers or redirects."""
+    urls = {
+        "youtube": "https://www.youtube.com/results?" + urlencode({"search_query": req.q, "sp": "EgIQAg=="}),
+        "bilibili": "https://api.bilibili.com/x/web-interface/search/type?" + urlencode({"search_type": "bili_user", "keyword": req.q, "page": 1}),
+        "apple_podcast": "https://itunes.apple.com/search?" + urlencode({"term": req.q, "entity": "podcast", "limit": 10}),
+        "folo": FOLO + "/discover",
+    }
+    if req.provider not in urls:
+        raise HTTPException(400, "未知搜索平台")
+    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36", "Accept-Encoding": "identity"}
+    if req.provider == "bilibili":
+        headers.update({"Referer": "https://search.bilibili.com/", "Cookie": "buvid3=" + str(uuid.uuid4()).upper() + "infoc;"})
+    method, payload = "GET", None
+    if req.provider == "folo":
+        if not req.token:
+            raise HTTPException(503, "Folo 搜索尚未连接")
+        headers.update({"Content-Type": "application/json", "Authorization": "Bearer " + req.token,
+                        "Cookie": "__Secure-better-auth.session_token=" + req.token + "; better-auth.session_token=" + req.token})
+        method, payload = "POST", json.dumps({"keyword": req.q, "target": "feeds"}).encode()
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    try:
+        # One bounded request, no redirects and no upstream account cookies.
+        opener = urllib.request.build_opener(NoRedirect())
+        request = urllib.request.Request(urls[req.provider], data=payload, headers=headers, method=method)
+        with opener.open(request, timeout=7) as response:
+            if response.status != 200:
+                raise ValueError("搜索平台暂时不可用")
+            data = response.read(4_000_001)
+            if len(data) > 4_000_000:
+                raise ValueError("搜索结果超过上限")
+            return {"body": data.decode("utf-8")}
+
+    except Exception as exc:
+        raise HTTPException(502, "搜索平台暂时不可用") from exc
+
+
+def is_media_entry(entry):
+    for attachment in (entry.get("media") or []) + (entry.get("attachments") or []):
+        if re.match(r"^(audio|video)(/|$)", attachment.get("type") or attachment.get("mime_type") or ""):
+            return True
+    return False
+
+
+@app.post("/source-inspect")
+def source_inspect(req: SourceRequest):
+    """Public-feed classification on follow, never from client-supplied types."""
+    resolved = resolve(req)
+    if resolved.get("choices"):
+        raise HTTPException(409, "请选择具体的公开 feed")
+    address = resolved.get("feed_url")
+    if not address:
+        raise HTTPException(422, "来源没有公开 feed")
+    try:
+        data, _, final = download(address)
+        parsed = feedparser.parse(data)
+        if not parsed.version:
+            raise ValueError("来源未返回有效 feed")
+        media = any(any(str(enc.get("type", "")).startswith(("audio/", "video/"))
+                        for enc in e.get("enclosures", [])) for e in parsed.entries)
+        # Empty podcast feeds still declare the iTunes podcast namespace.
+        media = media or any("itunes" in key for key in parsed.namespaces)
+    except Exception:
+        if not resolved.get("folo_id"):
+            raise HTTPException(422, "无法验证公开 feed，请稍后重试")
+        cached = folo_api("/feeds?" + urlencode({"id": resolved["folo_id"], "entriesLimit": 1}), req.token)
+        media = any(is_media_entry(e.get("entries", e)) for e in cached.get("entries", []))
+        # Named video/podcast routes must never fall into the article pipeline.
+        media = media or bool(re.search(r"/(?:xiaoyuzhou/podcast|youtube/channel|bilibili/user)/", address))
+        if media:
+            # Verify the fallback actually provides pollable media entries.
+            media_feed(SourceRequest(url="https://app.folo.is/feed/" + resolved["folo_id"], token=req.token))
+    return {**resolved, "kind": "media" if media else "article"}
+
+
+@app.post("/media-feed")
+def media_feed(req: SourceRequest):
+    """Read public cached podcast entries when an RSSHub origin is unavailable."""
+    address = public_url(req.url)
+    fid = folo_id(address)
+    lookups = [{"id": fid}] if fid else [{"url": address}]
+    parts = urlsplit(address)
+    if not fid and ("rsshub" in (parts.hostname or "") or parts.netloc == urlsplit(RSSHUB).netloc):
+        lookups.append({"url": "rsshub://" + parts.path.lstrip("/") + ("?" + parts.query if parts.query else "")})
+    for lookup in lookups:
+        try:
+            data = folo_api("/feeds?" + urlencode({**lookup, "entriesLimit": 100}), req.token)
+        except Exception:
+            continue
+        feed = data.get("feed") or {}
+        if feed.get("isPrivate"):
+            raise HTTPException(422, "不支持私有来源")
+        rows = []
+        for record in data.get("entries", []):
+            e = record.get("entries", record)
+            audio = next((m.get("url") for m in (e.get("media") or []) + (e.get("attachments") or [])
+                          if re.match(r"^audio(/|$)", m.get("type") or m.get("mime_type") or "")), None)
+            link = e.get("url")
+            if not audio and not (link and re.match(r"https://(?:www\.)?xiaoyuzhoufm.com/episode/[a-f0-9]+", link)):
+                continue
+            rows.append({"title": e.get("title"), "link": public_url(link) if link else None,
+                         "guid": str(e.get("id", link)), "published": iso(e.get("publishedAt")),
+                         "audio": public_url(audio) if audio else None, "duration_s": None})
+        if rows:
+            return {"title": feed.get("title"), "entries": rows}
+    raise HTTPException(422, "来源没有可轮询的公开播客内容")
