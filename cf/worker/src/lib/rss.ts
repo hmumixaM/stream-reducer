@@ -373,7 +373,7 @@ export async function pollRss(
       : cursor === source.backfill_before);
     const status = stalled
       ? "gap"
-      : page.next_before
+      : page.next_cursor || page.next_before
         ? "running"
         : page.coverage === "reached_since" || page.coverage === "archive_end"
           ? "complete"

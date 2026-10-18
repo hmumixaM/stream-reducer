@@ -58,7 +58,11 @@ def test_substack_resolve_custom_domain_never_sends_cookies(monkeypatch):
         calls.append(kwargs)
         return b'[{"id":123,"publication_id":42}]', "application/json", url
     monkeypatch.setattr(s, "download", download)
-    monkeypatch.setattr(s, "substack_json", lambda *args, **kwargs: {"publication": publication})
+    def api(path, *args, **kwargs):
+        if path == "user/profile/self": return {"id": 7}
+        if path == "subscriptions/page_v2": return {"subscriptions": [], "publications": []}
+        return {"publication": publication}
+    monkeypatch.setattr(s, "substack_json", api)
     result = s.substack_resolve(s.SubstackRequest(cookie="substack.sid=secret", url="https://news.example/p/story"))
     assert result["substack_subdomain"] == "news"
     assert all("Cookie" not in call.get("headers", {}) for call in calls)
@@ -108,6 +112,38 @@ def test_substack_403_is_not_automatically_session_expiration(monkeypatch):
     with pytest.raises(HTTPException) as caught:
         s.substack_check(s.SubstackRequest(cookie="substack.sid=session"))
     assert caught.value.status_code == 422 and "SUBSTACK_AUTH" not in caught.value.detail
+
+
+def test_substack_private_publication_uses_account_reader_and_keeps_opaque_cursor(monkeypatch):
+    calls = []
+    def api(path, cookie="", subdomain=""):
+        calls.append((path, bool(cookie), subdomain))
+        if path == "user/profile/self": return {"id": 7}
+        if path.startswith("archive?"): raise ValueError("Substack 访问暂时失败（HTTP 403）")
+        assert path.startswith("reader/posts?") and cookie and not subdomain
+        return {"posts": [
+            {"id": 123, "publication_id": 42, "canonical_url": "https://private.substack.com/p/story", "title": "Accessible post", "post_date": "2026-10-01T00:00:00Z"},
+            {"id": 999, "publication_id": 99, "canonical_url": "https://other.substack.com/p/secret", "title": "OTHER PRIVATE SUBSCRIPTION", "post_date": "2026-09-01T00:00:00Z"}],
+            "more": True, "cursor": {"lastPostDate": "2026-09-01T00:00:00Z", "lastPostId": 999}}
+    monkeypatch.setattr(s, "substack_json", api)
+    req = s.SubstackRequest(cookie="substack.sid=session", subdomain="private", publication_id="42", since="2026-07-18")
+    first = s.substack_poll(req)
+    assert first["next_cursor"].startswith("reader:") and len(first["entries"]) == 1
+    assert "OTHER PRIVATE" not in str(first)
+    req.cursor = first["next_cursor"]
+    s.substack_poll(req)
+    assert len([call for call in calls if call[0].startswith("archive?")]) == 1
+    assert "cursor=" in calls[-1][0]
+
+
+def test_substack_private_publication_resolves_from_account_directory(monkeypatch):
+    def api(path, *args, **kwargs):
+        if path == "user/profile/self": return {"id": 7}
+        return {"subscriptions": [{"publication_id": 42}], "publications": [{"id": 42, "name": "Private", "subdomain": "private"}]}
+    monkeypatch.setattr(s, "substack_json", api)
+    monkeypatch.setattr(s, "download", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("private host must not be requested")))
+    result = s.substack_resolve(s.SubstackRequest(cookie="substack.sid=session", url="https://private.substack.com"))
+    assert result["substack_publication_id"] == "42"
 
 @pytest.mark.parametrize("url", ["http://localhost/a", "http://example.local/x", "ftp://example.com", "https://user:pw@example.com", "https://example.com/?token=secret", "https://example.com:8080/feed"])
 def test_reject_unsafe_urls(url):

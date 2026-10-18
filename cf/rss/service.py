@@ -607,6 +607,13 @@ def substack_subscriptions(req: SubstackRequest):
 def substack_resolve(req: SubstackRequest):
     address = public_url(req.url)
     p = urlsplit(address)
+    if req.cookie:
+        # A private publication may not expose an anonymous archive. Account
+        # directory metadata can identify it without sending cookies to its host.
+        for source in substack_subscriptions(req)["sources"]:
+            hosts = {urlsplit(source["url"]).hostname, source["substack_subdomain"] + ".substack.com"}
+            if p.hostname.removeprefix("www.") in {h.removeprefix("www.") for h in hosts}:
+                return source
     if p.hostname == "substack.com" and re.match(r"/@[\w-]+(?:/|$)", p.path):
         handle = p.path.split("/")[1][1:]
         profile = substack_json("user/" + handle + "/public_profile")
@@ -639,14 +646,36 @@ def substack_resolve(req: SubstackRequest):
 @substack_endpoint
 def substack_poll(req: SubstackRequest):
     substack_check(req)
-    offset = int(req.cursor or "0")
+    reader = bool(req.cursor and req.cursor.startswith("reader:"))
+    offset = 0 if reader else int(req.cursor or "0")
     if offset < 0 or offset > 1_000_000 or not req.publication_id.isdigit():
         raise ValueError("Substack 分页参数无效")
-    rows = substack_json("archive?" + urlencode({"sort": "new", "offset": offset, "limit": 50}), subdomain=req.subdomain)
+    if not reader:
+        try:
+            rows = substack_json("archive?" + urlencode({"sort": "new", "offset": offset, "limit": 50}), subdomain=req.subdomain)
+        except ValueError as exc:
+            # Reader-only/private publications and blocked custom-domain archives
+            # can still be acquired through this account's main-site reader feed.
+            if "SUBSTACK_RATE_LIMIT" in str(exc):
+                raise
+            reader = True
+    reader_cursor, reader_more = None, False
+    if reader:
+        query = {"limit": 50}
+        if req.cursor and req.cursor.startswith("reader:"):
+            cursor = json.loads(req.cursor[7:])
+            query["cursor"] = cursor if isinstance(cursor, str) else json.dumps(cursor, separators=(",", ":"))
+        data = substack_json("reader/posts?" + urlencode(query), req.cookie)
+        rows = data.get("posts")
+        reader_cursor, reader_more = data.get("cursor"), bool(data.get("more"))
     if not isinstance(rows, list):
         raise ValueError("Substack 返回无效文章列表")
     entries, dates = [], []
     for post in rows:
+        # Reader fallback paginates the account feed, but emits only the selected
+        # publication. Other subscriptions/account fields never leave this RPC.
+        if reader and iso(post.get("post_date")):
+            dates.append(iso(post["post_date"]))
         if str(post.get("publication_id")) != req.publication_id or not str(post.get("id", "")).isdigit():
             continue
         date = iso(post.get("post_date"))
@@ -660,10 +689,11 @@ def substack_poll(req: SubstackRequest):
                         "content": post.get("description") or post.get("subtitle") or "", "content_is_full": False})
     oldest = min(dates) if dates else None
     reached = bool(oldest and oldest <= req.since)
-    more = bool(len(rows) >= 50 and not reached)
+    more = bool((reader_more and reader_cursor is not None if reader else len(rows) >= 50) and not reached)
     return {"entries": entries, "provider": "substack", "next_before": oldest if more else None,
-            "next_cursor": str(offset + len(rows)) if more else None,
-            "coverage": "reached_since" if reached else "archive_end", "warning": None, "auth_error": False}
+            "next_cursor": ("reader:" + json.dumps(reader_cursor, separators=(",", ":")) if reader else str(offset + len(rows))) if more else None,
+            "coverage": "reached_since" if reached else "reader_window" if reader else "archive_end",
+            "warning": "账号阅读流已耗尽，较早历史可能不全" if reader and not more and not reached else None, "auth_error": False}
 
 
 @app.post("/substack/extract")
@@ -681,7 +711,7 @@ def substack_extract(req: SubstackRequest):
     url = clean_url(post["canonical_url"])
     html = post.get("body_html") or ""
     soup = BeautifulSoup(html, "html.parser")
-    gated = bool(soup.select('.paywall, .paywall-content, .subscribe-widget, [data-component-name="Paywall"]'))
+    gated = bool(soup.select('.paywall, .paywall-content, [data-component-name="Paywall"]'))
     # Only article markup reaches extraction. No account/profile/API snapshot is
     # returned or persisted, including embedded state and personalized actions.
     for tag in soup(["script", "style", "form", "iframe"]):
@@ -703,9 +733,9 @@ def substack_extract(req: SubstackRequest):
     state = subscription.get("membership_state")
     expiry = iso(subscription.get("expiry"))
     current = not expiry or expiry > datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    entitled = audience == "everyone" or (audience in ("free", "subscribers") and bool(subscription)) or (
-        audience in ("only_paid", "paid", "founding") and current and state in ("subscribed", "comp", "lifetime")
-        and (audience != "founding" or subscription.get("is_founding")))
+    entitled = audience == "everyone" or (audience in ("free", "subscribers", "only_free") and bool(subscription)) or (
+        audience in ("only_paid", "paid", "founding", "only_founding") and current and state in ("subscribed", "comp", "lifetime")
+        and (audience not in ("founding", "only_founding") or subscription.get("is_founding")))
     full = bool(html and entitled and not gated and not post.get("is_geoblocked"))
     if len(text) > MAX_TEXT:
         text, full = text[:MAX_TEXT], False

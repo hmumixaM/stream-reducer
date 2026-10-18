@@ -84,7 +84,11 @@ endpoints. Subscription discovery uses `/subscriptions/page_v2`; the older
 `/subscriptions?tvOnly=false` excludes normal newsletters in current live tests.
 Archives and custom domains are requested anonymously; full article retrieval
 uses the main site's `/posts/by-id/:id`. Cookies never follow an origin-changing
-redirect. Only published article content enters extraction; account state,
+redirect. A reader-only/private publication resolves from the account directory
+and falls back to the authenticated main-site reader feed when its anonymous
+archive is unavailable. This fallback filters every page to the chosen
+publication, preserves opaque cursors, and reports a history gap if the reader
+window ends before the time boundary. Only published article content enters extraction; account state,
 comments, draft previews, and raw authenticated API responses are not stored.
 Paywall/entitlement checks distinguish previews from verified full content.
 An account without paid subscriptions cannot validate the real paid-content
