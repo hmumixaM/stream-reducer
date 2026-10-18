@@ -72,7 +72,10 @@ Opening a completed article in Chinese queues a missing edition from its saved
 body. Verified same-host canonical URLs merge source links, URL aliases and
 personal state without losing old article IDs. Briefs can have no explanation section; articles, reports
 and digests are classified by information structure, not mandatory word counts.
-Source references address saved paragraphs, including PDF page headings.
+Bulletins and concise explanations do not require or display paragraph references.
+The article source link and saved full body (including PDF page headings) remain
+available for tracing the source. Existing editions and saved section evidence
+remain compatible and are reused on retry; legacy reference fields are ignored.
 
 DB leases prevent duplicate work; abandoned jobs recover after lease expiry.
 Failures back off and stop after four automatic article attempts. Manual retry

@@ -12,6 +12,7 @@ import {
   drainRss,
   articleChunks,
   validateEdition,
+  RSS_VERSION,
 } from "../src/lib/rss";
 import { rssRoutes } from "../src/routes/rss";
 import { Hono } from "hono";
@@ -270,15 +271,85 @@ describe("independent RSS persistence and processing", () => {
     );
     expect(result.based_on_excerpt).toBe(true);
     expect(result.sections).toEqual([]);
-    expect(() =>
-      validateEdition(
-        {
+  });
+  it.each([undefined, [], [9], "invalid legacy field"])(
+    "accepts explanations without valid paragraph references (%j)",
+    (references) => {
+      expect(
+        validateEdition(
+          {
+            ...edition,
+            sections: [{ title: "Theme", text: "Detail", references }],
+          },
+          body,
+        ).sections,
+      ).toEqual([{ title: "Theme", text: "Detail" }]);
+    },
+  );
+  it.each([null, { title: "Theme", text: 9 }, { text: "Detail" }])(
+    "still rejects malformed explanation content (%j)",
+    (section) => {
+      expect(() =>
+        validateEdition({ ...edition, sections: [section] }, body),
+      ).toThrow("概括格式不正确");
+    },
+  );
+  it("recovers a reference failure using the saved body and successful original edition", async () => {
+    const s = setup();
+    await add(s);
+    s.objects.set("saved-body", JSON.stringify(body));
+    s.db.exec(
+      "UPDATE rss_article SET status='error',attempts=0,next_attempt_at='',body_key='saved-body',body_hash='hash',error='概括原文定位不正确'",
+    );
+    s.db
+      .prepare(
+        "INSERT INTO rss_edition(article_id,lang,body_hash,version,content,model,tokens) VALUES(1,'original','hash',?,?, 'old-model',0)",
+      )
+      .run(
+        RSS_VERSION,
+        JSON.stringify({
           ...edition,
-          sections: [{ title: "Theme", text: "Detail", references: [9] }],
-        },
-        body,
+          sections: [
+            { title: "Old theme", text: "Saved explanation", references: [1] },
+          ],
+        }),
+      );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: JSON.stringify({
+                      ...edition,
+                      sections: [
+                        { title: "主题", text: "中文概括", references: [999] },
+                      ],
+                    }),
+                  },
+                },
+              ],
+            }),
+          ),
       ),
-    ).toThrow();
+    );
+    await drainRss(s.env);
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(s.db.prepare("SELECT status FROM rss_article").get().status).toBe(
+      "done",
+    );
+    const result = s.db
+      .prepare("SELECT content FROM rss_edition WHERE lang='zh'")
+      .get();
+    expect(JSON.parse(result.content).sections).toEqual([
+      { title: "主题", text: "中文概括" },
+    ]);
+    const request = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(request.messages[0].content).toContain("Do not include references");
   });
   it("includes the last paragraph when chunking long reports", () => {
     const chunks = articleChunks({

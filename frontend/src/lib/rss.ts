@@ -4,7 +4,7 @@ export interface RssEdition {
   headline: string;
   intro: string;
   points: string[];
-  sections: { title: string; text: string; references: number[] }[];
+  sections: { title: string; text: string }[];
   summary_covered: boolean;
   based_on_excerpt: boolean;
 }

@@ -29,7 +29,6 @@ export function RssDetail() {
     me.data?.user?.preferred_language === "zh" ? "zh" : "original",
   );
   const [showBody, setShowBody] = useState(false);
-  const [reference, setReference] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const article = useQuery({
@@ -60,21 +59,6 @@ export function RssDetail() {
     } finally {
       setBusy(false);
     }
-  };
-  useEffect(() => {
-    if (reference !== null && showBody && body.data) {
-      document.getElementById(`rss-p-${reference}`)?.scrollIntoView({
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-          ? "auto"
-          : "smooth",
-        block: "center",
-      });
-      setReference(null);
-    }
-  }, [reference, showBody, body.data]);
-  const reveal = (ref: number) => {
-    setShowBody(true);
-    setReference(ref);
   };
   if (article.isLoading)
     return (
@@ -230,17 +214,6 @@ export function RssDetail() {
                       <p className="whitespace-pre-line text-base leading-8">
                         {s.text}
                       </p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {[...new Set(s.references)].slice(0, 6).map((ref) => (
-                          <button
-                            key={ref}
-                            className="min-h-8 rounded border px-2 text-xs text-muted-foreground hover:text-primary"
-                            onClick={() => reveal(ref)}
-                          >
-                            原文 §{ref}
-                          </button>
-                        ))}
-                      </div>
                     </section>
                   ))}
                 </div>
@@ -299,12 +272,8 @@ export function RssDetail() {
                   {body.data.paragraphs.map((p) => (
                     <div
                       key={p.id}
-                      id={`rss-p-${p.id}`}
-                      className="rss-original group relative mb-5 scroll-mt-24 rounded-md p-2 target:bg-primary/10"
+                      className="rss-original mb-5 rounded-md p-2"
                     >
-                      <span className="mb-1 block text-xs text-muted-foreground">
-                        §{p.id}
-                      </span>
                       <div className="prose prose-sm max-w-none break-words dark:prose-invert">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
