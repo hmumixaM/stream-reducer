@@ -1,3 +1,4 @@
+import { HTTPException } from "hono/http-exception";
 import { Container, getContainer } from "@cloudflare/containers";
 import type { Env } from "../env";
 import { sha256 } from "./crypto";
@@ -165,12 +166,21 @@ export async function followRss(
   source:
     (Omit<RssSource, "id"> & { category?: string }) | Record<string, unknown>,
 ): Promise<number> {
+  let substackAccess = "unknown";
+  if (source.provider === "substack" || [source.url, source.feed_url].some(url => typeof url === "string" && /^https:\/\/(?:[a-z0-9-]+\.)substack\.com(?:\/|$)/.test(url))) {
+    const metadata = "access" in source && source.access ? source
+      : source.substack_connection_id
+        ? await substackCall<Record<string, unknown>>(env, await getSubstackConnection(env, String(source.substack_connection_id)), "resolve", { url: source.url })
+        : await rssCall<Record<string, unknown>>(env, "/substack/resolve", { url: source.url });
+    substackAccess = String(metadata.access);
+    if (metadata.access !== "free") throw new HTTPException(403, { message: metadata.access === "paid" ? "需要付费，暂时无法订阅此 Substack 刊物" : "无法确认刊物免费，暂时无法订阅" });
+  }
   const row = await env.DB.prepare(
     `INSERT INTO rss_source(identity,provider,url,feed_url,folo_id,title,backfill_since,
-      substack_connection_id,substack_publication_id,substack_subdomain,image_url,site_url,branding_checked_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(identity) DO UPDATE SET
+      substack_connection_id,substack_publication_id,substack_subdomain,image_url,site_url,branding_checked_at,substack_access)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(identity) DO UPDATE SET
     folo_id=COALESCE(excluded.folo_id,rss_source.folo_id),title=excluded.title,
-    image_url=COALESCE(excluded.image_url,rss_source.image_url),site_url=COALESCE(excluded.site_url,rss_source.site_url)
+    image_url=COALESCE(excluded.image_url,rss_source.image_url),site_url=COALESCE(excluded.site_url,rss_source.site_url),substack_access=excluded.substack_access
     RETURNING id`,
   )
     .bind(
@@ -187,6 +197,7 @@ export async function followRss(
       source.image_url ?? null,
       source.site_url ?? null,
       source.image_url ? now() : null,
+      substackAccess,
     )
     .first<{ id: number }>();
   if (!row) throw new Error("未能保存来源");

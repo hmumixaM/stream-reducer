@@ -14,11 +14,15 @@ const connections = [
 await page.route('**/api/**', async route => {
   const req = route.request(), u = new URL(req.url());
   if (u.pathname === '/api/auth/me') return route.fulfill({ json: { user: { id: 1, email: 'qa@example.com', preferred_language: 'zh', is_admin: Number(admin) } } });
+  if (u.pathname === '/api/sources/search') {
+    calls.push({ path: u.pathname, provider: u.searchParams.get('provider'), platform: u.searchParams.get('platform') });
+    return route.fulfill({ json: { results: u.searchParams.get('provider') === 'substack' ? [{ key: 'substack:84', provider: 'substack', provider_id: '84', kind: 'article', platform: 'substack', title: '免费搜索结果', url: 'https://free.substack.com', image_url: null, aliases: ['substack:84'], following: false, access: 'free' }] : [], next_offset: null } });
+  }
   if (u.pathname === '/api/substack/connections') {
     if (req.method() === 'POST') { calls.push({ path: u.pathname, body: req.postDataJSON() }); return route.fulfill({ status: 201, json: { id: 'new' } }); }
     return route.fulfill({ json: connections });
   }
-  if (u.pathname.endsWith('/subscriptions') && u.pathname.startsWith('/api/substack/')) return route.fulfill({ json: { sources: [{ id: followed ? 1 : null, title: u.pathname.includes('/two/') ? '另一刊物' : '示例刊物', url: 'https://example.substack.com', image_url: null, substack_publication_id: '42', following: followed }], skipped: 0 } });
+  if (u.pathname.endsWith('/subscriptions') && u.pathname.startsWith('/api/substack/')) return route.fulfill({ json: { sources: [{ id: followed ? 1 : null, title: u.pathname.includes('/two/') ? '另一刊物' : '示例刊物', url: 'https://example.substack.com', image_url: null, substack_publication_id: '42', access: 'free', following: followed }, { id: null, title: '付费刊物', url: 'https://paid.substack.com', image_url: null, substack_publication_id: '99', access: 'paid', following: false }], skipped: 0 } });
   if (u.pathname.endsWith('/follow') || u.pathname.endsWith('/import')) {
     calls.push({ path: u.pathname, body: req.postDataJSON() }); followed = true;
     return route.fulfill({ json: u.pathname.endsWith('/import') ? { imported: 1 } : { id: 1 } });
@@ -29,6 +33,7 @@ await page.route('**/api/**', async route => {
 await page.goto(`${process.env.FRONTEND_URL || 'http://127.0.0.1:5174'}/subscriptions?tab=substack`);
 await page.getByText('示例刊物', { exact: true }).waitFor();
 assert.equal(await page.getByRole('button', { name: '管理连接', exact: true }).count(), 0);
+assert.equal(await page.getByRole('button', { name: '需要付费', exact: true }).isDisabled(), true);
 await page.getByRole('button', { name: '关注', exact: true }).click();
 await page.getByRole('button', { name: '已关注', exact: true }).waitFor();
 assert(calls.some(c => c.body?.publication_id === '42'));
@@ -59,6 +64,14 @@ assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > in
 await page.setViewportSize({ width: 1440, height: 1000 });
 await page.getByRole('button', { name: '管理连接', exact: true }).click();
 if (process.env.SUBSTACK_SCREENSHOTS) await page.screenshot({ path: `${process.env.SUBSTACK_SCREENSHOTS}/substack-desktop.png`, fullPage: true });
+await page.getByRole('button', { name: '搜索免费刊物', exact: true }).click();
+await page.getByRole('textbox', { name: '搜索来源', exact: true }).fill('technology');
+await page.getByText('免费搜索结果', { exact: true }).waitFor();
+assert(calls.some(c => c.provider === 'substack' && c.platform === 'substack'));
+assert.equal(await page.getByRole('combobox', { name: '来源平台' }).inputValue(), 'substack');
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(350);
+assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
 assert.deepEqual(errors, []);
 console.log(JSON.stringify({ sharedAccountFollow: true, importSubscriptions: true, directUrl: true, switchConnections: true, expiredConnection: true, adminCredentialManagement: true, clearsCredentialInput: true, mobileOverflow: false, pageErrors: errors }));
 await browser.close();

@@ -731,9 +731,10 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export type SourceProvider = "known" | "youtube" | "bilibili" | "apple_podcast" | "folo";
-export type SourcePlatform = "youtube" | "bilibili" | "apple_podcast" | "xiaoyuzhou" | "rss" | "article";
+export type SourceProvider = "known" | "youtube" | "bilibili" | "apple_podcast" | "folo" | "substack";
+export type SourcePlatform = "youtube" | "bilibili" | "apple_podcast" | "xiaoyuzhou" | "rss" | "article" | "substack";
 export interface SourceSearchResult {
+  access?: "free" | "paid" | "unknown";
   key: string;
   provider: SourceProvider;
   provider_id: string;

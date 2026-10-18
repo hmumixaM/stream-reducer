@@ -355,3 +355,14 @@ def test_media_feed_uses_public_catalog_page_limit_and_preserves_audio_duration(
     result = s.media_feed(s.SourceRequest(url="https://app.folo.is/feed/123"))
     assert result["entries"][0]["audio"].endswith(".m4a")
     assert result["entries"][0]["duration_s"] == 1200
+
+
+@pytest.mark.parametrize("publication,expected", [
+    ({"payments_state": "disabled"}, "free"),
+    ({"payments_state": "never_enabled"}, "free"),
+    ({"payments_state": "enabled"}, "paid"),
+    ({"payments_state": "disabled", "plans": [{"amount": 500}]}, "paid"),
+    ({}, "unknown"),
+])
+def test_substack_payment_status(publication, expected):
+    assert s.substack_source({"id": 42, "subdomain": "news", **publication})["access"] == expected

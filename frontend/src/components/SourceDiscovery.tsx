@@ -9,21 +9,23 @@ import { useMe } from "@/lib/auth";
 
 const LABELS: Record<string, string> = {
   youtube: "YouTube", bilibili: "B 站", apple_podcast: "Apple Podcasts", xiaoyuzhou: "小宇宙",
-  folo: "Folo", rss: "RSS / 播客", article: "文章 / RSS",
+  substack: "Substack", folo: "Folo", rss: "RSS / 播客", article: "文章 / RSS",
 };
 export function discoveryProviders(platform: string): SourceProvider[] {
-  if (platform === "xiaoyuzhou" || platform === "article" || platform === "rss") return ["folo"];
+  if (platform === "substack") return ["substack"];
+  if (platform === "article") return ["folo", "substack"];
+  if (platform === "xiaoyuzhou" || platform === "rss") return ["folo"];
   if (platform) return [platform as SourceProvider, "folo"];
-  return ["youtube", "bilibili", "apple_podcast", "folo"];
+  return ["youtube", "bilibili", "apple_podcast", "folo", "substack"];
 }
 
-export function SourceDiscovery({ onAdd }: { onAdd: () => void }) {
+export function SourceDiscovery({ onAdd, fixedPlatform }: { onAdd: () => void; fixedPlatform?: SourcePlatform }) {
   const me = useMe();
   const canFollow = Boolean(me.data?.user);
   const client = useQueryClient();
   const [params, setParams] = useSearchParams();
   const query = params.get("q") || "";
-  const requestedPlatform = params.get("platform") || "";
+  const requestedPlatform = fixedPlatform || params.get("platform") || "";
   const platform = Object.keys(LABELS).includes(requestedPlatform) && requestedPlatform !== "folo" ? requestedPlatform : "";
   const [composing, setComposing] = useState(false);
   const [debounced, setDebounced] = useState(query.trim());
@@ -101,9 +103,9 @@ export function SourceDiscovery({ onAdd }: { onAdd: () => void }) {
           onChange={e => update("q", e.target.value)} onCompositionStart={() => setComposing(true)}
           onCompositionEnd={e => { setComposing(false); update("q", e.currentTarget.value); }} />
       </label>
-      <Select aria-label="来源平台" value={platform} className="w-auto min-w-0" onChange={e => update("platform", e.target.value)}>
+      <Select disabled={Boolean(fixedPlatform)} aria-label="来源平台" value={platform} className="w-auto min-w-0" onChange={e => update("platform", e.target.value)}>
         <option value="">全部平台</option>
-        {(["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "article"] as SourcePlatform[]).map(p => <option key={p} value={p}>{LABELS[p]}</option>)}
+        {(["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "article", "substack"] as SourcePlatform[]).map(p => <option key={p} value={p}>{LABELS[p]}</option>)}
       </Select>
       {canFollow ? <Button variant="outline" onClick={onAdd}><Link2 className="h-4 w-4" />通过链接添加</Button>
         : <Link to="/login"><Button variant="outline">登录后关注</Button></Link>}
@@ -133,6 +135,7 @@ export function SourceDiscovery({ onAdd }: { onAdd: () => void }) {
       {remoteRows.length > 0 && renderRows(remoteRows)}
       {external.some(q => q.isError) && <p className="mt-3 text-sm text-muted-foreground">部分平台搜索失败，可重试或通过链接添加。{external[providers.indexOf("folo")]?.isError ? " Folo 连接可能需要更新。" : ""}</p>}
     </section>}
+    {platform === "substack" && <p className="text-sm text-muted-foreground">仅展示已确认免费的刊物；搜索覆盖 Substack 公开内容关联的刊物。</p>}
     {query.trim() && !canFollow && <p className="text-sm text-muted-foreground"><Link to="/login" className="text-primary underline">登录</Link>后可同时搜索 YouTube、B 站、播客和 Folo 公开目录。</p>}
     {!searching && !failed && debounced && knownRows.length === 0 && remoteRows.length === 0 && <EmptyState title="没有找到匹配来源" description="试试其他名称，或通过链接添加来源。" />}
   </div>;
@@ -154,11 +157,11 @@ function SourceResultRow({ source, query, canFollow, onFollow }: {
         : <a className="line-clamp-2 font-semibold hover:text-primary" href={source.url} target="_blank" rel="noreferrer">{source.title}</a>}
       {source.description && <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{source.description}</p>}
       <a className="mt-1 inline-flex max-w-full items-center gap-1 text-xs text-muted-foreground hover:text-primary" href={source.url} target="_blank" rel="noreferrer"><span className="truncate">查看来源</span><ExternalLink className="h-3 w-3 shrink-0" /></a>
-      {mutation.isError && <p className="mt-2 text-sm text-danger" role="alert">关注未完成，请重试或通过链接添加。</p>}
+      {mutation.isError && <p className="mt-2 text-sm text-danger" role="alert">{mutation.error.message}</p>}
     </div>
-    {canFollow ? <Button size="sm" variant={source.following ? "outline" : "default"} className="shrink-0" disabled={source.following || mutation.isPending} aria-busy={mutation.isPending} onClick={() => mutation.mutate()}>
+    {canFollow ? <Button size="sm" variant={source.following ? "outline" : "default"} className="shrink-0" disabled={source.following || mutation.isPending || (source.platform === "substack" && source.access !== "free")} aria-busy={mutation.isPending} onClick={() => mutation.mutate()}>
       {mutation.isPending ? <Spinner /> : source.following ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-      {mutation.isPending ? "关注中" : source.following ? "已关注" : mutation.isError ? "重试" : "关注"}
+      {source.platform === "substack" && source.access === "paid" ? "需要付费" : source.platform === "substack" && source.access !== "free" ? "待确认免费" : mutation.isPending ? "关注中" : source.following ? "已关注" : mutation.isError ? "重试" : "关注"}
     </Button> : <Link className="shrink-0 text-sm text-primary" to="/login">登录关注</Link>}
   </li>;
 }

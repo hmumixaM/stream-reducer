@@ -69,6 +69,12 @@ substackRoutes.get("/connections/:id/subscriptions", requireAuth, async c => {
   const saved = await c.env.DB.prepare(`SELECT s.id,s.identity,EXISTS(SELECT 1 FROM rss_follow f WHERE f.source_id=s.id AND f.user_id=?) following
     FROM rss_source s WHERE s.substack_connection_id=?`).bind(c.get("user").id, connection.id).all<{ id: number; identity: string; following: number }>();
   const byIdentity = new Map(saved.results.map(row => [row.identity, row]));
+  for (const item of preview.sources) {
+    if (["free", "paid", "unknown"].includes(String(item.access))) {
+      await c.env.DB.prepare("UPDATE rss_source SET substack_access=? WHERE substack_publication_id=?")
+        .bind(item.access, item.substack_publication_id).run();
+    }
+  }
   const sources = preview.sources.map(item => {
     const source = connectedSource(connection.id, item);
     const row = byIdentity.get(source.identity);
@@ -99,7 +105,11 @@ substackRoutes.post("/connections/:id/import", requireAuth, async c => {
   const connection = await getSubstackConnection(c.env, c.req.param("id")!);
   const preview = await substackCall<{ sources: Record<string, unknown>[]; skipped: number }>(c.env, connection, "subscriptions");
   const ids = [];
-  for (const source of preview.sources) ids.push(await followRss(c.env, c.get("user").id, connectedSource(connection.id, source)));
+  let skipped = preview.skipped;
+  for (const source of preview.sources) {
+    if (source.access !== "free") { skipped++; continue; }
+    ids.push(await followRss(c.env, c.get("user").id, connectedSource(connection.id, source)));
+  }
   if (ids.length) await c.env.RSS_JOBS.sendBatch([...new Set(ids)].map(id => ({ body: { kind: "rss_poll" as const, source_id: id } })));
-  return c.json({ imported: new Set(ids).size, skipped: preview.skipped });
+  return c.json({ imported: new Set(ids).size, skipped });
 });

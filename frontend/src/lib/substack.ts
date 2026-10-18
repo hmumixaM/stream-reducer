@@ -8,6 +8,7 @@ export interface SubstackConnection {
   last_error: string | null;
 }
 export interface SubstackPublication {
+  access?: "free" | "paid" | "unknown";
   id: number | null;
   title: string;
   url: string;

@@ -531,6 +531,15 @@ def substack_json(path, cookie="", subdomain=""):
         raise ValueError("Substack 返回无效数据或需要浏览器验证") from None
 
 
+def substack_access(publication):
+    if publication.get("payments_state") == "enabled" or any(
+        isinstance(p, dict) and isinstance(p.get("amount"), (int, float)) and p["amount"] > 0
+        for p in (publication.get("plans") or [])
+    ):
+        return "paid"
+    return "free" if publication.get("payments_state") in ("disabled", "never_enabled") else "unknown"
+
+
 def substack_source(publication):
     pub_id = str(publication.get("id", ""))
     subdomain = publication.get("subdomain", "")
@@ -549,7 +558,7 @@ def substack_source(publication):
     # account emails, podcast RSS tokens, reader state, or raw API responses.
     return {"provider": "substack", "title": plain(publication.get("name") or subdomain),
             "url": site, "feed_url": None, "folo_id": None, "image_url": image, "site_url": site,
-            "substack_publication_id": pub_id, "substack_subdomain": subdomain}
+            "substack_publication_id": pub_id, "substack_subdomain": subdomain, "access": substack_access(publication)}
 
 
 def substack_endpoint(fn):
@@ -814,6 +823,7 @@ def source_search(req: SearchRequest):
         "bilibili": "https://api.bilibili.com/x/web-interface/search/type?" + urlencode({"search_type": "bili_user", "keyword": req.q, "page": 1}),
         "apple_podcast": "https://itunes.apple.com/search?" + urlencode({"term": req.q, "entity": "podcast", "limit": 10}),
         "folo": FOLO + "/discover",
+        "substack": SUBSTACK + "/api/v1/top/search?" + urlencode({"query": req.q, "fromSuggestedSearch": "false"}),
     }
     if req.provider not in urls:
         raise HTTPException(400, "未知搜索平台")

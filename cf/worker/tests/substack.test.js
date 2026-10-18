@@ -6,12 +6,13 @@ import { database } from "./sqlite.mjs";
 import { sha256 } from "../src/lib/crypto";
 import { substackRoutes } from "../src/routes/substack";
 import { rssRoutes } from "../src/routes/rss";
+import { parseSubstack, searchRequest } from "../src/lib/sourceDiscovery";
 import { sourceRoutes } from "../src/routes/sources";
 import { followRss, persistEntries, pollRss, drainRss } from "../src/lib/rss";
 import { openSubstackCookie, sealSubstackCookie, substackCookie, extractSubstackArticle } from "../src/lib/substack";
 
 const states = [];
-const publication = { provider: "substack", title: "Example newsletter", url: "https://example.substack.com", feed_url: null,
+const publication = { access: "free", provider: "substack", title: "Example newsletter", url: "https://example.substack.com", feed_url: null,
   substack_publication_id: "42", substack_subdomain: "example", image_url: "https://substackcdn.com/logo.png", site_url: "https://example.substack.com" };
 const entry = { url: "https://example.substack.com/p/story", title: "Shared story", published_at: "2026-10-18T00:00:00Z", external_id: "123", substack_post_id: "123", content: "A public preview", content_is_full: false };
 const fullBody = { text: "A complete subscriber article with sufficient factual detail to generate a useful summary and original source notes.", paragraphs: [{ id: 1, text: "Original source evidence and complete subscriber article." }],
@@ -48,6 +49,58 @@ async function setup() {
 afterEach(() => { for (const db of states.splice(0)) db.close(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
 describe("Substack connections and shared articles", () => {
+  it("only discovers explicitly free publications, with public metadata and no credentials", () => {
+    const base = { id: 42, subdomain: "example", name: "Free news", payments_state: "disabled", owner_email: "PRIVATE" };
+    const rows = parseSubstack({ results: [base, { ...base, id: 43, payments_state: "enabled" }, { ...base, id: 44, payments_state: undefined }, { ...base, id: 45, plans: [{ amount: 500 }] }] });
+    expect(parseSubstack({ items: [{ publication: base, context: { users: [{ primary_publication: base }] } }, { publication: { ...base, id: 43, payments_state: "enabled" } }] })).toHaveLength(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ provider: "substack", access: "free", platform: "substack", kind: "article", feed_url: "https://example.substack.com/feed" });
+    expect(JSON.stringify(rows)).not.toContain("PRIVATE");
+    expect(searchRequest("substack", "AI & news", "secret")).toEqual({ url: "https://substack.com/api/v1/top/search?query=AI+%26+news&fromSuggestedSearch=false" });
+  });
+  it("searches free public publications without side effects and follows through the article queue", async () => {
+    const s = await setup();
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ items: [
+      { publication: { id: 42, subdomain: "example", name: "Example newsletter", payments_state: "disabled" } },
+      { publication: { id: 43, subdomain: "paid", name: "Paid newsletter", payments_state: "enabled" } },
+    ] })));
+    expect((await s.request("/api/sources/search?provider=substack&q=news", 0)).status).toBe(401);
+    const search = await (await s.request("/api/sources/search?provider=substack&q=news&platform=substack", 2)).json();
+    expect(search.results).toHaveLength(1);
+    expect(search.results[0]).toMatchObject({ provider_id: "42", following: false, access: "free" });
+    expect(s.db.prepare("SELECT count(*) n FROM rss_source").get().n).toBe(0);
+    expect(s.env.RSS_JOBS.send).not.toHaveBeenCalled();
+    const response = await s.request("/api/sources/follow", 2, "POST", { provider: "substack", provider_id: "42", q: "news" });
+    expect(response.status).toBe(200);
+    expect(s.db.prepare("SELECT provider,substack_access,feed_url FROM rss_source").get()).toMatchObject({ provider: "substack", substack_access: "free", feed_url: "https://example.substack.com/feed" });
+    expect(s.env.RSS_JOBS.send).toHaveBeenCalledWith({ kind: "rss_poll", source_id: 1 });
+    expect((await (await s.request("/api/sources/search?provider=known&q=news&platform=substack", 2)).json()).results[0].following).toBe(true);
+    s.db.exec("UPDATE rss_source SET substack_access='paid'");
+    expect((await (await s.request("/api/sources/search?provider=known&q=news&platform=substack", 2)).json()).results).toHaveLength(0);
+  });
+  it("blocks paid links, directory follows and imports without creating sources or queue jobs", async () => {
+    const s = await setup(), c = await s.connect();
+    containerFetch.mockImplementation(async req => Response.json(req.url.endsWith("/subscriptions") ? { sources: [{ ...publication, access: "paid" }], skipped: 0 } : { ...publication, access: "paid" }));
+    for (const body of [{ publication_id: "42" }, { url: publication.url }]) {
+      const response = await s.request(`/connections/${c.id}/follow`, 2, "POST", body);
+      expect(response.status).toBe(403);
+      expect((await response.json()).error).toContain("需要付费");
+    }
+    expect(await (await s.request(`/connections/${c.id}/import`, 2, "POST", {})).json()).toEqual({ imported: 0, skipped: 1 });
+    expect(s.db.prepare("SELECT count(*) n FROM rss_source").get().n).toBe(0);
+    expect(s.env.RSS_JOBS.send).not.toHaveBeenCalled();
+    expect(s.env.RSS_JOBS.sendBatch).not.toHaveBeenCalled();
+  });
+  it("rechecks saved Substack sources so generic RSS follow cannot bypass payment checks", async () => {
+    const s = await setup(), c = await s.connect();
+    await s.request(`/connections/${c.id}/import`, 1, "POST", {});
+    containerFetch.mockImplementation(async () => Response.json({ ...publication, access: "paid" }));
+    for (const path of ["/api/rss/sources/1/follow", "/api/sources/follow"]) {
+      const response = await s.request(path, 2, "POST", path.includes("sources/follow") ? { provider: "known", rss_source_id: 1 } : {});
+      expect(response.status).toBe(403);
+    }
+    expect(s.db.prepare("SELECT count(*) n FROM rss_follow WHERE user_id=2").get().n).toBe(0);
+  });
   it("encrypts credentials, authenticates ciphertext to the connection, and only accepts session cookies", async () => {
     const s = await setup();
     expect(substackCookie("tracking=no; substack.sid=session; email=private; connect.sid=other")).toBe("substack.sid=session; connect.sid=other");

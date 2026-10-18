@@ -3,8 +3,8 @@ import { normalizeChannelUrl } from "./channels";
 import { sha256 } from "./crypto";
 import { rssCall } from "./rss";
 
-export type DiscoveryProvider = "youtube" | "bilibili" | "apple_podcast" | "folo";
-export type SourcePlatform = "youtube" | "bilibili" | "apple_podcast" | "xiaoyuzhou" | "rss" | "article";
+export type DiscoveryProvider = "youtube" | "bilibili" | "apple_podcast" | "folo" | "substack";
+export type SourcePlatform = "youtube" | "bilibili" | "apple_podcast" | "xiaoyuzhou" | "rss" | "article" | "substack";
 export interface PublicSource {
   provider: DiscoveryProvider | "known";
   provider_id: string;
@@ -16,6 +16,7 @@ export interface PublicSource {
   url: string;
   feed_url: string | null;
   aliases: string[];
+  access?: "free" | "paid" | "unknown";
 }
 export interface SourceSearchResult extends PublicSource {
   key: string;
@@ -23,8 +24,8 @@ export interface SourceSearchResult extends PublicSource {
   rss_source_id: number | null;
   following: boolean;
 }
-export const PROVIDERS: DiscoveryProvider[] = ["youtube", "bilibili", "apple_podcast", "folo"];
-export const SOURCE_PLATFORMS: SourcePlatform[] = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss", "article"];
+export const PROVIDERS: DiscoveryProvider[] = ["youtube", "bilibili", "apple_podcast", "folo", "substack"];
+export const SOURCE_PLATFORMS: SourcePlatform[] = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss", "article", "substack"];
 
 const text = (value: unknown, max = 500): string => typeof value === "string"
   ? value.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").trim().slice(0, max) : "";
@@ -47,6 +48,7 @@ export function displayPlatform(url: string, feed: string | null, stored = "rss"
     if (!raw) continue;
     try {
       const u = new URL(raw);
+      if (/(^|\.)substack\.com$/.test(u.hostname) && u.hostname !== "substack.com") return "substack";
       if (/(^|\.)youtube\.com$/.test(u.hostname)) return "youtube";
       if (/(^|\.)bilibili\.com$/.test(u.hostname)) return "bilibili";
       if (/(^|\.)(podcasts|itunes)\.apple\.com$/.test(u.hostname)) return "apple_podcast";
@@ -135,6 +137,7 @@ export function parseFolo(data: any, env: Pick<Env, "RSSHUB_BASE_URL">): PublicS
     if (!feed) return [];
     const site = httpUrl(f.siteUrl);
     let platform = displayPlatform(site || feed, f.url, "article");
+    if (platform === "substack") return []; // Use verified Substack discovery for payment eligibility.
     const media = platform !== "article" || row.entries?.some((e: any) =>
       [...(Array.isArray(e.media) ? e.media : []), ...(Array.isArray(e.attachments) ? e.attachments : [])]
         .some((m: any) => /^(audio|video)(\/|$)/.test(m.type || m.mime_type || "")));
@@ -152,6 +155,26 @@ export function parseFolo(data: any, env: Pick<Env, "RSSHUB_BASE_URL">): PublicS
   });
 }
 
+export function substackAccess(publication: any): "free" | "paid" | "unknown" {
+  if (publication?.payments_state === "enabled" || publication?.plans?.some((p: any) => Number(p.amount) > 0)) return "paid";
+  return ["disabled", "never_enabled"].includes(publication?.payments_state) ? "free" : "unknown";
+}
+export function parseSubstack(data: any): PublicSource[] {
+  // The website's Publications endpoint currently returns empty even for known
+  // names. Its Top search includes canonical publication metadata for matches.
+  const publications = Array.isArray(data.items) ? data.items.flatMap((item: any) => [
+    item.publication, ...(item.context?.users || []).map((user: any) => user.primary_publication),
+  ]).filter(Boolean) : data.results;
+  if (!Array.isArray(publications)) throw new Error("Substack 未返回刊物搜索数据");
+  return [...new Map(publications.map((p: any) => [p.id, p])).values()].flatMap((p: any) => {
+    if (!/^\d+$/.test(String(p.id)) || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(p.subdomain) || substackAccess(p) !== "free") return [];
+    const origin = `https://${p.subdomain}.substack.com`;
+    const row = source("substack", String(p.id), "substack", origin, `${origin}/feed`, p.name, p.logo_url, p.description, "article");
+    row.aliases.push(`substack:${p.id}`);
+    return [{ ...row, access: "free" as const }];
+  });
+}
+
 export function searchRequest(provider: DiscoveryProvider, q: string, token?: string): { url: string; init?: RequestInit } {
   if (provider === "youtube") return { url: `https://www.youtube.com/results?${new URLSearchParams({ search_query: q, sp: "EgIQAg==" })}` };
   if (provider === "bilibili") return {
@@ -159,6 +182,7 @@ export function searchRequest(provider: DiscoveryProvider, q: string, token?: st
     init: { headers: { Referer: "https://search.bilibili.com/", Cookie: `buvid3=${crypto.randomUUID().toUpperCase()}infoc;` } },
   };
   if (provider === "apple_podcast") return { url: `https://itunes.apple.com/search?${new URLSearchParams({ term: q, entity: "podcast", limit: "10" })}` };
+  if (provider === "substack") return { url: `https://substack.com/api/v1/top/search?${new URLSearchParams({ query: q, fromSuggestedSearch: "false" })}` };
   if (!token) throw new Error("Folo 搜索尚未连接");
   return { url: "https://api.folo.is/discover", init: { method: "POST", headers: {
     "content-type": "application/json", Authorization: `Bearer ${token}`,
@@ -202,7 +226,7 @@ export async function discoverSources(env: Env, provider: DiscoveryProvider, q: 
       raw = await bounded(rssCall<{ body: string }>(env, "/source-search", { provider, q, token: provider === "folo" ? env.FOLO_TOKEN : "" }, 0, controller.signal)).then(r => r.body);
     }
     const parsed = provider === "youtube" ? parseYoutube(raw) : provider === "bilibili" ? parseBilibili(JSON.parse(raw))
-      : provider === "apple_podcast" ? parseApple(JSON.parse(raw)) : parseFolo(JSON.parse(raw), env);
+      : provider === "apple_podcast" ? parseApple(JSON.parse(raw)) : provider === "substack" ? parseSubstack(JSON.parse(raw)) : parseFolo(JSON.parse(raw), env);
     // Keep a bounded candidate page so platform filtering can happen before
     // the API's ten-row limit, and follow can revalidate any displayed result.
     const rows = [...new Map(parsed.map(r => [r.provider_id, r])).values()].slice(0, 100);

@@ -20,15 +20,16 @@ sourceRoutes.onError((error, c) => {
 });
 
 interface CatalogRow {
+  access?: "free" | "paid" | "unknown";
   id: number; kind: "media" | "article"; stored_platform: string; title: string | null;
   url: string; feed_url: string | null; image_url: string | null; following: number; folo_id: string | null;
 }
 function catalogSql(includeArticles: boolean): string {
   return `SELECT ch.id,'media' kind,ch.platform stored_platform,ch.title,
     COALESCE(ch.source_url,ch.feed_url) url,ch.feed_url,ch.image_url,
-    EXISTS(SELECT 1 FROM subscription s WHERE s.channel_id=ch.id AND s.user_id=?) following,NULL folo_id
-    ,ch.channel_key identity_key FROM channel ch ${includeArticles ? `UNION ALL SELECT r.id,'article' kind,'article' stored_platform,r.title,
-    r.url,r.feed_url,r.image_url,EXISTS(SELECT 1 FROM rss_follow f WHERE f.source_id=r.id AND f.user_id=?) following,r.folo_id
+    EXISTS(SELECT 1 FROM subscription s WHERE s.channel_id=ch.id AND s.user_id=?) following,NULL folo_id,NULL access
+    ,ch.channel_key identity_key FROM channel ch ${includeArticles ? `UNION ALL SELECT r.id,'article' kind,CASE WHEN r.provider='substack' THEN 'substack' ELSE 'article' END stored_platform,r.title,
+    r.url,COALESCE(r.feed_url,CASE WHEN r.substack_subdomain IS NOT NULL THEN 'https://'||r.substack_subdomain||'.substack.com/feed' END) feed_url,r.image_url,EXISTS(SELECT 1 FROM rss_follow f WHERE f.source_id=r.id AND f.user_id=?) following,r.folo_id,r.substack_access access
     ,r.identity identity_key FROM rss_source r` : ""}`;
 }
 export function catalogResult(row: CatalogRow): SourceSearchResult {
@@ -39,7 +40,7 @@ export function catalogResult(row: CatalogRow): SourceSearchResult {
     key: `${row.kind}:${row.id}`, provider: "known", provider_id: String(row.id), kind: row.kind, platform,
     title: row.title || row.url, image_url: row.image_url, description: null, url: row.url, feed_url: row.feed_url,
     aliases, channel_id: row.kind === "media" ? row.id : null, rss_source_id: row.kind === "article" ? row.id : null,
-    following: Boolean(row.following),
+    following: Boolean(row.following), ...(platform === "substack" ? { access: row.access || "unknown" } : {}),
   };
 }
 async function matchingCatalog(c: Parameters<typeof requireAuth>[0], userId: number, rows: PublicSource[]): Promise<SourceSearchResult[]> {
@@ -76,11 +77,12 @@ sourceRoutes.get("/search", async c => {
   if (provider === "known") {
     // Classify legacy RSS podcast rows before filtering and paginate in D1.
     const offset = integer(c.req.query("offset"), 0, 1_000_000), limit = Math.max(1, integer(c.req.query("limit"), 24, 50));
-    const clauses: string[] = [], binds: unknown[] = user ? [user.id, user.id] : [-1];
+    const clauses: string[] = ["(display_platform!='substack' OR access='free')"], binds: unknown[] = user ? [user.id, user.id] : [-1];
     if (q) { clauses.push("instr(lower(COALESCE(title,'') || ' ' || url || ' ' || COALESCE(feed_url,'')),lower(?))>0"); binds.push(q); }
     if (platform) { clauses.push(platform === "article" ? "kind='article'" : "display_platform=?"); if (platform !== "article") binds.push(platform); }
     const rows = await all<CatalogRow>(c.env.DB.prepare(`WITH public_catalog AS (${catalogSql(Boolean(user))}), classified AS (
       SELECT *, CASE
+        WHEN stored_platform='substack' OR url GLOB 'https://*.substack.com*' OR feed_url GLOB 'https://*.substack.com/*' THEN 'substack'
         WHEN url LIKE 'https://www.youtube.com/%' OR url LIKE 'https://youtube.com/%' OR feed_url LIKE '%/youtube/channel/%' THEN 'youtube'
         WHEN url LIKE 'https://space.bilibili.com/%' OR feed_url LIKE '%/bilibili/user/video/%' THEN 'bilibili'
         WHEN url LIKE 'https://podcasts.apple.com/%' OR url LIKE 'https://itunes.apple.com/%' THEN 'apple_podcast'
@@ -131,6 +133,12 @@ sourceRoutes.post("/follow", requireAuth, async c => {
       // Resolve/inspect the feed on the server. In particular a podcast found
       // through Folo must never be silently subscribed to the article pipeline.
       let resolved: Record<string, any> | undefined;
+      if (result.provider === "substack") {
+        resolved = await rssCall<Record<string, any>>(c.env, "/substack/resolve", { url: result.url });
+        if (resolved.access !== "free") return c.json({ error: resolved.access === "paid" ? "需要付费，暂时无法订阅此 Substack 刊物" : "无法确认刊物免费，暂时无法订阅" }, 403);
+        const feed = `https://${resolved.substack_subdomain}.substack.com/feed`;
+        resolved = { ...resolved, identity: `feed:${feed}`, feed_url: feed };
+      }
       if (result.provider === "folo" && !["youtube", "bilibili"].includes(result.platform)) {
         resolved = await rssCall<Record<string, any>>(c.env, "/source-inspect", { url: `https://app.folo.is/feed/${result.provider_id}`, token: c.env.FOLO_TOKEN || "" });
         if (resolved.kind === "media") result.kind = "media";

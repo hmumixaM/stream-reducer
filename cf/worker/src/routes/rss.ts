@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { requireAuth, type AppContext } from "../auth";
 import {
   followRss,
@@ -15,7 +16,7 @@ import {
 export const rssRoutes = new Hono<AppContext>();
 rssRoutes.use("*", requireAuth);
 rssRoutes.onError((error, c) =>
-  c.json({ error: error.message || "RSS 暂时不可用" }, 422),
+  c.json({ error: error.message || "RSS 暂时不可用" }, error instanceof HTTPException ? error.status : 422),
 );
 const positiveId = (value: string) => {
   const id = Number(value);
