@@ -213,7 +213,7 @@ def test_media_feed_can_validate_by_folo_identity(monkeypatch):
 
 def test_media_feed_uses_public_catalog_page_limit_and_preserves_audio_duration(monkeypatch):
     def cached(path, token=""):
-        assert "entriesLimit=20" in path
+        assert "entriesLimit=10" in path
         return {"feed": {"title": "Podcast"}, "entries": [{"id": "1", "url": "https://example.com/episode", "attachments": [{"url": "https://example.com/audio.m4a", "mime_type": "audio/mpeg", "duration_in_seconds": 1200}]}]}
     monkeypatch.setattr(s, "folo_api", cached)
     result = s.media_feed(s.SourceRequest(url="https://app.folo.is/feed/123"))

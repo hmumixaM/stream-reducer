@@ -626,7 +626,7 @@ def media_feed(req: SourceRequest):
         lookups.append({"url": "rsshub://" + parts.path.lstrip("/") + ("?" + parts.query if parts.query else "")})
     for lookup in lookups:
         try:
-            data = folo_api("/feeds?" + urlencode({**lookup, "entriesLimit": 20}), req.token)
+            data = folo_api("/feeds?" + urlencode({**lookup, "entriesLimit": 10}), req.token)
         except Exception:
             continue
         feed = data.get("feed") or {}
