@@ -198,7 +198,31 @@ def resolve(req: SourceRequest):
             return {"identity": "feed:" + clean_url(feed_url) if feed_url else "folo:" + fid,
                     "provider": "folo", "url": raw, "feed_url": feed_url, "folo_id": fid,
                     "title": feed.get("title") or feed_url or fid}
-        data, ctype, final = download(raw)
+        try:
+            data, ctype, final = download(raw)
+        except Exception as original_error:
+            # Folo's public catalog can supply a cached source even when an
+            # RSSHub instance blocks datacenter requests. This is a GET only:
+            # it never subscribes the account or spends a subscription slot.
+            candidates = [req.url.strip(), raw]
+            host = urlsplit(raw).hostname or ""
+            if "rsshub" in host and not req.url.startswith("rsshub://"):
+                parts = urlsplit(raw)
+                candidates.append("rsshub://" + parts.path.lstrip("/") + ("?" + parts.query if parts.query else ""))
+            for candidate in dict.fromkeys(candidates):
+                try:
+                    cached = folo_api("/feeds?" + urlencode({"url": candidate, "entriesLimit": 0}), req.token)
+                    feed = cached.get("feed") or {}
+                    if feed.get("type") != "feed" or feed.get("isPrivate"):
+                        continue
+                    address = public_url(raw)
+                    return {"identity": "feed:" + clean_url(address),
+                            "provider": "rsshub" if "rsshub" in host or req.url.startswith("rsshub://") else "rss",
+                            "url": raw, "feed_url": address, "folo_id": str(feed["id"]),
+                            "title": feed.get("title") or address}
+                except Exception:
+                    continue
+            raise original_error
         if "html" in ctype or data.lstrip().lower().startswith(b"<!doctype html"):
             soup = BeautifulSoup(data, "html.parser")
             candidates = soup.select('link[rel="alternate"][type="application/rss+xml"], link[rel="alternate"][type="application/atom+xml"]')

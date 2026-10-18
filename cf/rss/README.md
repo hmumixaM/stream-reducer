@@ -6,7 +6,9 @@ sources views. It uses `rss_*` D1 tables, `rss/` R2 objects and the two-consumer
 queues, global Browse, media Bulletin, search or knowledge graphs.
 
 The reader accepts RSS/Atom, website feed discovery, full RSSHub URLs,
-`rsshub://` routes, Folo feed/share URLs, and OPML. Multiple website feeds are
+`rsshub://` routes, Folo feed/share URLs, and OPML. If direct resolution
+fails (including RSSHub 403), public Folo catalog lookup can recover a cached
+source using GET requests without subscribing the account. Multiple website feeds are
 presented for selection. Follow categories, saved and read state are per user.
 The Folo import is bound to `FOLO_OWNER_EMAIL` and only imports public feeds in
 Articles (view 0). New follows exist exclusively in reducer; the integration

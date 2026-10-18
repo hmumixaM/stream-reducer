@@ -104,3 +104,21 @@ def test_canonical_requires_same_host_and_matching_saved_body(monkeypatch):
     monkeypatch.setattr(s,"download",lambda url,**k:(html,"text/html",url))
     r=s.extract(s.ExtractRequest(url="https://example.com/old"))
     assert r["canonical_url"]=="https://example.com/canonical"
+
+def test_rsshub_403_recovers_cached_public_feed_without_subscribing(monkeypatch):
+    monkeypatch.setattr(s,"download",lambda *a,**k:(_ for _ in ()).throw(s.UpstreamError(403)))
+    calls=[]
+    def catalog(path,token="",body=None):
+        calls.append((path,body))
+        return {"feed":{"type":"feed","id":"145342595547962368","title":"Anthropic Engineering","url":"rsshub://anthropic/engineering"}}
+    monkeypatch.setattr(s,"folo_api",catalog)
+    r=s.resolve(s.SourceRequest(url="rsshub://anthropic/engineering",token="free"))
+    assert r["folo_id"]=="145342595547962368"
+    assert r["feed_url"]=="https://rsshub.app/anthropic/engineering"
+    assert all(path.startswith('/feeds?') and body is None for path,body in calls)
+
+def test_full_rsshub_url_keeps_user_selected_instance_on_cached_fallback(monkeypatch):
+    monkeypatch.setattr(s,"download",lambda *a,**k:(_ for _ in ()).throw(s.UpstreamError(403)))
+    monkeypatch.setattr(s,"folo_api",lambda *a,**k:{"feed":{"type":"feed","id":"123","title":"A"}})
+    r=s.resolve(s.SourceRequest(url="https://rsshub.example.com/anthropic/engineering"))
+    assert r["feed_url"]=="https://rsshub.example.com/anthropic/engineering"
