@@ -1,3 +1,6 @@
+import { rssRoutes } from "./routes/rss";
+import { wakeRss, drainRss, pollRss, type RssMessage } from "./lib/rss";
+export { RssContainer } from "./lib/rss";
 import { Hono } from "hono";
 import type { Env, PipelineMessage } from "./env";
 import type { AppContext } from "./auth";
@@ -33,6 +36,7 @@ const app = new Hono<AppContext>();
 app.get("/api/health", (c) => c.json({ status: "ok", llm_model: c.env.LLM_MODEL, stt_model: c.env.STT_MODEL }));
 
 app.route("/api/auth", authRoutes);
+app.route("/api/rss", rssRoutes);
 // Folders live under /api/items/groups; register before the /:id catch-all.
 app.route("/api/items/groups", folderRoutes);
 // Comments/highlights (/api/items/:id/...) + the /api/annotations feed.
@@ -57,6 +61,7 @@ app.route("/oauth", oauthRoutes);
 app.all("/api/*", (c) => c.json({ error: "not found" }, 404));
 app.get("/media/*", async (c) => {
   const key = c.req.path.replace(/^\/media\/+/, "");
+  if (key.startsWith("rss/")) return c.json({error:"not found"},404);
   const object = key ? await c.env.MEDIA.get(key) : null;
   if (!object) return c.json({ error: "media not found" }, 404);
   const headers = new Headers();
@@ -85,10 +90,12 @@ export default {
   fetch: (request: Request, env: Env, ctx: ExecutionContext) => oauthProvider.fetch(request, env, ctx),
 
   // Pipeline queue consumer.
-  async queue(batch: MessageBatch<PipelineMessage>, env: Env): Promise<void> {
+  async queue(batch: MessageBatch<PipelineMessage | RssMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
       try {
-        await handleMessage(env, message.body, message.attempts, message.timestamp);
+        if(message.body.kind === "rss_drain") await drainRss(env);
+        else if(message.body.kind === "rss_poll") await pollRss(env,message.body.source_id,message.body.backfill);
+        else await handleMessage(env, message.body, message.attempts, message.timestamp);
         message.ack();
       } catch (err) {
         console.error("pipeline message failed", message.body, err);
@@ -101,6 +108,7 @@ export default {
 
   // Cron: poll subscriptions (every 15m) + nightly graph rebuild (04:00 UTC).
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    try { await wakeRss(env); } catch(error) { console.error("RSS scheduler failed",error); }
     await wakeBulletinWorkers(env);
     if (controller.cron === "0 4 * * *") {
       await env.PIPELINE.send({ kind: "graph_build", force: false });

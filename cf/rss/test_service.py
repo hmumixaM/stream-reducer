@@ -1,0 +1,94 @@
+import importlib.util
+import pathlib
+import socket
+import pytest
+import pymupdf
+from fastapi import HTTPException
+
+spec = importlib.util.spec_from_file_location("rss_service", pathlib.Path(__file__).with_name("service.py"))
+s = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(s)
+
+@pytest.mark.parametrize("url", ["http://localhost/a", "http://example.local/x", "ftp://example.com", "https://user:pw@example.com", "https://example.com/?token=secret", "https://example.com:8080/feed"])
+def test_reject_unsafe_urls(url):
+    with pytest.raises(ValueError): s.public_url(url)
+
+def test_redirect_and_dns_rebinding_are_checked(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(2,1,6,"",("127.0.0.1",80))])
+    with pytest.raises(ValueError, match="非公开"): s.download("https://public.example/feed")
+
+def test_rss_keeps_content_and_filters_audio_but_not_pdf():
+    xml=b'''<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><title>News</title><item><title>Full</title><link>https://example.com/a?utm_source=x</link><description>Intro</description><content:encoded><![CDATA[<p>Full article text.</p>]]></content:encoded><enclosure url="https://example.com/r.pdf" type="application/pdf"/></item><item><title>Audio</title><link>https://example.com/b</link><enclosure url="https://example.com/a.mp3" type="audio/mpeg"/></item></channel></rss>'''
+    feed=s.parse_feed(xml,"https://example.com/feed")
+    assert len(feed["entries"])==1
+    assert feed["entries"][0]["content_is_full"]
+    assert feed["entries"][0]["url"]=="https://example.com/a"
+
+def test_atom_relative_links_and_missing_date():
+    feed=s.parse_feed(b'<feed xmlns="http://www.w3.org/2005/Atom"><title>Atom</title><entry><title>A</title><link href="/a"/><content type="html">Full content</content></entry></feed>',"https://example.com/feed")
+    assert feed["entries"][0]["url"]=="https://example.com/a"
+    assert feed["entries"][0]["published_at"] is None
+
+def test_multiple_feed_choices_not_silently_selected(monkeypatch):
+    monkeypatch.setattr(s,"download",lambda *a,**k:(b'<html><link rel="alternate" type="application/rss+xml" href="/one"/><link rel="alternate" type="application/atom+xml" href="/two"/></html>',"text/html","https://example.com/"))
+    assert len(s.resolve(s.SourceRequest(url="https://example.com"))["choices"])==2
+
+def test_short_full_news_does_not_require_long_text(monkeypatch):
+    monkeypatch.setattr(s,"download",lambda *a,**k: (_ for _ in ()).throw(ValueError("offline")))
+    result=s.extract(s.ExtractRequest(url="https://example.com/a",content="<p>发布了三个新的功能，包括列表、搜索与收藏。</p>",content_is_full=True))
+    assert result["completeness"]=="full"
+
+def test_excerpt_is_never_promoted_when_both_providers_fail(monkeypatch):
+    monkeypatch.setattr(s,"download",lambda *a,**k: (_ for _ in ()).throw(ValueError("HTTP 503")))
+    result=s.extract(s.ExtractRequest(url="https://example.com/a",content="<p>This short article is an excerpt. Read the full article.</p>",content_is_full=True,folo_entry_id="123"))
+    assert result["completeness"]=="partial"
+    assert "Read the full" in result["text"]
+
+def test_folo_readability_upgrades_excerpt(monkeypatch):
+    monkeypatch.setattr(s,"folo_api",lambda *a,**k:{"content":"<p>Original evidence includes a new result. The measured rate was 32 percent and the report explains its limitations.</p>"})
+    result=s.extract(s.ExtractRequest(url="https://example.com/a",content="Read the full article",folo_entry_id="123"))
+    assert result["completeness"]=="full"
+    assert result["method"]=="folo_readability"
+
+def test_text_pdf_and_scanned_pdf():
+    pdf=pymupdf.open();p=pdf.new_page();p.insert_text((30,40),"Public report evidence and methods. "*8)
+    text,quality,kind=s.document(pdf.tobytes(),"application/pdf","https://example.com/r.pdf")
+    assert kind=="pdf" and quality=="full" and "第 1 页" in text
+    blank=pymupdf.open();blank.new_page()
+    with pytest.raises(ValueError,match="扫描件"):s.document(blank.tobytes(),"application/pdf","https://example.com/r.pdf")
+
+def test_explicit_pdf_report_in_full_feed_is_extracted(monkeypatch):
+    pdf=pymupdf.open();p=pdf.new_page();p.insert_text((30,40),"Full report evidence and limitations. "*8)
+    calls=[]
+    def download(url,**kwargs): calls.append(url);return pdf.tobytes(),"application/pdf",url
+    monkeypatch.setattr(s,"download",download)
+    r=s.extract(s.ExtractRequest(url="https://example.com/post",content='<p>Overview.</p><a href="/full.pdf">English PDF version</a>',content_is_full=True))
+    assert calls==["https://example.com/full.pdf"]
+    assert r["method"]=="pdf"
+
+def test_auth_failure_falls_back_with_reconnect_status(monkeypatch):
+    monkeypatch.setattr(s,"folo_api",lambda *a,**k:(_ for _ in ()).throw(s.UpstreamError(401)))
+    monkeypatch.setattr(s,"download",lambda *a,**k:(b'<rss version="2.0"><channel><title>A</title></channel></rss>',"application/xml","https://example.com/feed"))
+    r=s.poll(s.PollRequest(feed_url="https://example.com/feed",folo_id="123",since="2026-07-18"))
+    assert r["provider"]=="rss" and r["auth_error"]
+
+def test_rate_limit_retry_after_survives_fallback(monkeypatch):
+    monkeypatch.setattr(s,"folo_api",lambda *a,**k:(_ for _ in ()).throw(s.UpstreamError(429,"120")))
+    monkeypatch.setattr(s,"download",lambda *a,**k:(b'<rss version="2.0"><channel><title>A</title></channel></rss>',"application/xml","https://example.com/feed"))
+    assert s.poll(s.PollRequest(feed_url="https://example.com/feed",folo_id="123",since="2026-07-18"))["retry_after"]=="120"
+
+def test_folo_history_boundary_and_description_not_full(monkeypatch):
+    rows=[{"entries":{"id":str(i),"url":f"https://example.com/{i}","title":"A","publishedAt":"2026-07-01T00:00:00Z" if i==99 else "2026-08-01T00:00:00Z","content":"excerpt","description":"excerpt"}} for i in range(100)]
+    monkeypatch.setattr(s,"folo_api",lambda *a,**k:rows)
+    r=s.poll(s.PollRequest(folo_id="123",since="2026-07-18T00:00:00Z"))
+    assert r["coverage"]=="reached_since" and r["next_before"] is None
+    assert len(r["entries"])==99 and not r["entries"][0]["content_is_full"]
+
+def test_opml_categories_and_private_urls():
+    r=s.opml(s.OpmlRequest(text='<opml><body><outline text="AI"><outline text="News" xmlUrl="rsshub://news/a"/><outline text="Private" xmlUrl="https://example.com/feed?token=x"/></outline></body></opml>'))
+    assert r["sources"][0]["category"]=="AI" and r["skipped"]==1
+    with pytest.raises(HTTPException):s.opml(s.OpmlRequest(text='<!DOCTYPE x><opml/>'))
+
+@pytest.mark.parametrize("url",["https://app.folo.is/timeline/articles/all/123","https://app.folo.is/timeline/articles/all/pending","https://app.folo.is/list/123"])
+def test_folo_article_and_list_links_not_feed(url):
+    with pytest.raises(ValueError):s.folo_id(url)

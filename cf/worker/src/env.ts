@@ -1,3 +1,4 @@
+import type { RssContainer, RssMessage } from "./lib/rss";
 import type { PipelineContainer } from "./pipeline/container";
 import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 
@@ -26,6 +27,14 @@ export interface Env {
   ITEM_JOBS: Queue<PipelineMessage>;
   BULLETIN_JOBS: Queue<PipelineMessage>;
   PIPELINE_CONTAINER: DurableObjectNamespace<PipelineContainer>;
+
+  RSS_CONTAINER: DurableObjectNamespace<RssContainer>;
+  RSS_JOBS: Queue<RssMessage>;
+  RSS_ENABLED?: string;
+  RSS_CONTAINER_GEN?: string;
+  RSSHUB_BASE_URL?: string;
+  FOLO_TOKEN?: string;
+  FOLO_OWNER_EMAIL?: string;
 
   // Email (magic link)
   EMAIL: SendEmail;

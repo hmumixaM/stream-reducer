@@ -97,9 +97,11 @@
     "producers": [
       { "binding": "PIPELINE", "queue": "stream-reduce-pipeline" },
       { "binding": "ITEM_JOBS", "queue": "stream-reduce-items" },
-      { "binding": "BULLETIN_JOBS", "queue": "stream-reduce-bulletins" }
+      { "binding": "BULLETIN_JOBS", "queue": "stream-reduce-bulletins" },
+      { "binding": "RSS_JOBS", "queue": "stream-reduce-rss" }
     ],
     "consumers": [
+      { "queue": "stream-reduce-rss", "max_batch_size": 1, "max_concurrency": 2, "max_retries": 5 },
       {
         // Item processing chain (`process` messages) only. On the shared
         // pipeline queue each continuation waited behind ~17k polls, about 12
@@ -149,6 +151,7 @@
   // --- Container: Python pipeline (yt-dlp + ffmpeg + summarize) ---
   // Controlled per-instance through the PipelineContainer Durable Object.
   "containers": [
+    { "class_name": "RssContainer", "image": "../rss/Dockerfile", "image_build_context": "../rss", "instance_type": "basic", "max_instances": 2 },
     {
       "class_name": "PipelineContainer",
       "image": "../pipeline/Dockerfile",
@@ -179,12 +182,14 @@
 
   "durable_objects": {
     "bindings": [
-      { "class_name": "PipelineContainer", "name": "PIPELINE_CONTAINER" }
+      { "class_name": "PipelineContainer", "name": "PIPELINE_CONTAINER" },
+      { "class_name": "RssContainer", "name": "RSS_CONTAINER" }
     ]
   },
 
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["PipelineContainer"] }
+    { "tag": "v1", "new_sqlite_classes": ["PipelineContainer"] },
+    { "tag": "v2-rss", "new_sqlite_classes": ["RssContainer"] }
   ],
 
   // --- Email Service: magic-link sign-in ---
@@ -196,6 +201,10 @@
   },
 
   "vars": {
+    "RSS_ENABLED": "true",
+    "RSS_CONTAINER_GEN": "1",
+    "RSSHUB_BASE_URL": "https://rsshub.app",
+    "FOLO_OWNER_EMAIL": "huyangmax@gmail.com",
     "APP_ORIGIN": "https://reducer.xgoose.org",
     "EMAIL_FROM": "noreply@xgoose.org",
     // OpenAI-compatible LiteLLM deployment. Its gemini-3.7-flash alias routes

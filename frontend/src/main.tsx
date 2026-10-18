@@ -26,6 +26,8 @@ const named = <T extends string>(
   return route;
 };
 
+const Rss = named(() => import("@/pages/Rss"), "Rss");
+const RssDetail = named(() => import("@/pages/RssDetail"), "RssDetail");
 const Timeline = named(() => import("@/pages/Timeline"), "Timeline");
 const Library = named(() => import("@/pages/Library"), "Library");
 const Browse = named(() => import("@/pages/Browse"), "Browse");
@@ -193,6 +195,8 @@ const router = createBrowserRouter([
       { path: "subscriptions", element: <Subscriptions /> },
       { path: "channels/:id", element: <ChannelDetail /> },
       // Personal pages require a session.
+      { path: "rss", element: <RequireAuth><Rss /></RequireAuth> },
+      { path: "rss/articles/:id", element: <RequireAuth><RssDetail /></RequireAuth> },
       { path: "research", element: <RequireAuth><Research /></RequireAuth> },
       { path: "dossiers/:slug", element: <RequireAuth><Dossier /></RequireAuth> },
       { path: "research/briefs/:id", element: <RequireAuth><ResearchBrief /></RequireAuth> },

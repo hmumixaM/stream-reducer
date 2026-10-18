@@ -54,6 +54,7 @@ const NAV: {
   { to: "/bulletin", label: "Bulletin", icon: Newspaper, section: "main" },
   { to: MIRROR ? "/" : "/timeline", label: "Source feed", icon: Clock, section: "main", end: true },
   { to: "/research", label: "Agents", icon: Radar, section: "main" },
+  { to: "/rss", label: "RSS", icon: Rss, section: "main" },
   { to: "/subscriptions", label: "Sources", icon: Rss, section: "main" },
   { to: "/library", label: "Knowledge base", icon: Bookmark, section: "main" },
   { to: "/browse", label: "Browse", icon: Compass, section: "discover" },
