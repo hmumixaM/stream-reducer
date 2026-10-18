@@ -122,3 +122,14 @@ def test_full_rsshub_url_keeps_user_selected_instance_on_cached_fallback(monkeyp
     monkeypatch.setattr(s,"folo_api",lambda *a,**k:{"feed":{"type":"feed","id":"123","title":"A"}})
     r=s.resolve(s.SourceRequest(url="https://rsshub.example.com/anthropic/engineering"))
     assert r["feed_url"]=="https://rsshub.example.com/anthropic/engineering"
+
+def test_history_uses_folo_older_page_cursor_despite_parameter_name(monkeypatch):
+    calls=[]
+    def api(path,token="",body=None):
+        calls.append(body)
+        return [{"entries":{"id":"1","url":"https://example.com/history","title":"Old","publishedAt":"2026-08-01T00:00:00Z","content":"A complete historical article."}}]
+    monkeypatch.setattr(s,"folo_api",api)
+    r=s.poll(s.PollRequest(folo_id="123",before="2026-09-02T12:00:00.381Z",since="2026-07-18T00:00:00Z"))
+    assert calls[0]["publishedAfter"]=="2026-09-02T12:00:00.381Z"
+    assert "publishedBefore" not in calls[0]
+    assert r["entries"][0]["published_at"].startswith("2026-08-01")

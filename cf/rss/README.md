@@ -45,7 +45,9 @@ alternative. The import endpoints never return authentication material.
 
 Polling runs every 30 minutes (on the existing 15-minute scheduler), first reads
 Folo if a matching cached feed ID is available, and falls back to the original
-feed. A separate saved cursor backfills three calendar months, newest first.
+feed. A separate saved cursor backfills three calendar months, newest first. Folo
+names its older-page cursor `publishedAfter`; `publishedBefore` returns newer
+entries and must not be used for historical paging (verified against live data).
 R2 discovery snapshots and DB links are persisted before advancing that cursor.
 The history status `complete` requires reaching the time boundary; exhaustion,
 feed-window limitations and stalled timestamp pagination are explicitly `gap`.

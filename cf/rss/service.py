@@ -262,7 +262,9 @@ def poll(req: PollRequest):
             query = {"feedId": req.folo_id, "limit": 100, "withContent": True,
                      "excludePrivate": True}
             if req.before:
-                query["publishedBefore"] = req.before
+                # Folo names the older-page cursor publishedAfter (as used by
+                # its official CLI), despite the ordinary meaning of the name.
+                query["publishedAfter"] = req.before
             rows = folo_api("/entries", req.token, query)
             entries = []
             for row in rows:
