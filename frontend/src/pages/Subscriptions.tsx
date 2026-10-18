@@ -10,6 +10,8 @@ import {
 import { Compass, Rss, Search } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { ChannelCard } from "@/components/ChannelCard";
+import { rssApi, type RssSource, type RssStatus } from "@/lib/rss";
+import { FollowedArticleRow, articleSourceHasError } from "@/components/FollowedArticleRow";
 import { ChannelRow } from "@/components/ChannelRow";
 import { SourceDiscovery } from "@/components/SourceDiscovery";
 import { Button, Card, Input, Spinner } from "@/components/ui";
@@ -223,10 +225,12 @@ function AddChannelDialog({
   );
 }
 
-type FollowFilter = "all" | "errors";
+type FollowFilter = "all" | "errors" | "media" | "articles";
 const FOLLOW_FILTER_LABELS: Record<FollowFilter, string> = {
   all: "All",
   errors: "Errors",
+  media: "视频 / 播客",
+  articles: "RSS / Substack",
 };
 
 function FollowingChannels({
@@ -236,6 +240,7 @@ function FollowingChannels({
   groups: Group[];
   onDiscover: () => void;
 }) {
+  const me = useMe();
   const [filter, setFilter] = useState<FollowFilter>("all");
   const [query, setQuery] = useState("");
   const [polling, setPolling] = useState(0);
@@ -243,7 +248,7 @@ function FollowingChannels({
     polling > 0 ? FOLLOW_REFETCH_ACTIVE_MS : FOLLOW_REFETCH_MS;
 
   const channels = useInfiniteQuery({
-    queryKey: ["channels", "following"],
+    queryKey: ["channels", "following", me.data?.user?.id],
     queryFn: ({ pageParam }) =>
       api.listChannels({
         following: true,
@@ -255,18 +260,33 @@ function FollowingChannels({
       lastPage.length === PAGE_SIZE ? pages.length * PAGE_SIZE : undefined,
     refetchInterval,
   });
+  const articles = useQuery({
+    queryKey: ["rss", "sources", me.data?.user?.id],
+    queryFn: () => rssApi<RssSource[]>("/sources"),
+    refetchInterval: FOLLOW_REFETCH_MS,
+  });
+  const rssStatus = useQuery({
+    queryKey: ["rss", "status", me.data?.user?.id],
+    queryFn: () => rssApi<RssStatus>("/status"),
+    refetchInterval: 30000,
+  });
+  const articleRows = articles.data ?? [];
   const rows = channels.data?.pages.flat() ?? [];
 
   const counts = useMemo(
     () => ({
-      all: rows.length,
+      all: rows.length + articleRows.length,
+      media: rows.length,
+      articles: articleRows.length,
       errors: rows.filter((channel) => channel.follow?.last_status === "error")
-        .length,
+        .length + articleRows.filter(articleSourceHasError).length,
     }),
-    [rows],
+    [rows, articleRows],
   );
   const search = query.trim().toLowerCase();
+  const visibleArticles = articleRows.filter(source => filter !== "media" && (filter !== "errors" || articleSourceHasError(source)) && `${source.title} ${source.url} ${source.category}`.toLowerCase().includes(search));
   const visible = rows.filter((channel) => {
+    if (filter === "articles") return false;
     if (filter === "errors" && channel.follow?.last_status !== "error")
       return false;
     if (!search) return true;
@@ -276,10 +296,10 @@ function FollowingChannels({
   const trackPoll = (pending: boolean) =>
     setPolling((count) => Math.max(0, count + (pending ? 1 : -1)));
 
-  if (channels.isLoading) {
+  if (channels.isLoading || articles.isLoading) {
     return <LoadingState label="Loading followed channels…" />;
   }
-  if (!channels.isError && counts.all === 0) {
+  if (!channels.isError && !articles.isError && counts.all === 0) {
     return (
       <EmptyState
         icon={<Rss className="h-5 w-5" />}
@@ -310,7 +330,7 @@ function FollowingChannels({
           )}
         </p>
         <label className="relative ml-auto min-w-[180px] max-w-xs flex-1">
-          <span className="sr-only">Filter followed channels</span>
+          <span className="sr-only">Filter followed sources</span>
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             value={query}
@@ -339,13 +359,17 @@ function FollowingChannels({
           onRetry={() => channels.refetch()}
         />
       )}
-      {visible.length === 0 ? (
+      {articles.isError && <ErrorState message={`文章来源加载失败：${articles.error.message}`} onRetry={() => articles.refetch()} />}
+      {rssStatus.isError && <ErrorState message="无法读取自动更新状态" onRetry={() => rssStatus.refetch()} />}
+      {rssStatus.data && (!rssStatus.data.enabled || rssStatus.data.paused) && <p role="status" className="text-sm text-warning">RSS / Substack 自动更新已暂停，请管理员恢复。</p>}
+      {visible.length === 0 && visibleArticles.length === 0 ? (
         <EmptyState
           title="No follows match this view"
           description="Clear the filter or search to see the rest of your channels."
         />
       ) : (
         <div className="space-y-2">
+          {visibleArticles.map(source => <FollowedArticleRow key={`article:${source.id}`} source={source} paused={Boolean(rssStatus.data && (!rssStatus.data.enabled || rssStatus.data.paused))} />)}
           {visible.map((channel) => (
             <ChannelRow
               key={channel.id}

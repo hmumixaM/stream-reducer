@@ -413,6 +413,22 @@ describe("RSS access boundaries", () => {
         .status,
     ).toBe(401);
   });
+  it("lists every personal article follow with poll health, without exposing other users' sources", async () => {
+    const s = setup();
+    await add(s);
+    await followRss(s.env, 2, { ...source, identity: "feed:https://private.example/feed", url: "https://private.example/feed", title: "Other user source" });
+    const owner = await appFor(s, 1), stranger = await appFor(s, 2);
+    s.db.exec("UPDATE rss_source SET last_checked_at='2026-10-18T20:00:00Z',next_poll_at='2026-10-18T20:30:00Z',poll_count=3 WHERE id=1");
+    const ownRows = await (await owner("/sources")).json();
+    expect(ownRows).toHaveLength(1);
+    expect(ownRows[0]).toMatchObject({ id: 1, title: "Example", article_count: 1, latest_published_at: "2026-10-18T00:00:00Z", poll_count: 3, next_poll_at: "2026-10-18T20:30:00Z" });
+    expect((await (await stranger("/sources")).json()).map(x => x.title)).toEqual(["Other user source"]);
+    s.env.RSS_JOBS.send.mockClear();
+    expect((await stranger("/sources/1/refresh", "POST", {})).status).toBe(404);
+    expect(s.env.RSS_JOBS.send).not.toHaveBeenCalled();
+    expect((await owner("/sources/1/refresh", "POST", {})).status).toBe(200);
+    expect(s.env.RSS_JOBS.send).toHaveBeenCalledWith({ kind: "rss_poll", source_id: 1 });
+  });
   it("read and saved state belongs only to the requesting user", async () => {
     const s = setup();
     await add(s);

@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const errors = [], calls = [];
+let refreshed = false, removed = false, sourceFailure = false;
+page.on('pageerror', e => errors.push(e.message));
+const source = (id, title, provider) => ({ id, title, provider, url: `https://${id}.example.com`, category: 'AI', image_url: null, site_url: null, feed_url: `https://${id}.example.com/feed`, article_count: id === 1 ? 20 : 2, last_checked_at: refreshed ? new Date().toISOString() : '2026-10-18T20:00:00Z', next_poll_at: '2099-01-01T00:00:00Z', poll_count: refreshed ? 2 : 1, success_count: 1, last_error: null, auth_error: 0, lease_until: null, backfill_status: 'gap', connection_status: null, connection_enabled: null, latest_published_at: '2026-10-18T19:00:00Z' });
+await page.route('**/api/**', async route => {
+  const req = route.request(), u = new URL(req.url());
+  if (u.pathname === '/api/auth/me') return route.fulfill({ json: { user: { id: 1, email: 'qa@example.com', preferred_language: 'zh', is_admin: 0 } } });
+  if (u.pathname === '/api/rss/sources') return sourceFailure ? route.fulfill({ status: 502, json: { error: 'temporary RSS failure' } }) : route.fulfill({ json: [source(1, 'a16z', 'substack'), ...(removed ? [] : [source(2, 'RSS newsletter', 'rss')])] });
+  if (u.pathname === '/api/rss/status') return route.fulfill({ json: { enabled: true, paused: false, counts: [] } });
+  if (u.pathname.endsWith('/refresh')) { calls.push(u.pathname); refreshed = true; return route.fulfill({ json: { queued: true } }); }
+  if (u.pathname === '/api/rss/sources/2' && req.method() === 'DELETE') { removed = true; return route.fulfill({ json: { ok: true } }); }
+  return route.fulfill({ json: [] });
+});
+await page.goto(`${process.env.FRONTEND_URL || 'http://127.0.0.1:5198'}/subscriptions?tab=following`);
+await page.getByRole('link', { name: 'a16z', exact: true }).waitFor();
+await page.getByRole('link', { name: 'RSS newsletter', exact: true }).waitFor();
+assert.equal(await page.getByText('You are not following any channels', { exact: true }).count(), 0);
+assert.equal(await page.getByText('20 篇文章', { exact: false }).count(), 1);
+await page.getByRole('button', { name: '检查更新', exact: true }).first().click();
+assert(calls.includes('/api/rss/sources/1/refresh'));
+await page.getByRole('textbox', { name: 'Filter followed sources' }).fill('a16z');
+assert.equal(await page.getByRole('link', { name: 'RSS newsletter', exact: true }).count(), 0);
+await page.getByRole('textbox', { name: 'Filter followed sources' }).fill('');
+await page.getByRole('button', { name: '视频 / 播客', exact: false }).click();
+await page.getByText('No follows match this view', { exact: true }).waitFor();
+await page.getByRole('button', { name: 'RSS / Substack', exact: false }).click();
+await page.getByRole('link', { name: 'a16z', exact: true }).waitFor();
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(350);
+assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+await page.getByRole('button', { name: '取消关注', exact: true }).last().click();
+await page.getByRole('link', { name: 'RSS newsletter', exact: true }).waitFor({ state: 'detached' });
+sourceFailure = true;
+await page.reload();
+await page.getByText('文章来源加载失败：temporary RSS failure', { exact: false }).waitFor();
+assert.equal(await page.getByText('You are not following any channels', { exact: true }).count(), 0);
+assert.deepEqual(errors, []);
+console.log(JSON.stringify({ rssAndSubstackFollowing: true, noMediaEmptyState: true, searchAndTypeFilters: true, refresh: true, unfollow: true, sourceErrorsVisible: true, mobileOverflow: false, pageErrors: errors }));
+await browser.close();

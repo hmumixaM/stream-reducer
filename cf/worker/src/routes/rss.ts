@@ -76,7 +76,11 @@ rssRoutes.post("/control", async (c) => {
 });
 rssRoutes.get("/sources", async (c) => {
   const rows = await c.env.DB.prepare(
-    `SELECT s.*,f.category,(SELECT count(*) FROM rss_source_article sa WHERE sa.source_id=s.id) article_count
+    `SELECT s.*,f.category,(SELECT count(*) FROM rss_source_article sa WHERE sa.source_id=s.id) article_count,
+    (SELECT max(a.published_at) FROM rss_source_article sa JOIN rss_article a ON a.id=sa.article_id WHERE sa.source_id=s.id) latest_published_at,
+    (SELECT label FROM substack_connection c WHERE c.id=s.substack_connection_id) connection_label,
+    (SELECT status FROM substack_connection c WHERE c.id=s.substack_connection_id) connection_status,
+    (SELECT enabled FROM substack_connection c WHERE c.id=s.substack_connection_id) connection_enabled
     FROM rss_source s JOIN rss_follow f ON f.source_id=s.id WHERE f.user_id=? ORDER BY f.category,s.title`,
   )
     .bind(c.get("user").id)

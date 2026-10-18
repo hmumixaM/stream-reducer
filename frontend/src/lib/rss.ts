@@ -20,6 +20,13 @@ export interface RssSource {
   provider: string;
   actual_provider: string | null;
   last_checked_at: string | null;
+  next_poll_at: string;
+  lease_until: string | null;
+  latest_published_at: string | null;
+  connection_label: string | null;
+  connection_status: string | null;
+  connection_enabled: number | null;
+  substack_connection_id?: string | null;
   last_error: string | null;
   earliest_at: string | null;
   backfill_since: string;
