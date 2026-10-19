@@ -10,3 +10,16 @@ export async function validGatewayBearer(header: string | null, masterKey: strin
   const expectedKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(masterKey), algorithm, false, ["verify"]);
   return crypto.subtle.verify("HMAC", expectedKey, signature, challenge);
 }
+
+/** Preserve LiteLLM's credential-header precedence for its supported SDKs. */
+export async function validGatewayAuth(headers: Headers, masterKey: string): Promise<boolean> {
+  const custom = headers.get("x-litellm-api-key");
+  if (custom) return validGatewayBearer(/^Bearer\s/i.test(custom) ? custom : `Bearer ${custom}`, masterKey);
+  const authorization = headers.get("authorization");
+  if (authorization) return validGatewayBearer(authorization, masterKey);
+  for (const name of ["api-key", "x-api-key", "x-goog-api-key", "ocp-apim-subscription-key"]) {
+    const value = headers.get(name);
+    if (value !== null) return validGatewayBearer(`Bearer ${value}`, masterKey);
+  }
+  return false;
+}

@@ -1,5 +1,5 @@
 import { Container, getContainer } from "@cloudflare/containers";
-import { validGatewayBearer } from "./auth";
+import { validGatewayAuth } from "./auth";
 
 interface Env {
   LITELLM: DurableObjectNamespace<LiteLLMContainer>;
@@ -80,7 +80,7 @@ export class LiteLLMContainer extends Container<Env> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Authenticate before starting a billable container or querying user state.
-    if (!(await validGatewayBearer(request.headers.get("authorization"), env.LITELLM_MASTER_KEY))) {
+    if (!(await validGatewayAuth(request.headers, env.LITELLM_MASTER_KEY))) {
       return new Response(JSON.stringify({ error: { message: "Unauthorized" } }), {
         status: 401,
         headers: { "content-type": "application/json" },
