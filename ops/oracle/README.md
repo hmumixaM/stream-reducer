@@ -24,3 +24,26 @@ Use vendor repositories with signature verification for host updates. Review
 third-party repository errors separately; do not bypass GPG checks. Installing
 packages does not replace the running kernel or every daemon's loaded library.
 Review reboot requirements and coordinate interruption of audio/model work.
+
+## Firewall and container runtime updates
+
+The host's old CentOS 8 Docker repository stopped at Engine 26. Use Docker's
+official **RHEL 8 / aarch64** repository for compatible maintained EL8 RPMs,
+with GPG checking enabled. Do not substitute EL9 RPMs or bypass signatures.
+
+The permanent firewalld direct rule must include its chain declaration:
+
+```sh
+firewall-cmd --permanent --direct --add-chain ipv4 filter DOCKER-USER
+firewall-cmd --permanent --direct --add-rule ipv4 filter DOCKER-USER 0 \
+  -i enp0s3 -m conntrack --ctstate NEW -j DROP
+```
+
+An old firewalld process can lose Docker forwarding/NAT rules during host
+updates. Declare the chain before reloading firewalld, then allow Docker's
+reload callback to rebuild bridge/NAT/isolation rules. Verify internal relay
+connectivity and actual provider calls, in addition to container health.
+Keep the public-interface NEW-connection guard and internal-network isolation.
+`live-restore` preserves processes for compatible daemon restarts; a major
+runtime upgrade or kernel reboot still requires a coordinated maintenance
+window. Do not promise uninterrupted requests across that window.
