@@ -164,7 +164,6 @@ export function Layout() {
   const initialMetadata = useRef(true);
   useLayoutEffect(() => {
     if (initialMetadata.current) { initialMetadata.current = false; return; }
-    document.getElementById("public-source-content")?.remove();
     if (/^\/(items|bulletin|rss\/articles)\/\d+$/.test(location.pathname) || location.pathname === "/articles") return;
     const publicPage = location.pathname === "/" || location.pathname === "/browse";
     document.getElementById("seo-schema")?.remove();

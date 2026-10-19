@@ -240,10 +240,15 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
     }<h2 class="text-xl font-semibold mt-8">Detailed notes</h2>${renderNotes(item.markdown)}</article>`;
     page.markdown = `# ${item.headline || item.title}\n\n${item.subhead || ""}\n\nSource: [${item.title}](${safeSource(item.source_url)})\nSource creator: ${item.author || item.platform}\n${item.published_at ? `Source published: ${item.published_at}\n` : ""}Canonical: ${page.canonical}\n\nAI-assisted summary; check the original for full context.\n\n${item.markdown}`;
     if (page.image)
-      page.body = page.body.replace(
-        "</h1>",
-        `</h1><figure class="my-6"><img src="${escapeHtml(page.image)}" alt="${escapeHtml(item.title)} — ${escapeHtml(item.author || item.platform)}" loading="eager" decoding="async" class="w-full rounded-lg"/><figcaption>${escapeHtml(item.title)} — ${escapeHtml(item.author || item.platform)}</figcaption></figure>`,
-      );
+      page.body = page.body
+        .replace(
+          '<h1 class="text-3xl font-semibold mb-4">',
+          '<div class="source-heading mb-4"><h1 class="text-3xl font-semibold">',
+        )
+        .replace(
+          "</h1>",
+          `</h1><a class="source-cover" href="${escapeHtml(safeSource(item.source_url))}"><img src="${escapeHtml(page.image)}" alt="${escapeHtml(item.title)} — ${escapeHtml(item.author || item.platform)}" width="160" height="90" loading="eager" decoding="async"/></a></div>`,
+        );
     const extra = await mediaContent(env, item);
     page.supplemental = extra.html;
     page.markdown += "\n\n" + extra.markdown;
@@ -461,22 +466,11 @@ export async function serveSeo(request: Request, env: Env): Promise<Response> {
         e.append(pageHead(page), { html: true });
       },
     })
-    .on("body", {
-      element(e) {
-        // This accessible reading section survives the SPA replacing #root.
-        // All visitors can open it; crawlers get the same complete content.
-        if (page.supplemental)
-          e.append(
-            `<details id="public-source-content" class="mx-auto max-w-4xl break-words px-6 py-8"><summary class="cursor-pointer font-semibold">Full reading content and available editions</summary>${page.supplemental}</details>`,
-            { html: true },
-          );
-      },
-    })
     .on("#root", {
       element(e) {
         if (page.body)
           e.setInnerContent(
-            `<main class="mx-auto max-w-4xl break-words px-6 py-12">${page.body}</main>`,
+            `<main class="mx-auto max-w-4xl break-words px-6 py-12">${page.body}${page.supplemental || ""}</main>`,
             { html: true },
           );
       },

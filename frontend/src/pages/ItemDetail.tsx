@@ -1,3 +1,4 @@
+import { SourceCover } from "@/components/SourceCover";
 import { useArticleMetadata } from "@/lib/seo";
 import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -194,14 +195,15 @@ export function ItemDetail() {
     <div className={cn("screen-only", readMode ? "mx-auto max-w-3xl" : "")}>
       <BackLink to={backTo.to} label={backTo.label} />
 
-      <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0 flex-1">
+      <div className="mb-5 flex flex-col gap-4">
+        <div className="source-heading">
+          <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <PlatformBadge platform={d.platform} />
             <StatusBadge status={d.status} />
           </div>
           <h1 className="text-display font-semibold leading-tight">{d.title || d.source_url}</h1>
-          {d.thumbnail && <figure className="my-6"><img src={d.thumbnail} alt={`${d.title} — ${d.author || d.platform}`} loading="eager" decoding="async" className="w-full max-w-2xl rounded-lg"/><figcaption className="mt-2 text-xs text-muted-foreground">{d.title} — {d.author || d.platform}</figcaption></figure>}
+
           {d.channel ? (
             <Link
               to={`/channels/${d.channel.id}`}
@@ -215,9 +217,10 @@ export function ItemDetail() {
           ) : (
             d.author && <p className="mt-1 text-sm text-muted-foreground">{d.author}</p>
           )}
+          </div>
+          <SourceCover src={d.thumbnail} title={d.title || d.source_url} author={d.author} href={d.source_url} />
         </div>
-        {/* Capped so a long action row wraps instead of squeezing the title. */}
-        <div className="flex flex-wrap gap-2 md:max-w-[55%] md:justify-end">
+        <div className="flex flex-wrap gap-2">
           {!readMode && canEdit && (
             <>
               <Button

@@ -410,3 +410,14 @@
   .reading-print pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   .reading-print a { color: inherit; }
 }
+
+/* Source artwork supports the heading without becoming a second hero. */
+.source-heading { display: flex; align-items: flex-start; gap: clamp(16px, 3vw, 32px); }
+.source-heading > :first-child { flex: 1; min-width: 0; }
+.source-cover { display: block; flex: 0 0 160px; width: 160px; overflow: hidden; border: 1px solid hsl(var(--border) / .65); border-radius: 6px; background: hsl(var(--muted) / .35); }
+.source-cover img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: contain; }
+.source-cover:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 4px; }
+@media (max-width: 640px) {
+  .source-cover { flex-basis: 88px; width: 88px; margin-top: 3px; }
+  .source-heading { gap: 16px; }
+}
