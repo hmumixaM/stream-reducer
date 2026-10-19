@@ -68,11 +68,21 @@ export class LiteLLMContainer extends Container<Env> {
 
   override async fetch(request: Request): Promise<Response> {
     // The old SDK's default startup window can reject a healthy cold boot.
-    await this.startAndWaitForPorts(4000, {
+    const waitUntilReady = () => this.startAndWaitForPorts(4000, {
       instanceGetTimeoutMS: 120_000,
       portReadyTimeoutMS: 120_000,
       abort: request.signal,
     });
+    try {
+      await waitUntilReady();
+    } catch (error) {
+      if (request.signal.aborted) throw error;
+      // The platform can reject its first readiness probe while a cold VM is
+      // still booting. No user request has been forwarded at this point, so a
+      // second readiness check cannot duplicate a paid model completion.
+      console.warn("Retrying container readiness after a cold-start failure");
+      await waitUntilReady();
+    }
     return super.fetch(request);
   }
 }
