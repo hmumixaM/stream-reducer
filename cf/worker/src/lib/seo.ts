@@ -1,3 +1,4 @@
+import { POPULAR_POOL_SQL } from "./popularPicks";
 import { mediaContent, section } from "./seoContent";
 import {
   publicArticle,
@@ -44,6 +45,7 @@ interface PublicItem {
   thumbnail: string | null;
   completed_at: string | null;
   published_at: string | null;
+  view_count?: number | null;
   markdown: string;
   structured: string;
 }
@@ -66,7 +68,7 @@ function listing(items: PublicItem[]) {
   return items
     .map(
       (i) =>
-        `<article class="py-5 border-b"><p class="text-sm text-muted-foreground mb-2">${escapeHtml(i.author || i.platform)}</p><h3 class="text-xl font-semibold"><a href="/items/${i.id}">${escapeHtml(i.headline || i.title)}</a></h3><p class="text-muted-foreground mt-2">${escapeHtml(i.subhead || plainText(i.markdown).slice(0, 200))}</p></article>`,
+        `<article class="py-5 border-b"><p class="text-sm text-muted-foreground mb-2">${escapeHtml(i.author || i.platform)}${i.view_count ? ` · ${new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(i.view_count)} views` : ""}</p><h3 class="text-xl font-semibold"><a href="/items/${i.id}">${escapeHtml(i.headline || i.title)}</a></h3><p class="text-muted-foreground mt-2">${escapeHtml(i.subhead || plainText(i.markdown).slice(0, 200))}</p></article>`,
     )
     .join("");
 }
@@ -288,7 +290,7 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
       ),
     );
     const rows = await env.DB.prepare(
-      `SELECT i.*, substr(s.markdown,1,500) AS markdown FROM item i JOIN summary s ON s.item_id=i.id WHERE ${ELIGIBLE} ${q ? "AND (i.title LIKE ? OR i.headline LIKE ? OR i.subhead LIKE ? OR i.author LIKE ?)" : ""} ORDER BY i.completed_at DESC, i.id DESC LIMIT ? OFFSET ?`,
+      `SELECT i.*, substr(s.markdown,1,500) AS markdown FROM item i JOIN summary s ON s.item_id=i.id WHERE ${ELIGIBLE} ${url.pathname === "/" ? `AND i.id IN (${POPULAR_POOL_SQL})` : ""} ${q ? "AND (i.title LIKE ? OR i.headline LIKE ? OR i.subhead LIKE ? OR i.author LIKE ?)" : ""} ORDER BY ${url.pathname === "/" ? "RANDOM()" : "i.completed_at DESC, i.id DESC"} LIMIT ? OFFSET ?`,
     )
       .bind(
         ...(q ? Array(4).fill(`%${q}%`) : []),
@@ -303,7 +305,7 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
         : "Browse Video & Podcast Summaries | Stream Reducer";
     page.body =
       url.pathname === "/"
-        ? `${homeIntro}<section class="mt-12"><h2 class="text-2xl font-semibold">Recently summarized</h2>${listing(rows.results)}</section>`
+        ? `${homeIntro}<section class="mt-12"><h2 class="text-2xl font-semibold">Popular picks</h2><p class="text-sm text-muted-foreground mt-2">A random selection of popular English videos and podcasts.</p>${listing(rows.results)}</section>`
         : `<h1 class="text-3xl font-semibold mb-5">Browse video &amp; podcast summaries</h1>${searchForm}${listing(rows.results)}${rows.results.length === 24 ? `<a href="/browse?offset=${offset + 24}${q ? `&amp;q=${encodeURIComponent(q)}` : ""}">More summaries</a>` : ""}`;
     if (url.pathname === "/browse" && offset)
       page.canonical += `?offset=${offset}`;
@@ -357,7 +359,7 @@ export async function serveSeo(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === "/llms.txt") {
     return new Response(
-      `# Stream Reducer\n\n> Public, AI-assisted summaries of videos and podcasts, with original source links and timestamped references. English and Chinese reading editions are available in the application.\n\n## Explore\n- [Home](${ORIGIN}/): Product introduction and recent summaries.\n- [Browse](${ORIGIN}/browse): Search public titles and headlines with ?q=.\n- [Sitemap](${ORIGIN}/sitemap.xml): Paginated index of completed public summaries.\n\n## Read and cite\nEach /items/{id} page serves a summary and source attribution in its initial HTML. Append .md for plain Markdown, including the canonical URL and original source. Cite the canonical summary page and attribute underlying claims to the original creator. AI summaries may contain errors; consult the source for full context.\n\n## Access\nCompleted RSS/Substack articles are public at /rss/articles/{id}; browse them at /articles. Public HTML includes existing reading summaries, translated editions, detailed notes, source quotes and transcripts where available. Personal libraries, annotations, follows and account connection settings require authentication and are outside this public index. This file is a discovery aid, not an indexing guarantee.\n`,
+      `# Stream Reducer\n\n> Public, AI-assisted summaries of videos and podcasts, with original source links and timestamped references. English and Chinese reading editions are available in the application.\n\n## Explore\n- [Home](${ORIGIN}/): Product introduction and randomly selected popular summaries.\n- [Browse](${ORIGIN}/browse): Search public titles and headlines with ?q=.\n- [Sitemap](${ORIGIN}/sitemap.xml): Paginated index of completed public summaries.\n\n## Read and cite\nEach /items/{id} page serves a summary and source attribution in its initial HTML. Append .md for plain Markdown, including the canonical URL and original source. Cite the canonical summary page and attribute underlying claims to the original creator. AI summaries may contain errors; consult the source for full context.\n\n## Access\nCompleted RSS/Substack articles are public at /rss/articles/{id}; browse them at /articles. Public HTML includes existing reading summaries, translated editions, detailed notes, source quotes and transcripts where available. Personal libraries, annotations, follows and account connection settings require authentication and are outside this public index. This file is a discovery aid, not an indexing guarantee.\n`,
       {
         headers: {
           "content-type": "text/plain; charset=utf-8",

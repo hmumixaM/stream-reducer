@@ -201,4 +201,38 @@ describe("complete public HTML and article access", () => {
       ).index,
     ).toBe(false);
   });
+  it("draws homepage picks only from the top 100 completed English sources with usable summaries", async () => {
+    const s = setup();
+    const views = s.db.prepare("UPDATE item SET view_count=? WHERE id=?");
+    const transcript = s.db.prepare(
+      "INSERT INTO transcript(item_id,language,source,text) VALUES(?,?,'native','Source transcript')",
+    );
+    for (let id = 1; id <= 105; id++) {
+      s.item(id, "2026-10-01");
+      views.run(id * 100000, id);
+      transcript.run(id, id === 105 ? "en-US" : "en");
+    }
+    for (const [id, language] of [
+      [106, "zh"],
+      [107, null],
+      [108, "en"],
+    ]) {
+      s.item(id, "2026-10-01");
+      views.run(999999999, id);
+      transcript.run(id, language);
+    }
+    s.db.exec("DELETE FROM summary WHERE item_id=108");
+    const page = await publicPage(
+      s.env,
+      new URL("https://reducer.xgoose.org/"),
+    );
+    const ids = [...page.body.matchAll(/href="\/items\/(\d+)"/g)].map((m) =>
+      Number(m[1]),
+    );
+    expect(ids).toHaveLength(8);
+    expect(new Set(ids).size).toBe(8);
+    expect(ids.every((id) => id >= 6 && id <= 105)).toBe(true);
+    expect(page.body).toContain("Popular picks");
+    expect(page.body).toContain("views");
+  });
 });

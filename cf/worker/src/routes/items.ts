@@ -1,3 +1,4 @@
+import { POPULAR_POOL_SQL } from "../lib/popularPicks";
 import { Hono } from "hono";
 import type { AppContext } from "../auth";
 import { requireAuth, resolveUser } from "../auth";
@@ -44,6 +45,8 @@ itemsRoutes.get("/", async (c) => {
     where.push("(item.title LIKE ? OR item.headline LIKE ? OR item.subhead LIKE ? OR item.author LIKE ?)");
     binds.push(...Array(4).fill(`%${u.q}%`));
   }
+  const popularRandom = u.sort === "popular_random";
+  if (popularRandom) where.push(`item.id IN (${POPULAR_POOL_SQL})`);
   const sortCol = sortColumn(SORT_COLUMNS, u.sort, "published");
   const order = sortOrder(u.order);
   const limit = Math.min(Number(u.limit ?? 100), 500);
@@ -63,7 +66,7 @@ itemsRoutes.get("/", async (c) => {
          LEFT JOIN user_item ui ON ui.item_id = item.id AND ui.user_id = ?
          LEFT JOIN item_interest ii ON ii.item_id = item.id AND ii.user_id = ?
          ${whereSql}
-         ORDER BY ${sortCol} ${order}, item.created_at DESC
+         ORDER BY ${popularRandom ? "RANDOM()" : `${sortCol} ${order}, item.created_at DESC`}
          LIMIT ? OFFSET ?`,
     ).bind(userId, userId, ...binds, limit, offset),
   );

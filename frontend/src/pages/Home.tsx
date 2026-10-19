@@ -7,13 +7,12 @@ import { ErrorState } from "@/components/shell";
 
 export function PublicHome() {
   const navigate = useNavigate();
-  const recent = useQuery({
-    queryKey: ["home-summaries"],
+  const picks = useQuery({
+    queryKey: ["home-popular-english-picks"],
     queryFn: () =>
       api.browseItems({
         status: "done",
-        sort: "completed",
-        order: "desc",
+        sort: "popular_random",
         limit: 8,
       }),
   });
@@ -113,10 +112,10 @@ export function PublicHome() {
           </div>
         ))}
       </section>
-      <section aria-labelledby="recent-heading">
+      <section aria-labelledby="popular-heading">
         <div className="mb-3 flex items-center justify-between gap-4">
-          <h2 id="recent-heading" className="text-2xl font-semibold">
-            Recently summarized
+          <h2 id="popular-heading" className="text-2xl font-semibold">
+            Popular picks
           </h2>
           <Link
             to="/browse"
@@ -125,21 +124,26 @@ export function PublicHome() {
             View all
           </Link>
         </div>
-        {recent.isLoading && (
+        <p className="mb-4 text-sm text-muted-foreground">
+          A random selection of popular English videos and podcasts.
+        </p>
+        {picks.isLoading && (
           <p role="status" className="py-6 text-muted-foreground">
-            Loading recent summaries…
+            Loading popular picks…
           </p>
         )}
-        {recent.isError && (
+        {picks.isError && (
           <ErrorState
-            message="Recent summaries could not load."
-            onRetry={() => recent.refetch()}
+            message="Popular picks could not load."
+            onRetry={() => picks.refetch()}
           />
         )}
-        {recent.data?.map((item) => (
+        {picks.data?.map((item) => (
           <article key={item.id} className="border-b py-5">
             <p className="mb-2 text-xs text-muted-foreground">
               {item.author || item.platform}
+              {!!item.view_count &&
+                ` · ${new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(item.view_count)} views`}
             </p>
             <h3 className="text-lg font-semibold leading-snug">
               <Link
@@ -156,9 +160,9 @@ export function PublicHome() {
             )}
           </article>
         ))}
-        {recent.data?.length === 0 && (
+        {picks.data?.length === 0 && (
           <p className="py-6 text-muted-foreground">
-            New summaries will appear here as they are ready.
+            Popular summaries will appear here when view counts are available.
           </p>
         )}
       </section>
