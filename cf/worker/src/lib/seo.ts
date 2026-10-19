@@ -305,7 +305,7 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
         : "Browse Video & Podcast Summaries | Stream Reducer";
     page.body =
       url.pathname === "/"
-        ? `${homeIntro}<section class="mt-12"><h2 class="text-2xl font-semibold">Popular picks</h2><p class="text-sm text-muted-foreground mt-2">A random selection of popular English videos and podcasts.</p>${listing(rows.results)}</section>`
+        ? `${homeIntro}<section class="mt-12"><h2 class="text-2xl font-semibold">Popular picks</h2><p class="text-sm text-muted-foreground mt-2">Popular English videos and podcasts, with a different creator in every pick.</p>${listing(rows.results)}</section>`
         : `<h1 class="text-3xl font-semibold mb-5">Browse video &amp; podcast summaries</h1>${searchForm}${listing(rows.results)}${rows.results.length === 24 ? `<a href="/browse?offset=${offset + 24}${q ? `&amp;q=${encodeURIComponent(q)}` : ""}">More summaries</a>` : ""}`;
     if (url.pathname === "/browse" && offset)
       page.canonical += `?offset=${offset}`;

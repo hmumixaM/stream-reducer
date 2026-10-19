@@ -201,38 +201,62 @@ describe("complete public HTML and article access", () => {
       ).index,
     ).toBe(false);
   });
-  it("draws homepage picks only from the top 100 completed English sources with usable summaries", async () => {
+  it("balances creators while sampling only their most-viewed usable English summaries", async () => {
     const s = setup();
-    const views = s.db.prepare("UPDATE item SET view_count=? WHERE id=?");
+    const metadata = s.db.prepare(
+      "UPDATE item SET view_count=?,author=? WHERE id=?",
+    );
     const transcript = s.db.prepare(
       "INSERT INTO transcript(item_id,language,source,text) VALUES(?,?,'native','Source transcript')",
     );
-    for (let id = 1; id <= 105; id++) {
-      s.item(id, "2026-10-01");
-      views.run(id * 100000, id);
-      transcript.run(id, id === 105 ? "en-US" : "en");
+    for (let creator = 0; creator < 12; creator++) {
+      // One channel has far more entries and views than every other channel.
+      const count = creator === 0 ? 200 : 8;
+      for (let rank = 1; rank <= count; rank++) {
+        const id = creator * 1000 + rank;
+        s.item(id, "2026-10-01");
+        metadata.run(
+          rank * 1000 * (creator === 0 ? 100000 : 1),
+          creator === 0 && rank % 2
+            ? " DIARY OF A CEO "
+            : creator === 0
+              ? "Diary Of A CEO"
+              : `Creator ${creator}`,
+          id,
+        );
+        transcript.run(id, rank % 2 ? "en-orig" : "en_US");
+      }
     }
     for (const [id, language] of [
-      [106, "zh"],
-      [107, null],
-      [108, "en"],
+      [13001, "zh"],
+      [13002, null],
+      [13003, "en"],
     ]) {
       s.item(id, "2026-10-01");
-      views.run(999999999, id);
+      metadata.run(999999999, "Ineligible", id);
       transcript.run(id, language);
     }
-    s.db.exec("DELETE FROM summary WHERE item_id=108");
-    const page = await publicPage(
-      s.env,
-      new URL("https://reducer.xgoose.org/"),
-    );
-    const ids = [...page.body.matchAll(/href="\/items\/(\d+)"/g)].map((m) =>
-      Number(m[1]),
-    );
-    expect(ids).toHaveLength(8);
-    expect(new Set(ids).size).toBe(8);
-    expect(ids.every((id) => id >= 6 && id <= 105)).toBe(true);
-    expect(page.body).toContain("Popular picks");
-    expect(page.body).toContain("views");
+    s.db.exec("DELETE FROM summary WHERE item_id=13003");
+    // Repeat to exercise random choices, not a lucky single sample.
+    for (let request = 0; request < 8; request++) {
+      const page = await publicPage(
+        s.env,
+        new URL("https://reducer.xgoose.org/"),
+      );
+      const ids = [...page.body.matchAll(/href="\/items\/(\d+)"/g)].map((m) =>
+        Number(m[1]),
+      );
+      expect(ids).toHaveLength(8);
+      const creators = ids.map((id) => Math.floor(id / 1000));
+      expect(new Set(creators).size).toBe(8);
+      expect(
+        ids.every(
+          (id) =>
+            Math.floor(id / 1000) < 12 && id % 1000 >= (id < 1000 ? 196 : 4),
+        ),
+      ).toBe(true);
+      expect(page.body).toContain("Popular picks");
+      expect(page.body).toContain("different creator");
+    }
   });
 });

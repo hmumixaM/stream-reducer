@@ -8,7 +8,7 @@ import { ErrorState } from "@/components/shell";
 export function PublicHome() {
   const navigate = useNavigate();
   const picks = useQuery({
-    queryKey: ["home-popular-english-picks"],
+    queryKey: ["home-balanced-english-picks"],
     queryFn: () =>
       api.browseItems({
         status: "done",
@@ -125,7 +125,7 @@ export function PublicHome() {
           </Link>
         </div>
         <p className="mb-4 text-sm text-muted-foreground">
-          A random selection of popular English videos and podcasts.
+          Popular English videos and podcasts, with a different creator in every pick.
         </p>
         {picks.isLoading && (
           <p role="status" className="py-6 text-muted-foreground">
