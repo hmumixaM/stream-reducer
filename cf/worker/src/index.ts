@@ -1,3 +1,4 @@
+import { publicArticlesRoutes } from "./routes/publicArticles";
 import { serveSeo } from "./lib/seo";
 import { rssRoutes } from "./routes/rss";
 import { substackRoutes } from "./routes/substack";
@@ -49,6 +50,7 @@ app.get("/api/health", (c) => c.json({ status: "ok", llm_model: c.env.LLM_MODEL,
 app.route("/api/auth", authRoutes);
 app.route("/api/internal", audioDiagnosticRoutes);
 app.route("/api/rss", rssRoutes);
+app.route("/api/public/articles", publicArticlesRoutes);
 app.route("/api/substack", substackRoutes);
 // Folders live under /api/items/groups; register before the /:id catch-all.
 app.route("/api/items/groups", folderRoutes);
@@ -84,7 +86,7 @@ app.get("/media/*", async (c) => {
   headers.set("cache-control", "private, max-age=3600");
   return new Response(object.body, { headers });
 });
-for (const path of ["/", "/browse", "/items/:id", "/bulletin/:id", "/robots.txt", "/llms.txt", "/sitemap.xml", "/sitemaps/:file"]) {
+for (const path of ["/", "/browse", "/articles", "/rss/articles/:id", "/items/:id", "/bulletin/:id", "/robots.txt", "/llms.txt", "/sitemap.xml", "/sitemaps/:file"]) {
   app.get(path, (c) => serveSeo(c.req.raw, c.env));
 }
 // Anything else: serve the built SPA (assets binding handles SPA fallback).

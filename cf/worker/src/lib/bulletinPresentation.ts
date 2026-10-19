@@ -1,5 +1,6 @@
 type Point = { text: string; timestamp: number | null };
 export type BulletinRow = {
+  thumbnail?: string | null;
   id: number; title: string | null; headline: string | null; subhead: string | null;
   author: string | null; source_url: string; platform: string; duration_s: number | null;
   published_at: string | null; created_at: string; sort_date: number; saved: number;
@@ -55,7 +56,7 @@ export function serializeBulletin(row: BulletinRow, language: string, detail = f
   };
   if (!detail) return base;
   return {
-    ...base, markdown: row.summary_markdown || "", tldr: text(structured.tldr),
+    ...base, thumbnail: row.thumbnail || null, markdown: row.summary_markdown || "", tldr: text(structured.tldr),
     key_points: keyPoints.map((point) => point.text), key_point_details: keyPoints,
     background: text(structured.background), atmosphere: text(structured.atmosphere),
     walkthrough: text(structured.walkthrough),
@@ -68,7 +69,7 @@ export function serializeBulletin(row: BulletinRow, language: string, detail = f
   };
 }
 
-export const bulletinMetadata = `i.id, i.title, i.headline, i.subhead, i.author, i.source_url, i.platform,
+export const bulletinMetadata = `i.id, i.title, i.thumbnail, i.headline, i.subhead, i.author, i.source_url, i.platform,
   i.duration_s, i.published_at, i.created_at, (ui.id IS NOT NULL) AS saved,
   COALESCE(julianday(i.published_at),julianday(i.created_at),0) AS sort_date,
   bt.bulletin AS localized_bulletin, bt.status AS localized_bulletin_status,

@@ -463,6 +463,7 @@ export interface ReadingSummaryResult {
 }
 
 export interface BulletinItem {
+  thumbnail?: string | null;
   id: number;
   title: string;
   source_title: string;

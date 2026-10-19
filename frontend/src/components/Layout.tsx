@@ -58,6 +58,7 @@ const NAV: {
   { to: "/subscriptions", label: "Sources", icon: Rss, section: "main" },
   { to: "/library", label: "Knowledge base", icon: Bookmark, section: "main" },
   { to: "/browse", label: "Browse", icon: Compass, section: "discover" },
+  { to: "/articles", label: "Articles", icon: Newspaper, section: "discover" },
   { to: "/collections", label: "Collections", icon: FolderKanban, section: "discover" },
   { to: "/search", label: "Search", icon: SearchIcon, section: "discover" },
   { to: "/graph", label: "Graph", icon: Network, section: "discover" },
@@ -74,7 +75,7 @@ const NAV: {
 // library rather than a timeline; browsing, search, and the graph are reachable.
 const MIRROR_NAV = new Set(["/", "/search", "/graph"]);
 // Anonymous visitors can browse the global catalog and channel directory.
-const PUBLIC_NAV = new Set(["/subscriptions", "/browse", "/collections"]);
+const PUBLIC_NAV = new Set(["/subscriptions", "/browse", "/articles", "/collections"]);
 const MIRROR_LABELS: Record<string, string> = { "/": "Library" };
 
 function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -163,7 +164,8 @@ export function Layout() {
   const initialMetadata = useRef(true);
   useLayoutEffect(() => {
     if (initialMetadata.current) { initialMetadata.current = false; return; }
-    if (/^\/(items|bulletin)\/\d+$/.test(location.pathname)) return;
+    document.getElementById("public-source-content")?.remove();
+    if (/^\/(items|bulletin|rss\/articles)\/\d+$/.test(location.pathname) || location.pathname === "/articles") return;
     const publicPage = location.pathname === "/" || location.pathname === "/browse";
     document.getElementById("seo-schema")?.remove();
     document.head.querySelector('meta[property="og:image"]')?.remove();

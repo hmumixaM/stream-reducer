@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { updateMetadata } from "@/lib/seo";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
@@ -25,6 +26,13 @@ export function RssDetail() {
   const { id } = useParams();
   const me = useMe();
   const client = useQueryClient();
+  const authed = !!me.data?.user;
+  const publicRead = async <T,>(suffix: string): Promise<T> => {
+    const response = await fetch(`/api/public/articles/${id}${suffix}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Article unavailable");
+    return data as T;
+  };
   const [lang, setLang] = useState(
     me.data?.user?.preferred_language === "zh" ? "zh" : "original",
   );
@@ -32,14 +40,24 @@ export function RssDetail() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const article = useQuery({
-    queryKey: ["rss", "article", id, lang],
-    queryFn: () => rssApi<Detail>(`/articles/${id}?lang=${lang}`),
+    queryKey: ["rss", "article", id, lang, authed],
+    queryFn: () =>
+      authed
+        ? rssApi<Detail>(`/articles/${id}?lang=${lang}`).catch(() =>
+            publicRead<Detail>(""),
+          )
+        : publicRead<Detail>(""),
     refetchInterval: (q) =>
       ["done", "missing"].includes(q.state.data?.status || "") ? false : 10000,
   });
   const body = useQuery({
-    queryKey: ["rss", "body", id],
-    queryFn: () => rssApi<RssBody>(`/articles/${id}/body`),
+    queryKey: ["rss", "body", id, authed],
+    queryFn: () =>
+      authed
+        ? rssApi<RssBody>(`/articles/${id}/body`).catch(() =>
+            publicRead<RssBody>("/body"),
+          )
+        : publicRead<RssBody>("/body"),
     enabled: showBody,
   });
   const action = async (fn: () => Promise<void>) => {
@@ -57,6 +75,17 @@ export function RssDetail() {
       setBusy(false);
     }
   };
+  useEffect(() => {
+    const a = article.data;
+    if (!a) return;
+    const edition = a.editions.find((e) => e.lang === "original")?.content;
+    updateMetadata(
+      `${edition?.headline || a.title} | Stream Reducer`,
+      (edition?.intro || a.title).slice(0, 180),
+      `https://reducer.xgoose.org/rss/articles/${a.id}`,
+      a.status === "done",
+    );
+  }, [article.data]);
   if (article.isLoading)
     return (
       <div className="flex items-center gap-2 p-10">
@@ -77,11 +106,11 @@ export function RssDetail() {
   return (
     <div className="mx-auto max-w-4xl pb-16">
       <Link
-        to="/bulletin"
+        to={authed ? "/bulletin" : "/articles"}
         className="mb-6 inline-flex min-h-11 items-center gap-2 text-sm text-muted-foreground hover:text-primary"
       >
         <ArrowLeft size={16} />
-        Bulletin
+        {authed ? "Bulletin" : "Articles"}
       </Link>
       <article className="rounded-lg border bg-card px-5 py-7 sm:px-10 sm:py-10">
         <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
@@ -118,7 +147,7 @@ export function RssDetail() {
           </a>
           <Button
             variant="ghost"
-            disabled={busy}
+            disabled={busy || !authed}
             onClick={() =>
               void action(async () => {
                 await rssApi(
@@ -293,33 +322,42 @@ export function RssDetail() {
             </div>
           )}
         </section>
-        <div className="mt-5 flex flex-wrap gap-2 border-t pt-5">
-          <Button
-            disabled={busy}
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              void action(async () => {
-                await rssApi(`/articles/${id}/retry`, {});
-              })
-            }
-          >
-            <RefreshCw size={13} />
-            重试概括
-          </Button>
-          <Button
-            disabled={busy}
-            variant="ghost"
-            size="sm"
-            onClick={() =>
-              void action(async () => {
-                await rssApi(`/articles/${id}/retry`, { refetch: true });
-              })
-            }
-          >
-            重新获取正文
-          </Button>
-        </div>
+        {!authed && (
+          <p className="mt-5 text-sm">
+            <Link className="underline" to="/login">
+              Sign in to save articles and follow sources
+            </Link>
+          </p>
+        )}
+        {authed && (
+          <div className="mt-5 flex flex-wrap gap-2 border-t pt-5">
+            <Button
+              disabled={busy || !authed}
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                void action(async () => {
+                  await rssApi(`/articles/${id}/retry`, {});
+                })
+              }
+            >
+              <RefreshCw size={13} />
+              重试概括
+            </Button>
+            <Button
+              disabled={busy || !authed}
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                void action(async () => {
+                  await rssApi(`/articles/${id}/retry`, { refetch: true });
+                })
+              }
+            >
+              重新获取正文
+            </Button>
+          </div>
+        )}
       </article>
     </div>
   );

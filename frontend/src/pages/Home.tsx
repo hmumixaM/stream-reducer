@@ -72,6 +72,9 @@ export function PublicHome() {
           <Link className="underline underline-offset-4" to="/browse">
             Browse all summaries
           </Link>
+          <Link className="underline underline-offset-4" to="/articles">
+            RSS &amp; Substack articles
+          </Link>
           <Link className="underline underline-offset-4" to="/collections">
             Explore collections
           </Link>

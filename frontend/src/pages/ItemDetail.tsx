@@ -201,6 +201,7 @@ export function ItemDetail() {
             <StatusBadge status={d.status} />
           </div>
           <h1 className="text-display font-semibold leading-tight">{d.title || d.source_url}</h1>
+          {d.thumbnail && <figure className="my-6"><img src={d.thumbnail} alt={`${d.title} — ${d.author || d.platform}`} loading="eager" decoding="async" className="w-full max-w-2xl rounded-lg"/><figcaption className="mt-2 text-xs text-muted-foreground">{d.title} — {d.author || d.platform}</figcaption></figure>}
           {d.channel ? (
             <Link
               to={`/channels/${d.channel.id}`}
