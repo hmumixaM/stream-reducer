@@ -2,7 +2,7 @@
 # stateless ingest/transcribe/summarize service. Built from the repo ROOT
 # (see wrangler.jsonc image_build_context) so it can vendor the shared `app/`
 # adapters package.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Userspace Tailscale provides an authenticated residential fallback through
 # the user's NAS exit node. It needs no TUN device or NET_ADMIN capability:
