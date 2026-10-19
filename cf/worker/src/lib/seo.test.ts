@@ -163,6 +163,9 @@ describe("public search and AI retrieval", () => {
     ).text();
     expect(robots).toContain("Allow: /");
     expect(robots).toContain("Disallow: /api/");
+    expect(robots).toContain("Allow: /api/auth/me$");
+    expect(robots).toContain("Allow: /api/items?");
+    expect(robots).toContain("Allow: /api/bulletin/");
     expect(robots).toContain("Sitemap: https://reducer.xgoose.org/sitemap.xml");
     const llms = await (
       await serveSeo(

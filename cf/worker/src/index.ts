@@ -37,6 +37,13 @@ export { PipelineContainer } from "./pipeline/container";
 
 const app = new Hono<AppContext>();
 
+// Public pages load JSON during React rendering. Crawlers may fetch those
+// resources, but the API documents themselves should never be search results.
+app.use("/api/*", async (c, next) => {
+  await next();
+  c.header("X-Robots-Tag", "noindex, nofollow");
+});
+
 app.get("/api/health", (c) => c.json({ status: "ok", llm_model: c.env.LLM_MODEL, stt_model: c.env.STT_MODEL }));
 
 app.route("/api/auth", authRoutes);

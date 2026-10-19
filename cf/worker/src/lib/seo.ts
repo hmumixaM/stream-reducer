@@ -265,7 +265,7 @@ export async function serveSeo(request: Request, env: Env): Promise<Response> {
   }
   if (url.pathname === "/robots.txt")
     return new Response(
-      `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /media/\nDisallow: /oauth/\nDisallow: /mcp\n\n# Public HTML is available to Googlebot, Bingbot, OAI-SearchBot and ChatGPT-User.\nSitemap: ${ORIGIN}/sitemap.xml\n`,
+      `User-agent: *\nAllow: /\nDisallow: /api/\n# Public React pages need these read endpoints when rendered by search engines.\nAllow: /api/auth/me$\nAllow: /api/items$\nAllow: /api/items?\nAllow: /api/items/\nAllow: /api/bulletin/\nAllow: /api/collections\nAllow: /api/channels\nAllow: /api/sources/search\nDisallow: /media/\nAllow: /media/thumbnail/\nDisallow: /oauth/\nDisallow: /mcp\n\n# Public HTML is available to Googlebot, Bingbot, OAI-SearchBot and ChatGPT-User.\nSitemap: ${ORIGIN}/sitemap.xml\n`,
       {
         headers: {
           "content-type": "text/plain; charset=utf-8",
