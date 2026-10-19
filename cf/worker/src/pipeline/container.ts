@@ -49,6 +49,8 @@ export class PipelineContainer extends Container<Env> {
     RIGHTCODE_API_KEY: this.env.RIGHTCODE_API_KEY,
     OPENROUTER_API_KEY: this.env.OPENROUTER_API_KEY,
     STT_MODEL: this.env.STT_MODEL,
+    AUDIO_OFFLOAD_URL: this.env.AUDIO_OFFLOAD_URL ?? "",
+    AUDIO_OFFLOAD_TOKEN: this.env.AUDIO_OFFLOAD_TOKEN ?? "",
     // Bilibili web cookies for yt-dlp (materialized into a cookie file inside
     // the container) — required to clear HTTP 412 risk control on downloads.
     // This is the static seed; the per-job request body carries the freshest

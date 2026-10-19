@@ -58,8 +58,11 @@ jobs:
 
       - name: Validate RSS extraction
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
           pip install -r cf/rss/requirements.txt pytest httpx
           pytest cf/rss/test_service.py
+          pytest tests/test_audio_offload.py
 
       # 3. Apply D1 migrations (idempotent)
       - name: Apply D1 migrations
@@ -83,8 +86,10 @@ jobs:
             OPENROUTER_API_KEY
             RIGHTCODE_API_KEY
             ADMIN_TOKEN
+            AUDIO_OFFLOAD_TOKEN
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           RIGHTCODE_API_KEY: ${{ secrets.RIGHTCODE_API_KEY }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          AUDIO_OFFLOAD_TOKEN: ${{ secrets.AUDIO_OFFLOAD_TOKEN }}

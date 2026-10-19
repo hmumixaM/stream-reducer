@@ -23,9 +23,9 @@ Worker (Hono, TS)  ──►  D1            (users, items, user_item, subs, ...)
         ├── Queue ──► Worker queue consumer ──► PipelineContainer (DO)
         │                                              │
         │                                              ▼
-        │                                  Python container (yt-dlp, ffmpeg)
+        │                                  Python container (yt-dlp, basic)
         │                                   • metadata + native transcript
-        │                                   • OpenRouter Whisper STT
+        │                                   • Oracle ARM audio preparation → OpenRouter Whisper STT
         │                                   • Gemini-proxy summary
         │                                  returns transcript+summary+chunks JSON
         ├── Bulletin queue ──► newest-first short Chinese translations ──► D1
@@ -42,6 +42,10 @@ Worker (Hono, TS)  ──►  D1            (users, items, user_item, subs, ...)
   account needed), including collection Bulletin feeds. The per-user
   **Bulletin**, reading summaries, **Library**, Search, Graph, annotations, queue,
   subscriptions, and settings require a magic-link session.
+
+Audio decoding, transcoding and segmentation run on the authenticated Oracle ARM
+service; see [deployment and limits](audio/README.md). Cloudflare retains media
+downloads, metadata, native transcripts and model calls on the `basic` tier.
 
 ## Prerequisites
 

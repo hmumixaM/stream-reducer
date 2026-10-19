@@ -53,6 +53,8 @@ export interface Env {
   // Image model for on-demand infographics (RightCode Draw API).
   LLM_MODEL_INFOGRAPHIC: string;
   STT_MODEL: string;
+  AUDIO_OFFLOAD_URL?: string;
+  AUDIO_OFFLOAD_TOKEN?: string;
   EMBEDDING_DIM: string;
   SUBSCRIPTION_WINDOW_DAYS: string;
   SUBSCRIPTION_MIN_DURATION_S?: string;

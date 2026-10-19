@@ -14,6 +14,9 @@ import os
 import queue
 import subprocess
 import threading
+import tempfile
+import time
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -70,6 +73,50 @@ async def metadata(request: Request):
         return pipeline.fetch_metadata(body["source_url"], body.get("platform"), body.get("bilibili_cookie"))
     except Exception as exc:  # noqa: BLE001
         logger.exception("metadata failed")
+        return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
+
+
+@app.post("/audio-check")
+def audio_check():
+    """Fixed, bounded public-podcast test; never writes an item or library entry."""
+    import httpx
+    from audio_offload import split_audio
+    source = (
+        "https://aphid.fireside.fm/d/1437767933/"
+        "19a49f52-28ee-4e25-b8e9-4f0ee70917e0/"
+        "63e76d1a-c5bb-4103-8ef4-e235917367c6.mp3"
+    )
+    started = time.monotonic()
+    try:
+        with tempfile.TemporaryDirectory(prefix="audio_check_") as tmp:
+            path = Path(tmp) / "podcast.mp3"
+            size = 0
+            with httpx.stream("GET", source, follow_redirects=True, timeout=120) as response:
+                response.raise_for_status()
+                with path.open("wb") as output:
+                    for block in response.iter_bytes(1024 * 1024):
+                        size += len(block)
+                        if size > 160 * 1024**2:
+                            raise RuntimeError("diagnostic source exceeds size limit")
+                        output.write(block)
+            downloaded = time.monotonic()
+            chunks = split_audio(path, 300, Path(tmp) / "chunks")
+            prepared = time.monotonic()
+            usage = pipeline.llm.SttUsage()
+            with httpx.Client(timeout=300) as client:
+                text, language = pipeline.llm.transcribe_chunk(client, str(chunks[0]), usage)
+            if not text.strip():
+                raise RuntimeError("diagnostic transcription was empty")
+            return {
+                "ok": True, "provider": "oracle-arm", "source_bytes": size,
+                "chunk_count": len(chunks), "download_s": round(downloaded-started, 2),
+                "prepare_and_transfer_s": round(prepared-downloaded, 2),
+                "total_s": round(time.monotonic()-started, 2),
+                "stt_characters": len(text), "stt_language": language,
+                "stt_cost_usd": usage.cost_usd,
+            }
+    except Exception as exc:
+        logger.exception("audio diagnostic failed")
         return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
 
 

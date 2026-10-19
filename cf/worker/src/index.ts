@@ -20,6 +20,7 @@ import { statsRoutes } from "./routes/stats";
 import { queueRoutes } from "./routes/queue";
 import { settingsRoutes } from "./routes/settings";
 import { adminRoutes } from "./routes/admin";
+import { audioDiagnosticRoutes } from "./routes/audioDiagnostic";
 import { oauthRoutes } from "./routes/oauth";
 import { collectionRoutes } from "./routes/collections";
 import { mcpHandler } from "./routes/mcp";
@@ -38,6 +39,7 @@ const app = new Hono<AppContext>();
 app.get("/api/health", (c) => c.json({ status: "ok", llm_model: c.env.LLM_MODEL, stt_model: c.env.STT_MODEL }));
 
 app.route("/api/auth", authRoutes);
+app.route("/api/internal", audioDiagnosticRoutes);
 app.route("/api/rss", rssRoutes);
 app.route("/api/substack", substackRoutes);
 // Folders live under /api/items/groups; register before the /:id catch-all.

@@ -14,6 +14,7 @@
 export function isTransientCapacity(msg: string): boolean {
   const m = msg.toLowerCase();
   return (
+    m.includes("oracle audio unavailable:") ||
     m.includes("container 503") ||
     m.includes("no container instance available") ||
     m.includes("currently provisioning") ||

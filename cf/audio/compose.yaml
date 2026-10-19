@@ -1,0 +1,52 @@
+name: stream-reducer-audio
+services:
+  audio:
+    build: .
+    image: stream-reducer-audio:20261018
+    restart: unless-stopped
+    init: true
+    read_only: true
+    user: "10001:10001"
+    cpus: 2
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 96
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    env_file: .env
+    volumes:
+      - ./data:/data:Z
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    ports:
+      - "127.0.0.1:18081:8080"
+    networks: [isolated]
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+    healthcheck:
+      test: [CMD, python, -c, "import socket; s=socket.create_connection(('127.0.0.1',8080),3); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.1
+    restart: unless-stopped
+    command: [tunnel, --no-autoupdate, run]
+    env_file: tunnel.env
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+    networks: [isolated, egress]
+    depends_on:
+      audio: {condition: service_healthy}
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+networks:
+  isolated:
+    internal: true
+  egress: {}

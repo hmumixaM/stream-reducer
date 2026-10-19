@@ -24,7 +24,8 @@ from pathlib import Path
 
 from app.adapters.base import ContentMeta
 from app.adapters.registry import detect_platform, get_adapter
-from app.pipeline.audio import decodable_duration, probe_duration, split_audio
+from app.pipeline.audio import probe_duration
+from audio_offload import split_audio
 from app.pipeline.jsonparse import extract_json
 from app.pipeline.prompts import (
     DANMAKU_SYSTEM,
@@ -1229,19 +1230,11 @@ def run(job: dict, on_progress=None) -> dict:
                                       "text": "\n".join(s.get("text", "") for s in segs)}
                     else:
                         audio_path = Path(adapter.download_audio(source_url, Path(tmp), on_progress=emit))
-                        # A full decode catches Bilibili's byte-complete but
-                        # mid-stream-corrupt CDN downloads. Direct HTTP podcast
-                        # downloads and yt-dlp already detect incomplete bodies;
-                        # decoding them here only duplicates the full transcode
-                        # below. On a 3.5-hour podcast and the 1/4-vCPU basic
-                        # container that redundant pass took >4 minutes with no
-                        # output, so the Worker killed a healthy download as a
-                        # "pipeline stalled" job.
-                        decodable = (
-                            decodable_duration(audio_path, on_progress=emit)
-                            if plat.value == "bilibili"
-                            else probe_duration(audio_path)
-                        )
+                        # Oracle's strict decode and output coverage check reject
+                        # truncated/corrupt downloads. Keep only the cheap header
+                        # probe here, including for Bilibili, so basic does not
+                        # duplicate the CPU-heavy full-file decode.
+                        decodable = probe_duration(audio_path)
                         media["bytes"] = audio_path.stat().st_size
                         media["duration_s"] = decodable or probe_duration(audio_path)
                         media["format"] = audio_path.suffix.lstrip(".") or "mp3"
@@ -1318,9 +1311,8 @@ def _transcribe(tmp: str, audio_path: Path, stages: list[Stage], on_progress=Non
 
     with Stage("transcribe", provider="openrouter", model=os.environ.get("STT_MODEL")) as st:
         workdir = Path(tmp) / "chunks"
-        # ffmpeg can spend minutes transcoding a multi-hour episode on the basic
-        # container. Forward its progress as heartbeats so the Worker's idle
-        # watchdog can distinguish slow useful work from a dead process.
+        # Oracle prepares chunks with durable jobs, resumable uploads and progress
+        # heartbeats. There is no local encoding fallback on the basic container.
         chunk_paths = split_audio(
             str(audio_path),
             TRANSCRIBE_CHUNK_SECONDS,
