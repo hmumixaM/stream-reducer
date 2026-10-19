@@ -366,3 +366,30 @@ def test_media_feed_uses_public_catalog_page_limit_and_preserves_audio_duration(
 ])
 def test_substack_payment_status(publication, expected):
     assert s.substack_source({"id": 42, "subdomain": "news", **publication})["access"] == expected
+
+
+def test_folo_metadata_resolution_uses_supported_minimum_entry_limit(monkeypatch):
+    calls = []
+    def cached(path, token=""):
+        calls.append(path)
+        assert "entriesLimit=1" in path
+        return {"feed": {"id": "41371367532304384", "url": "rsshub://xiaoyuzhou/podcast/62382c1103bea1ebfffa1c00", "title": "半拿铁", "isPrivate": False}, "entries": []}
+    monkeypatch.setattr(s, "folo_api", cached)
+    result = s.resolve(s.SourceRequest(url="https://app.folo.is/feed/41371367532304384"))
+    assert result["folo_id"] == "41371367532304384"
+    assert result["feed_url"].endswith("/xiaoyuzhou/podcast/62382c1103bea1ebfffa1c00")
+    assert len(calls) == 1
+
+
+def test_folo_podcast_follow_inspection_survives_blocked_rsshub(monkeypatch):
+    pid = "62382c1103bea1ebfffa1c00"
+    def cached(path, token=""):
+        assert "entriesLimit=1" in path or "entriesLimit=10" in path
+        return {"feed": {"id": "123", "url": "rsshub://xiaoyuzhou/podcast/" + pid, "title": "半拿铁"}, "entries": [
+            {"id": "episode", "url": "https://www.xiaoyuzhoufm.com/episode/" + "6acf43d9e742e36efcc2dbdf", "publishedAt": "2026-10-18T00:00:00Z", "attachments": [{"url": "https://audio.example/audio.mp3", "mime_type": "audio/mpeg", "duration_in_seconds": 3600}]}
+        ]}
+    monkeypatch.setattr(s, "folo_api", cached)
+    monkeypatch.setattr(s, "download", lambda *a, **k: (_ for _ in ()).throw(ValueError("RSSHub blocked")))
+    result = s.source_inspect(s.SourceRequest(url="https://app.folo.is/feed/123"))
+    assert result["kind"] == "media" and result["folo_id"] == "123"
+    assert s.media_feed(s.SourceRequest(url=result["feed_url"]))["entries"][0]["duration_s"] == 3600

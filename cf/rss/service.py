@@ -67,7 +67,7 @@ def branding(req: BrandingRequest):
     # blocks server requests. Reading metadata never creates a subscription.
     if req.folo_id and re.fullmatch(r"\d+", req.folo_id):
         try:
-            feed = folo_api("/feeds?" + urlencode({"id": req.folo_id, "entriesLimit": 0})).get("feed", {})
+            feed = folo_api("/feeds?" + urlencode({"id": req.folo_id, "entriesLimit": 1})).get("feed", {})
             image = feed.get("image")
             if image and not feed.get("isPrivate"):
                 data, ctype, final = download(public_url(image))
@@ -235,7 +235,7 @@ def resolve(req: SourceRequest):
         raw = public_url(raw)
         fid = folo_id(raw)
         if fid:
-            data = folo_api("/feeds?" + urlencode({"id": fid, "entriesLimit": 0}), req.token)
+            data = folo_api("/feeds?" + urlencode({"id": fid, "entriesLimit": 1}), req.token)
             feed = data["feed"]
             if feed.get("isPrivate"):
                 raise ValueError("暂不支持私有 Folo 来源")
@@ -258,7 +258,7 @@ def resolve(req: SourceRequest):
                 candidates.append("rsshub://" + parts.path.lstrip("/") + ("?" + parts.query if parts.query else ""))
             for candidate in dict.fromkeys(candidates):
                 try:
-                    cached = folo_api("/feeds?" + urlencode({"url": candidate, "entriesLimit": 0}), req.token)
+                    cached = folo_api("/feeds?" + urlencode({"url": candidate, "entriesLimit": 1}), req.token)
                     feed = cached.get("feed") or {}
                     if feed.get("type") != "feed" or feed.get("isPrivate"):
                         continue
@@ -282,7 +282,7 @@ def resolve(req: SourceRequest):
         parsed = parse_feed(data, final)
         cached_id = None
         try:
-            cached = folo_api("/feeds?" + urlencode({"url": final, "entriesLimit": 0}), req.token)
+            cached = folo_api("/feeds?" + urlencode({"url": final, "entriesLimit": 1}), req.token)
             if cached.get("feed", {}).get("type") == "feed":
                 cached_id = str(cached["feed"]["id"])
         except Exception:

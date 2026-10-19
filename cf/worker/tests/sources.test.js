@@ -177,3 +177,23 @@ it("polls legacy Xiaoyuzhou page identities through their public RSS bridge", as
   const feed = await fetchFeed(env, "https://www.xiaoyuzhoufm.com/podcast/5e4ee557418a84a0466737b7");
   expect(feed.entries).toHaveLength(1); expect(feed.entries[0].audio).toBe("https://example.com/audio.mp3");
 });
+
+
+it("follows a Xiaoyuzhou search result through verified public cache and enqueues media polling", async () => {
+  const { request, db, env } = setup();
+  const pid = "682c566cc7c5f17595635a2c";
+  fetch.mockImplementation(async () => Response.json({ data: [{ feed: { id: "160287095502623744", title: "半拿铁·周刊", siteUrl: `https://www.xiaoyuzhoufm.com/podcast/${pid}`, url: `rsshub://xiaoyuzhou/podcast/${pid}` } }] }));
+  containerFetch.mockImplementation(async req => {
+    expect(new URL(req.url).pathname).toBe("/source-inspect");
+    expect((await req.json()).url).toBe("https://app.folo.is/feed/160287095502623744");
+    return Response.json({ kind: "media", provider: "folo", feed_url: `https://rsshub.app/xiaoyuzhou/podcast/${pid}`, folo_id: "160287095502623744" });
+  });
+  const response = await request("/follow", { provider: "folo", provider_id: "160287095502623744", q: "半拿铁" });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ following: true, kind: "media", platform: "xiaoyuzhou" });
+  expect(db.prepare("SELECT title,feed_url FROM channel").get()).toMatchObject({ title: "半拿铁·周刊", feed_url: `https://rsshub.app/xiaoyuzhou/podcast/${pid}` });
+  expect(db.prepare("SELECT enabled FROM subscription WHERE user_id=1").get().enabled).toBe(1);
+  expect(db.prepare("SELECT count(*) n FROM subscription WHERE user_id=2").get().n).toBe(0);
+  expect(db.prepare("SELECT count(*) n FROM rss_follow").get().n).toBe(0);
+  expect(env.PIPELINE.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "poll", force: true }));
+});
