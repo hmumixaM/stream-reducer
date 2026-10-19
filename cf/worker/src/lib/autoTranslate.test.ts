@@ -54,7 +54,7 @@ describe("automatic collection translations", () => {
             bind() { return statement; },
             async all() {
               return {
-                results: sql.includes("FROM user_item")
+                results: sql.includes("preferred_language") ? [{ lang: "zh" }] : sql.includes("FROM user_item")
                   ? [
                     { id: 7, sample: "This English summary covers markets, policy, and the week ahead in enough detail." },
                     { id: 8, sample: "Another English summary about earnings, rates, and what investors are watching." },

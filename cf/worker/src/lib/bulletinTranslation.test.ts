@@ -28,6 +28,19 @@ function setup(initial: Partial<BulletinTranslationRow> = {}, sourceOverride = s
 }
 afterEach(()=>vi.unstubAllGlobals());
 describe('complete Chinese bulletin',()=>{
+  it('creates a cached English bulletin without modifying source notes', async () => {
+    const english = { headline: 'Hybrid AI', subhead: 'Cost and privacy drive adoption.', tldr: 'The panel favors hybrid AI for costs and privacy.', bulletin: [{ text: 'Use a hybrid approach.', timestamp: 500 }] };
+    const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(english) } }] })));
+    vi.stubGlobal('fetch', fetch);
+    const { env, writes } = setup({ status: 'queued', bulletin: '[]' });
+    const result = await translateBulletinEdition(env, 1, 'en');
+    expect(result).toMatchObject({ status: 'done', headline: english.headline, bulletin: [{ text: 'Use a hybrid approach.', timestamp: 90 }] });
+    expect(JSON.parse(fetch.mock.calls[0][1].body).messages[0].content).toContain('natural English');
+    expect(writes.find((w) => w.sql.includes('SET headline='))?.values[6]).toBe('en');
+    expect(writes.some((w) => w.sql.includes('UPDATE summary'))).toBe(false);
+    await translateBulletinEdition(env, 1, 'en');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it('treats points-only historical rows as incomplete',()=>{
     expect(readBulletinTranslation(setup().getRow())).toMatchObject({status:'missing',complete:false,bulletin:[{text:'采用混合方式。',timestamp:90}]});
   });

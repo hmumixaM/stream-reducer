@@ -28,7 +28,7 @@ export async function rssBulletins(
   const sort = "COALESCE(julianday(a.published_at),julianday(a.created_at),0)";
   const after = feedCursorFilter(sort, "a.id", 1, cursor);
   const args: unknown[] = [
-    language === "zh" ? "zh" : "original",
+    language === "zh" || language === "en" ? language : "original",
     userId,
     userId,
     ...after.binds,
@@ -99,11 +99,11 @@ export async function rssBulletins(
         bulletin: points.map((p) => p.text),
         bulletin_points: points,
         bulletin_language:
-          row.edition_lang === "zh" ? ("zh" as const) : ("original" as const),
+          row.edition_lang === "zh" || row.edition_lang === "en" ? row.edition_lang : ("original" as const),
         bulletin_overview: e.intro || "",
         bulletin_intro_ready: true,
         localization_status:
-          language === "zh" && row.edition_lang !== "zh" ? "missing" : "done",
+          (language === "zh" || language === "en") && row.edition_lang !== language ? "missing" : "done",
         summary: e.intro || "",
         based_on_excerpt: !!e.based_on_excerpt,
       },

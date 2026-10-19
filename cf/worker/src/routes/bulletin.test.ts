@@ -28,6 +28,15 @@ describe("bulletin reading API", () => {
     expect(detail).toHaveProperty("walkthrough", "Long original content");
     expect(detail).toHaveProperty("tldr", "Original overview");
   });
+  it("renders English editions and keeps original notes and source timestamps", () => {
+    const english = { ...row, localized_headline: "AI ownership", localized_subhead: "Costs and privacy", localized_tldr: "The panel favors hybrid AI.", localized_bulletin: JSON.stringify([{ text: "Use hybrid AI.", timestamp: 90 }]) };
+    const card = serializeBulletin(english, "en", true);
+    expect(card).toMatchObject({ title: "AI ownership", bulletin_language: "en", bulletin_intro_ready: true, localization_status: "done", walkthrough: "Long original content" });
+    expect(card.bulletin_points).toEqual([{ text: "Use hybrid AI.", timestamp: 90 }]);
+    expect(serializeBulletin(english, "auto").title).toBe("Original");
+    expect(serializeBulletin({ ...row, localized_bulletin: null }, "en")).toMatchObject({ title: "English bulletin is being prepared", bulletin_intro_ready: false, bulletin: [] });
+    expect(serializeBulletin({ ...row, source_language: "en-US" }, "en")).toMatchObject({ title: "Original", bulletin_language: "en", bulletin_intro_ready: true, bulletin_overview: "Original overview" });
+  });
   it("falls back honestly when a localized result is empty or broken", () => {
     expect(serializeBulletin({ ...row, localized_bulletin: "broken" }, "zh").bulletin_language).toBe("original");
     expect(serializeBulletin({ ...row, localized_bulletin: "broken" }, "zh").localization_status).toBe("missing");
@@ -50,7 +59,7 @@ describe("bulletin reading API", () => {
     expect(JSON.parse(atob(data.next_cursor))).toEqual([row.sort_date, 0, 10]);
     expect(queries[0].sql).not.toContain("s.markdown");
     expect(queries[0].sql).not.toContain("$.walkthrough");
-    expect(queries[0].args.slice(0, 3)).toEqual([4, 4, 4]);
+    expect(queries[0].args.slice(0, 4)).toEqual([4, "zh", 4, 4]);
   });
   it("allows an abandoned intro translation to be retried", () => {
     const stale = serializeBulletin({ ...row, localized_headline: "", localized_tldr: "", localized_bulletin_status: "processing", localized_updated_at: new Date(Date.now() - 180_000).toISOString() }, "zh");
@@ -61,7 +70,7 @@ describe("bulletin reading API", () => {
     const { app, env, queries } = setup();
     const cursor = encodeURIComponent(btoa(JSON.stringify([2461302.1, 10])));
     expect((await app.request(`/api/bulletin/feed?cursor=${cursor}&q=test&platform=youtube&saved=true`, {}, env)).status).toBe(200);
-    expect(queries[0].args).toEqual([4, 4, 4, 2461302.1, 2461302.1, 0, 0, 10, "%test%", "%test%", "%test%", "youtube", 25]);
+    expect(queries[0].args).toEqual([4, "zh", 4, 4, 2461302.1, 2461302.1, 0, 0, 10, "%test%", "%test%", "%test%", "youtube", 25]);
     expect(queries[0].sql).toContain("sub.enabled=1");
   });
   it.each(["/feed?limit=bad", "/feed?cursor=bad", "/nope", "/0/reading-summary"])("rejects invalid input before a query: %s", async (url) => {

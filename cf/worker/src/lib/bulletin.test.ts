@@ -25,3 +25,20 @@ describe("Chinese bulletin backfill", () => {
     expect(batch.mock.calls[0][0]).toHaveLength(3);
   });
 });
+
+it("queues English only for non-English sources and leaves completed translations alone", async () => {
+  const queued: unknown[][] = [];
+  const env = { DB: {
+    prepare(sql: string) {
+      let args: unknown[] = [];
+      return { bind(...values: unknown[]) { args = values; return this; },
+        async all() { return { results: sql.includes("FROM transcript") ? [{ item_id: 1, language: "en-US" }] : [{ item_id: 2, status: "done", headline: "Ready", tldr: "Ready overview" }] }; },
+        args: () => args,
+      };
+    },
+    async batch(statements: { args: () => unknown[] }[]) { queued.push(...statements.map((s) => s.args())); },
+  }, BULLETIN_JOBS: { sendBatch: vi.fn() } } as unknown as Env;
+  expect(await enqueueBulletinTranslations(env, [1, 2, 3], "en")).toBe(1);
+  expect(queued).toHaveLength(1);
+  expect(queued[0].slice(0, 2)).toEqual([3, "en"]);
+});

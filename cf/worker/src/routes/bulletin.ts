@@ -35,7 +35,7 @@ const accessible = (
   includeCollections = false,
 ) => `FROM item i JOIN summary s ON s.item_id=i.id
   LEFT JOIN user_item ui ON ui.item_id=i.id AND ui.user_id=?
-  LEFT JOIN bulletin_translation bt ON bt.item_id=i.id AND bt.lang='zh'
+  LEFT JOIN bulletin_translation bt ON bt.item_id=i.id AND bt.lang=?
   WHERE i.status='done' AND (ui.id IS NOT NULL
     OR EXISTS (SELECT 1 FROM subscription sub JOIN channel_item ci ON ci.channel_id=sub.channel_id
       WHERE sub.user_id=? AND sub.enabled=1 AND ci.item_id=i.id)
@@ -80,7 +80,7 @@ bulletinRoutes.get("/feed", requireAuth, async (c) => {
   )
     return c.json({ error: "Invalid source" }, 400);
   const after = feedCursorFilter(sortDate, "i.id", 0, cursor);
-  const binds: unknown[] = [user.id, user.id, user.id, ...after.binds];
+  const binds: unknown[] = [user.id, user.preferred_language || "auto", user.id, user.id, ...after.binds];
   let filters = after.sql;
   if (params.q?.trim()) {
     filters += " AND (i.title LIKE ? OR i.headline LIKE ? OR i.author LIKE ?)";
@@ -149,7 +149,7 @@ async function getAccessible(
   return first<BulletinRow>(
     env.DB.prepare(
       `SELECT ${metadata}, s.structured AS summary_structured, s.markdown AS summary_markdown ${accessible(true)} AND i.id=? LIMIT 1`,
-    ).bind(userId, userId, userId, id),
+    ).bind(userId, "auto", userId, userId, id),
   );
 }
 
@@ -165,9 +165,9 @@ bulletinRoutes.get("/:id", async (c) => {
       `SELECT ${metadata}, s.structured AS summary_structured, s.markdown AS summary_markdown
      FROM item i JOIN summary s ON s.item_id=i.id
      LEFT JOIN user_item ui ON ui.item_id=i.id AND ui.user_id=?
-     LEFT JOIN bulletin_translation bt ON bt.item_id=i.id AND bt.lang='zh'
+     LEFT JOIN bulletin_translation bt ON bt.item_id=i.id AND bt.lang=?
      WHERE i.status='done' AND i.id=? LIMIT 1`,
-    ).bind(user?.id ?? -1, id),
+    ).bind(user?.id ?? -1, user?.preferred_language || "auto", id),
   );
   if (!row) return c.json({ error: "bulletin not found" }, 404);
   const source = { ...row, summary_markdown: row.summary_markdown || null };
@@ -180,6 +180,7 @@ bulletinRoutes.get("/:id", async (c) => {
       "SELECT * FROM reading_summary_lang WHERE item_id=? AND lang='zh'",
     ).bind(id),
   );
+  const english = await first<ReadingRow>(c.env.DB.prepare("SELECT * FROM reading_summary_lang WHERE item_id=? AND lang='en'").bind(id));
   const contentTranslations = await all<{ lang: string; status: string }>(
     c.env.DB.prepare(
       "SELECT lang, status FROM item_translation WHERE item_id = ? ORDER BY lang",
@@ -189,6 +190,7 @@ bulletinRoutes.get("/:id", async (c) => {
     ...serializeBulletin(row, user?.preferred_language || "auto", true),
     reading_summary: readCached(cached, hash),
     reading_summary_zh: readCached(chinese, hash),
+    reading_summary_en: readCached(english, hash),
     content_translations: contentTranslations,
     channel: await itemChannel(c.env, id),
   });
@@ -201,7 +203,7 @@ bulletinRoutes.post("/:id/reading-summary", requireAuth, async (c) => {
   const row = await getAccessible(c.env, c.get("user").id, id);
   if (!row) return c.json({ error: "bulletin not found" }, 404);
   const body = (await c.req.json().catch(() => ({}))) as { lang?: string };
-  const lang = body.lang === "zh" ? "zh" : "";
+  const lang = body.lang === "zh" || body.lang === "en" ? body.lang : "";
   try {
     const result = await generateReadingSummary(
       c.env,

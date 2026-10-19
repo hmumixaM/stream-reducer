@@ -73,8 +73,9 @@ export function ItemDetail() {
     localStorage.setItem("sr_read_mode", String(readMode));
   }, [readMode]);
 
+  const preferred = me.data?.user?.preferred_language || "auto";
   const preferChinese = me.data?.user?.preferred_language === "zh";
-  const itemKey = ["item", itemId, me.data?.user?.id, preferChinese];
+  const itemKey = ["item", itemId, me.data?.user?.id, preferred];
   const item = useQuery({
     queryKey: itemKey,
     queryFn: () => api.getItem(itemId),
@@ -84,18 +85,18 @@ export function ItemDetail() {
   const prepareBulletin = useMutation({
     mutationFn: (id: number) => api.prepareBulletin(id),
     onSuccess: (localized_bulletin, id) => {
-      qc.setQueryData<ItemDetailData>(["item", id, me.data?.user?.id, preferChinese], (old) => old ? { ...old, localized_bulletin } : old);
+      qc.setQueryData<ItemDetailData>(["item", id, me.data?.user?.id, preferred], (old) => old ? { ...old, localized_bulletin } : old);
       qc.invalidateQueries({ queryKey: ["bulletin"] });
     },
   });
-  const attemptedBulletins = useRef(new Set<number>());
+  const attemptedBulletins = useRef(new Set<string>());
   useEffect(() => {
     const localized = item.data?.localized_bulletin;
-    if (preferChinese && item.data?.summary && !localized?.complete && localized?.status !== "processing" && !attemptedBulletins.current.has(itemId)) {
-      attemptedBulletins.current.add(itemId);
+    if (preferred !== "auto" && !(preferred === "en" && /^(en(?:[-_].+)?|english)$/i.test(item.data?.transcript?.language || "")) && item.data?.summary && !localized?.complete && localized?.status !== "processing" && !attemptedBulletins.current.has(`${itemId}:${preferred}`)) {
+      attemptedBulletins.current.add(`${itemId}:${preferred}`);
       prepareBulletin.mutate(itemId);
     }
-  }, [itemId, preferChinese, item.data?.summary, item.data?.localized_bulletin?.complete, item.data?.localized_bulletin?.status]);
+  }, [itemId, preferred, item.data?.summary, item.data?.localized_bulletin?.complete, item.data?.localized_bulletin?.status]);
   const articleTitle = item.data?.title?.trim() || item.data?.source_url;
   useArticleMetadata(itemId, item.data?.headline || articleTitle, item.data?.subhead || item.data?.summary?.markdown, item.data?.status === "done");
 
@@ -335,6 +336,7 @@ export function ItemDetail() {
             <SummaryView
               itemId={itemId}
               preferChinese={preferChinese}
+              preferEnglish={preferred === "en" && !/^(en(?:[-_].+)?|english)$/i.test(d.transcript?.language || "")}
               summaryMarkdown={d.summary.markdown}
               structured={d.summary.structured}
               headline={d.headline}
@@ -575,6 +577,7 @@ function SummaryView({
   summaryMarkdown,
   structured,
   preferChinese,
+  preferEnglish,
   headline,
   subhead,
   itemTitle,
@@ -593,6 +596,7 @@ function SummaryView({
   itemId: number;
   summaryMarkdown: string;
   preferChinese: boolean;
+  preferEnglish: boolean;
   structured: Record<string, unknown>;
   headline?: string | null;
   subhead?: string | null;
@@ -610,16 +614,16 @@ function SummaryView({
   onDelete: (id: number) => void;
 }) {
   const picked = useRef(false);
-  const askedChinese = useRef(false);
+  const askedEditions = useRef(new Set<string>());
   const nativeChinese = isPredominantlyChinese(summaryMarkdown || sourceText);
-  const [lang, setLang] = useState<string | null>(preferChinese && !nativeChinese ? "zh" : null);
+  const [lang, setLang] = useState<string | null>(preferEnglish ? "en" : preferChinese && !nativeChinese ? "zh" : null);
   const [summaryMode, setSummaryMode] = useState<"bulletin" | "detailed">("bulletin");
   const qc = useQueryClient();
   const mdClass = readMode ? "prose-read max-w-none" : "prose-sr max-w-none text-sm";
   useEffect(() => {
     if (picked.current) return;
-    setLang(preferChinese && !nativeChinese ? "zh" : null);
-  }, [preferChinese, nativeChinese]);
+    setLang(preferEnglish ? "en" : preferChinese && !nativeChinese ? "zh" : null);
+  }, [preferEnglish, preferChinese, nativeChinese]);
 
   const translation = useQuery({
     queryKey: ["translation", itemId, lang],
@@ -664,11 +668,11 @@ function SummaryView({
     if (confirm(prompt)) request.mutate(code);
   };
   useEffect(() => {
-    if (!authed || !preferChinese || nativeChinese || lang !== "zh" || askedChinese.current) return;
-    if (translations.some((row) => row.lang === "zh")) return;
-    askedChinese.current = true;
-    request.mutate("zh");
-  }, [authed, preferChinese, nativeChinese, lang, translations, request]);
+    if (!authed || (!preferChinese && !preferEnglish) || (preferChinese && nativeChinese) || lang !== (preferEnglish ? "en" : "zh") || askedEditions.current.has(`${itemId}:${lang}`)) return;
+    if (translations.some((row) => row.lang === (preferEnglish ? "en" : "zh"))) return;
+    askedEditions.current.add(`${itemId}:${lang}`);
+    request.mutate(preferEnglish ? "en" : "zh");
+  }, [authed, preferEnglish, preferChinese, nativeChinese, lang, translations, request]);
 
   const edition = lang != null && translation.data?.status === "done" ? translation.data : null;
   const viewStructured = (edition?.structured ?? structured) as Record<string, unknown>;

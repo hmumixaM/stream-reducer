@@ -72,12 +72,12 @@ export interface User {
   id: number;
   email: string;
   is_admin: boolean;
-  preferred_language: "auto" | "zh";
+  preferred_language: "auto" | "zh" | "en";
   created_at: string;
 }
 
 export interface BulletinPreference {
-  preferred_language: "auto" | "zh";
+  preferred_language: "auto" | "zh" | "en";
   enqueued?: number;
 }
 
@@ -463,6 +463,7 @@ export interface ReadingSummaryResult {
 }
 
 export interface BulletinItem {
+  source_language?: string | null;
   thumbnail?: string | null;
   id: number;
   title: string;
@@ -478,7 +479,7 @@ export interface BulletinItem {
   bulletin_points: BulletinPoint[];
   bulletin_overview: string;
   bulletin_intro_ready: boolean;
-  bulletin_language: "zh" | "original";
+  bulletin_language: "zh" | "en" | "original";
   localization_status: string;
   markdown: string;
   tldr: string;
@@ -493,6 +494,7 @@ export interface BulletinItem {
   entities: string[];
   reading_summary: ReadingSummaryResult;
   reading_summary_zh?: ReadingSummaryResult;
+  reading_summary_en?: ReadingSummaryResult;
   content_translations?: { lang: string; status: string }[];
   channel?: SourceChannel | null;
 }
@@ -973,7 +975,7 @@ export const api = {
     }),
   getMe: () => optionalSession(),
   getBulletinPreference: () => req<BulletinPreference>("/api/auth/preferences"),
-  updateBulletinPreference: (preferred_language: "auto" | "zh") =>
+  updateBulletinPreference: (preferred_language: "auto" | "zh" | "en") =>
     req<BulletinPreference>("/api/auth/preferences", {
       method: "PATCH",
       body: JSON.stringify({ preferred_language }),
@@ -1212,7 +1214,7 @@ export const api = {
   },
   getBulletin: (id: number) => req<BulletinItem>(`/api/bulletin/${id}`),
   prepareBulletin: (id: number) => req<LocalizedBulletin>(`/api/items/${id}/bulletin`, { method: "POST" }),
-  prepareReadingSummary: (id: number, lang?: "zh") => req<ReadingSummaryResult>(`/api/bulletin/${id}/reading-summary`, { method: "POST", body: JSON.stringify(lang ? { lang } : {}) }),
+  prepareReadingSummary: (id: number, lang?: "zh" | "en") => req<ReadingSummaryResult>(`/api/bulletin/${id}/reading-summary`, { method: "POST", body: JSON.stringify(lang ? { lang } : {}) }),
   runResearch: () =>
     req<{ ok: boolean; created: number; generated_at: string }>("/api/research/run", { method: "POST" }),
   askResearch: (question: string) =>

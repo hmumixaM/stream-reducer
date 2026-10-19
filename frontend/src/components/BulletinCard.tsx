@@ -21,7 +21,7 @@ export function BulletinCard({
   const points = expanded
     ? item.bulletin_points
     : item.bulletin_points.slice(0, 3);
-  const pending = zh && item.localization_status !== "done";
+  const pending = !item.bulletin_intro_ready || (zh && item.localization_status !== "done");
   return (
     <article className="desk-story">
       <div className="desk-story-meta">
@@ -57,11 +57,11 @@ export function BulletinCard({
           item.localization_status === "processing" ? (
             <>
               <RefreshCw size={11} className="animate-spin" />
-              中文简报准备中
+              {zh ? "中文简报准备中" : "English bulletin is being prepared"}
             </>
           ) : (
             <Link to={href} className="hover:underline">
-              中文概览待补齐 · 打开阅读页即可生成
+              {zh ? "中文概览待补齐 · 打开阅读页即可生成" : "English overview pending · open to prepare"}
             </Link>
           )}
         </p>
@@ -69,7 +69,7 @@ export function BulletinCard({
       {showOverview && item.bulletin_overview && (
         <p
           className="mt-4 text-[15px] leading-8 text-foreground/85"
-          lang={item.bulletin_language === "zh" ? "zh-CN" : undefined}
+          lang={item.bulletin_language === "zh" ? "zh-CN" : item.bulletin_language === "en" ? "en" : undefined}
         >
           {item.bulletin_overview}
         </p>
@@ -77,7 +77,7 @@ export function BulletinCard({
       {points.length ? (
         <ul
           className="desk-story-points"
-          lang={item.bulletin_language === "zh" ? "zh-CN" : undefined}
+          lang={item.bulletin_language === "zh" ? "zh-CN" : item.bulletin_language === "en" ? "en" : undefined}
         >
           {points.map((point, i) => (
             <li key={i}>{point.text}</li>

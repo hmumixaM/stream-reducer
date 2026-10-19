@@ -54,7 +54,8 @@ export function BulletinDetail() {
   const itemId = Number(id);
   const me = useMe();
   const authed = !!me.data?.user;
-  const zh = me.data?.user?.preferred_language === "zh";
+  const preferred = me.data?.user?.preferred_language || "auto";
+  const zh = preferred === "zh";
   const [params, setParams] = useSearchParams();
   const collection = params.get("collection");
   const returnParams = new URLSearchParams({ view: "bulletin" });
@@ -74,34 +75,35 @@ export function BulletinDetail() {
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState(false);
   const qc = useQueryClient();
-  const queryKey = ["bulletin", itemId, me.data?.user?.id, zh];
+  const queryKey = ["bulletin", itemId, me.data?.user?.id, preferred];
   const bulletin = useQuery({
     queryKey, queryFn: () => api.getBulletin(itemId), enabled: Number.isInteger(itemId) && itemId > 0,
-    refetchInterval: (query) => query.state.data?.reading_summary.status === "processing" || query.state.data?.reading_summary_zh?.status === "processing" || (zh && query.state.data?.localization_status === "processing") ? 3000 : false,
+    refetchInterval: (query) => query.state.data?.reading_summary.status === "processing" || query.state.data?.reading_summary_zh?.status === "processing" || query.state.data?.reading_summary_en?.status === "processing" || (preferred !== "auto" && query.state.data?.localization_status === "processing") ? 3000 : false,
   });
   useArticleMetadata(itemId, bulletin.data?.title, bulletin.data?.subhead || bulletin.data?.tldr);
   const preparation = useMutation({
-    mutationFn: ({ id, lang }: { id: number; lang?: "zh" }) => api.prepareReadingSummary(id, lang),
-    onSuccess: (result, { id, lang }) => qc.setQueryData<BulletinItem>(["bulletin", id, me.data?.user?.id, zh], (old) => old ? { ...old, ...(lang === "zh" ? { reading_summary_zh: result } : { reading_summary: result }) } : old),
+    mutationFn: ({ id, lang }: { id: number; lang?: "zh" | "en" }) => api.prepareReadingSummary(id, lang),
+    onSuccess: (result, { id, lang }) => qc.setQueryData<BulletinItem>(["bulletin", id, me.data?.user?.id, preferred], (old) => old ? { ...old, ...(lang === "zh" ? { reading_summary_zh: result } : lang === "en" ? { reading_summary_en: result } : { reading_summary: result }) } : old),
   });
   const localization = useMutation({
     mutationFn: (id: number) => api.prepareBulletin(id),
     onSuccess: (_result, id) => qc.invalidateQueries({ queryKey: ["bulletin", id] }),
   });
-  const localizedAttempts = useRef(new Set<number>());
+  const localizedAttempts = useRef(new Set<string>());
   useEffect(() => {
     if (!authed) return;
-    if (zh && bulletin.data && !bulletin.data.bulletin_intro_ready && bulletin.data.localization_status !== "processing" && !localizedAttempts.current.has(itemId)) {
-      localizedAttempts.current.add(itemId);
+    if (preferred !== "auto" && bulletin.data && !bulletin.data.bulletin_intro_ready && bulletin.data.localization_status !== "processing" && !localizedAttempts.current.has(`${itemId}:${preferred}`)) {
+      localizedAttempts.current.add(`${itemId}:${preferred}`);
       localization.mutate(itemId);
     }
-  }, [authed, itemId, zh, bulletin.data?.bulletin_intro_ready, bulletin.data?.localization_status]);
+  }, [authed, itemId, preferred, bulletin.data?.bulletin_intro_ready, bulletin.data?.localization_status]);
   const attempted = useRef(new Set<string>());
   const picked = useRef(false);
-  const askedChinese = useRef(false);
+  const askedEditions = useRef(new Set<string>());
+  const nativeEnglish = /^(en(?:[-_].+)?|english)$/i.test(bulletin.data?.source_language || "");
   const nativeChinese = isPredominantlyChinese(bulletin.data?.markdown || bulletin.data?.tldr || "");
   const [lang, setLang] = useState<string | null>(zh ? "zh" : null);
-  useEffect(() => { if (!picked.current) setLang(zh && !nativeChinese ? "zh" : null); }, [zh, nativeChinese]);
+  useEffect(() => { if (!picked.current) setLang(preferred === "en" && !nativeEnglish ? "en" : zh && !nativeChinese ? "zh" : null); }, [preferred, zh, nativeChinese, nativeEnglish]);
   const translations = bulletin.data?.content_translations ?? [];
   const translation = useQuery({
     queryKey: ["translation", itemId, lang],
@@ -131,22 +133,23 @@ export function BulletinDetail() {
     if (confirm(zh ? `生成${label}全文？生成一次后所有人共用。` : `Generate a ${label} edition of the full summary? It runs once and is then shared.`)) requestEdition.mutate(code);
   };
   useEffect(() => {
-    if (!authed || !zh || nativeChinese || lang !== "zh" || askedChinese.current) return;
-    if (translations.some((row) => row.lang === "zh")) return;
+    if (!authed || preferred === "auto" || (zh && nativeChinese) || lang !== preferred || askedEditions.current.has(`${itemId}:${preferred}`)) return;
+    if (translations.some((row) => row.lang === preferred)) return;
     if (!bulletin.data) return;
-    askedChinese.current = true;
-    requestEdition.mutate("zh");
-  }, [authed, zh, nativeChinese, lang, translations, bulletin.data, itemId, requestEdition]);
+    askedEditions.current.add(`${itemId}:${preferred}`);
+    requestEdition.mutate(preferred);
+  }, [authed, preferred, zh, nativeChinese, lang, translations, bulletin.data, itemId, requestEdition]);
   const chineseBrief = lang === "zh" && !nativeChinese;
-  const briefStatus = chineseBrief ? bulletin.data?.reading_summary_zh?.status : bulletin.data?.reading_summary.status;
+  const briefLang = chineseBrief ? "zh" : lang === "en" ? "en" : undefined;
+  const briefStatus = briefLang === "zh" ? bulletin.data?.reading_summary_zh?.status : briefLang === "en" ? bulletin.data?.reading_summary_en?.status : bulletin.data?.reading_summary.status;
   useEffect(() => {
-    const key = `${itemId}:${chineseBrief ? "zh" : "source"}`;
+    const key = `${itemId}:${briefLang || "source"}`;
     if (!authed) return;
     if (briefStatus === "missing" && !attempted.current.has(key)) {
       attempted.current.add(key);
-      preparation.mutate({ id: itemId, lang: chineseBrief ? "zh" : undefined });
+      preparation.mutate({ id: itemId, lang: briefLang });
     }
-  }, [authed, itemId, chineseBrief, briefStatus]); // A missing concise brief is prepared once; errors require an explicit retry.
+  }, [authed, itemId, briefLang, briefStatus]); // A missing concise brief is prepared once; errors require an explicit retry.
   useEffect(() => { setPrintFull(false); }, [itemId]);
 
   if (bulletin.isLoading) return <LoadingState label={zh ? "正在打开阅读稿…" : "Opening your reading edition…"} />;
@@ -161,9 +164,9 @@ export function BulletinDetail() {
   const failedEdition = lang != null && translation.data?.status === "error";
   const glancePoints = edition ? editionPoints : lang == null ? item.key_point_details : item.bulletin_points;
   const glanceOverview = edition ? editionOverview : lang == null ? item.tldr : item.bulletin_overview;
-  const brief = chineseBrief ? item.reading_summary_zh : item.reading_summary;
+  const brief = briefLang === "zh" ? item.reading_summary_zh : briefLang === "en" ? item.reading_summary_en : item.reading_summary;
   const summary = brief?.content ?? null;
-  const preparing = (preparation.isPending && preparation.variables?.id === itemId && Boolean(preparation.variables.lang) === chineseBrief) || brief?.status === "processing";
+  const preparing = (preparation.isPending && preparation.variables?.id === itemId && preparation.variables.lang === briefLang) || brief?.status === "processing";
   const notesMarkdown = edition
     ? (typeof editionStructured.walkthrough === "string" && editionStructured.walkthrough.trim() ? editionStructured.walkthrough : edition.markdown)
     : (item.walkthrough || item.markdown);
@@ -209,7 +212,7 @@ export function BulletinDetail() {
       <div className="reader-columns">
         <div className="min-w-0">
           <section className="reader-bulletin" aria-label="Bulletin">
-            <div className="mb-4 flex items-center justify-between"><p className="desk-eyebrow text-primary">BULLETIN</p><span className="font-mono text-[10px] text-muted-foreground">{edition ? languageLabel(edition.lang) : lang == null ? (zh ? "原文" : "AT A GLANCE") : (item.bulletin_language === "zh" ? "中文简报" : "AT A GLANCE")}</span></div>
+            <div className="mb-4 flex items-center justify-between"><p className="desk-eyebrow text-primary">BULLETIN</p><span className="font-mono text-[10px] text-muted-foreground">{edition ? languageLabel(edition.lang) : lang == null ? (zh ? "原文" : "AT A GLANCE") : (item.bulletin_language === "zh" ? "中文简报" : item.bulletin_language === "en" ? "ENGLISH BULLETIN" : "AT A GLANCE")}</span></div>
             {lang != null && !edition && <div className="mb-4 text-sm text-muted-foreground" role="status">{failedEdition ? <>{zh ? "全文翻译失败。" : "The full edition failed."} <button className="underline" onClick={() => requestEdition.mutate(lang)}>{zh ? "重试" : "Retry"}</button></> : (zh ? "全文与上面的简报使用同一次翻译，生成后会替换这里的预览。" : "The full edition replaces this preview when it is ready.")}</div>}
             {lang == null && zh && !item.bulletin_intro_ready && <div className="mb-4 text-sm text-muted-foreground" role="status">{localization.isPending || item.localization_status === "processing" ? "正在补齐中文标题与概览…" : <button onClick={() => localization.mutate(itemId)} className="underline">中文概览暂未就绪，点击重试</button>}</div>}
             {glanceOverview && <p className="mb-5 text-sm leading-7">{glanceOverview}</p>}
@@ -227,8 +230,8 @@ export function BulletinDetail() {
           }} className={cn("reader-tab", view === tab.value && "is-active")} onClick={() => setView(tab.value)}>{tab.label}</button>)}</div>
           <article className="reader-article" role="tabpanel" id={`panel-${view}`} aria-labelledby={`tab-${view}`}>
             {view === "summary" && (summary ? <SummaryBody summary={summary} source={item.source_url} zh={zh || chineseBrief} /> : <>
-              <div className="reader-preparing" role="status">{preparing ? <RefreshCw size={18} className="shrink-0 animate-spin" /> : <BookOpen size={18} className="shrink-0" />}<div><p className="font-medium">{preparing ? (zh ? "正在整理这篇精炼概括" : "Preparing your reading edition") : (zh ? "精炼概括暂时未就绪" : "The reading edition isn’t ready yet")}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{zh ? "先阅读上面的简报，或切换到完整逐段内容。" : "You can read the bulletin above, or switch to the full notes."}</p>{!preparing && authed && <Button size="sm" variant="outline" className="mt-3" onClick={() => preparation.mutate({ id: itemId, lang: chineseBrief ? "zh" : undefined })}>{zh ? "重新生成概括" : "Retry summary"}</Button>}</div></div>
-              {(chineseBrief ? editionOverview : item.tldr) && <p className="reader-lead">{chineseBrief ? editionOverview : item.tldr}</p>}
+              <div className="reader-preparing" role="status">{preparing ? <RefreshCw size={18} className="shrink-0 animate-spin" /> : <BookOpen size={18} className="shrink-0" />}<div><p className="font-medium">{preparing ? (zh ? "正在整理这篇精炼概括" : "Preparing your reading edition") : (zh ? "精炼概括暂时未就绪" : "The reading edition isn’t ready yet")}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{zh ? "先阅读上面的简报，或切换到完整逐段内容。" : "You can read the bulletin above, or switch to the full notes."}</p>{!preparing && authed && <Button size="sm" variant="outline" className="mt-3" onClick={() => preparation.mutate({ id: itemId, lang: briefLang })}>{zh ? "重新生成概括" : "Retry summary"}</Button>}</div></div>
+              {(lang != null ? editionOverview : item.tldr) && <p className="reader-lead">{lang != null ? editionOverview : item.tldr}</p>}
             </>)}
             {view === "notes" && (waitingEdition || failedEdition ? <div className="reader-preparing" role="status"><RefreshCw size={18} className={cn("shrink-0", waitingEdition && "animate-spin")} /><div><p className="font-medium">{failedEdition ? (zh ? "全文翻译失败" : "The full edition failed") : (zh ? `正在生成${languageLabel(lang!)}逐段内容` : `Preparing the ${languageLabel(lang!)} notes`)}</p>{failedEdition && <Button size="sm" variant="outline" className="mt-3" onClick={() => requestEdition.mutate(lang!)}>{zh ? "重试" : "Retry"}</Button>}</div></div> : <><p className="mb-6 text-xs text-muted-foreground">{zh ? "保留完整论述、例子与时间线。" : "The full argument, examples and chronological notes."}</p><Suspense fallback={<LoadingState label={zh ? "加载完整内容…" : "Loading full notes…"} />}><FullMarkdown markdown={notesMarkdown} highlights={[]} source="summary" readOnly onCreate={noOp} onUpdateNote={noOp} onDelete={noOp} className="prose-sr reader-prose" /></Suspense></>)}
             {view === "sources" && <><section className="reader-section pt-0"><p className="desk-eyebrow">{zh ? "原始来源" : "ORIGINAL SOURCE"}</p><h2 className="mt-3">{item.source_title}</h2><p className="reader-prose mt-4">{item.background}</p><a href={item.source_url} target="_blank" rel="noreferrer" className="reader-citation mt-4">{zh ? "打开原始来源" : "Open original source"}<ArrowUpRight size={12} /></a></section>{item.quotes.map((quote, index) => <blockquote className="reader-quote" key={index}><p>“{quote.text}”</p><footer>{quote.speaker}{quote.timestamp !== null && <a href={sourceAt(item.source_url, quote.timestamp)} target="_blank" rel="noreferrer"> · {timestampLabel(quote.timestamp)} ↗</a>}</footer></blockquote>)}{!item.quotes.length && <p className="text-sm text-muted-foreground">{zh ? "这篇内容未提取单独引文，可在完整内容中查阅。" : "No separate quotes were extracted. You can inspect the full notes."}</p>}<Link to={`/items/${item.id}`} className="reader-citation mt-8">{zh ? "查看逐字稿、笔记与标注" : "Open transcript, notes & highlights"}<ArrowUpRight size={13} /></Link></>}

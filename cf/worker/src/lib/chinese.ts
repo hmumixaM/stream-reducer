@@ -27,3 +27,14 @@ export async function sourceAlreadyChinese(env: Env, itemId: number): Promise<bo
   );
   return isPredominantlyChinese(row?.sample || "");
 }
+
+export function isEnglishLanguage(language: string | null | undefined): boolean {
+  return /^(en(?:[-_].+)?|english)$/i.test(language || "");
+}
+
+export async function sourceAlreadyEnglish(env: Env, itemId: number): Promise<boolean> {
+  const row = await first<{ language: string }>(env.DB.prepare(
+    "SELECT language FROM transcript WHERE item_id=?",
+  ).bind(itemId));
+  return isEnglishLanguage(row?.language);
+}

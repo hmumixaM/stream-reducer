@@ -73,6 +73,14 @@ describe("reading edition", () => {
     expect(request.messages[1].content).toContain("Evidence");
     expect(writes.some((sql) => sql.includes("reading_summary_lang"))).toBe(true);
   });
+  it("stores an English reading brief separately from the source brief", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(brief) } }] })));
+    vi.stubGlobal("fetch", fetch);
+    const { env, writes } = environment();
+    expect((await generateReadingSummary(env, source, "en")).status).toBe("done");
+    expect(JSON.parse(fetch.mock.calls[0][1].body).messages[0].content).toContain("entire brief in English");
+    expect(writes.some((sql) => sql.includes("reading_summary_lang"))).toBe(true);
+  });
   it("persists an error when the provider fails so the UI can retry", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 })));
     const { env, getRow } = environment();
@@ -88,6 +96,7 @@ describe("reading brief queueing", () => {
       DB: { prepare(sql: string) {
         return { bind() { return this; }, async first() {
           if (sql.includes("AS sample")) return { sample };
+          if (sql.includes("preferred_language = 'en'")) return null;
           return chineseReader ? { id: 7 } : null;
         } };
       } },

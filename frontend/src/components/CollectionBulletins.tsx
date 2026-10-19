@@ -10,7 +10,7 @@ export function CollectionBulletins({ slug, section, trackId }: { slug: string; 
   const me = useMe();
   const zh = me.data?.user?.preferred_language === "zh";
   const feed = useInfiniteQuery({
-    queryKey: ["collection-bulletin", slug, section, trackId, me.data?.user?.id, zh],
+    queryKey: ["collection-bulletin", slug, section, trackId, me.data?.user?.id, me.data?.user?.preferred_language],
     queryFn: ({ pageParam }) => api.listCollectionBulletins(slug, { section, track_id: trackId, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => page.next_cursor ?? undefined,

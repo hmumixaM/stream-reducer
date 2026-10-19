@@ -283,10 +283,10 @@ itemsRoutes.post("/:id/bulletin", requireAuth, async (c) => {
   if (!Number.isInteger(id) || id <= 0) return c.json({ error: "Invalid item" }, 400);
   const source = await first<{ id: number }>(c.env.DB.prepare("SELECT id FROM item WHERE id=? AND status='done'").bind(id));
   if (!source) return c.json({ error: "item not found" }, 404);
-  try { return c.json(await translateBulletinEdition(c.env, id)); }
+  try { return c.json(await translateBulletinEdition(c.env, id, c.get("user").preferred_language === "en" ? "en" : "zh")); }
   catch (error) {
     console.error("bulletin localization failed", id, String(error));
-    return c.json({ error: "Chinese bulletin could not be prepared. Please retry." }, 503);
+    return c.json({ error: "Bulletin could not be prepared. Please retry." }, 503);
   }
 });
 
@@ -337,10 +337,10 @@ itemsRoutes.get("/:id", async (c) => {
         item.source_url,
       )
     : null;
-  const localizedBulletin = summaryContent && user?.preferred_language === "zh"
+  const localizedBulletin = summaryContent && (user?.preferred_language === "zh" || user?.preferred_language === "en")
     ? readBulletinTranslation(await first<BulletinTranslationRow>(c.env.DB.prepare(
-      "SELECT * FROM bulletin_translation WHERE item_id=? AND lang='zh'",
-    ).bind(id))) : null;
+      "SELECT * FROM bulletin_translation WHERE item_id=? AND lang=?",
+    ).bind(id, user.preferred_language))) : null;
 
   return c.json({
     ...toItemRead(item, ui, { is_interested: interested != null }),

@@ -1,7 +1,7 @@
 import type { Env } from "../env";
-import { all, first } from "../db";
+import { all } from "../db";
 import { isoNow } from "./crypto";
-import { isPredominantlyChinese, sourceAlreadyChinese } from "./chinese";
+import { isEnglishLanguage, sourceAlreadyEnglish, isPredominantlyChinese, sourceAlreadyChinese } from "./chinese";
 
 const SUPPORTED_LANGUAGES = new Set([
   "en",
@@ -54,6 +54,7 @@ export async function enqueueTranslationLanguages(
       throw new Error(`unsupported translation language: ${language}`);
     }
     if (language === "zh" && await sourceAlreadyChinese(env, itemId)) continue;
+    if (language === "en" && await sourceAlreadyEnglish(env, itemId)) continue;
     const result = await env.DB.prepare(QUEUE_TRANSLATION).bind(itemId, language).run();
     if ((result.meta.changes ?? 0) === 0) continue;
     try {
@@ -81,9 +82,9 @@ export async function enqueueLibraryContentTranslations(
   if (!SUPPORTED_LANGUAGES.has(lang)) {
     throw new Error(`unsupported translation language: ${lang}`);
   }
-  const rows = await all<{ id: number; sample: string | null }>(
+  const rows = await all<{ id: number; sample: string | null; language: string | null }>(
     env.DB.prepare(
-      `SELECT i.id, substr(COALESCE(s.markdown, t.text, ''), 1, 8000) AS sample
+      `SELECT i.id, t.language, substr(COALESCE(s.markdown, t.text, ''), 1, 8000) AS sample
          FROM user_item ui
          JOIN item i ON i.id = ui.item_id
          JOIN transcript t ON t.item_id = i.id
@@ -92,7 +93,7 @@ export async function enqueueLibraryContentTranslations(
     ).bind(userId),
   );
   const ids = rows
-    .filter((row) => lang !== "zh" || !isPredominantlyChinese(row.sample || ""))
+    .filter((row) => lang === "zh" ? !isPredominantlyChinese(row.sample || "") : lang !== "en" || !isEnglishLanguage(row.language))
     .map((row) => row.id);
   return enqueueContentTranslations(env, ids, lang);
 }
@@ -100,17 +101,15 @@ export async function enqueueLibraryContentTranslations(
 // When a source finishes, give it the full edition preferred by someone who
 // already has it in their library.
 export async function enqueuePreferredContentTranslation(env: Env, itemId: number): Promise<number> {
-  const row = await first<{ ok: number }>(
+  const rows = await all<{ lang: string }>(
     env.DB.prepare(
-      `SELECT 1 AS ok
+      `SELECT DISTINCT u.preferred_language AS lang
          FROM user_item ui
          JOIN user u ON u.id = ui.user_id
-        WHERE ui.item_id = ? AND u.preferred_language = 'zh'
-        LIMIT 1`,
+        WHERE ui.item_id = ? AND u.preferred_language IN ('zh','en')`,
     ).bind(itemId),
   );
-  if (!row) return 0;
-  const queued = await enqueueTranslationLanguages(env, itemId, ["zh"]);
+  const queued = await enqueueTranslationLanguages(env, itemId, rows.map((row) => row.lang));
   return queued.length;
 }
 

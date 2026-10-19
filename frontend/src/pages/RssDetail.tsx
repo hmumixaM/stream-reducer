@@ -1,5 +1,5 @@
 import { updateMetadata } from "@/lib/seo";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
@@ -34,8 +34,15 @@ export function RssDetail() {
     return data as T;
   };
   const [lang, setLang] = useState(
-    me.data?.user?.preferred_language === "zh" ? "zh" : "original",
+    me.data?.user?.preferred_language === "zh" || me.data?.user?.preferred_language === "en" ? me.data.user.preferred_language : "original",
   );
+  const pickedLanguage = useRef(false);
+  useEffect(() => {
+    if (!pickedLanguage.current) {
+      const preferred = me.data?.user?.preferred_language;
+      setLang(preferred === "zh" || preferred === "en" ? preferred : "original");
+    }
+  }, [me.data?.user?.preferred_language]);
   const [showBody, setShowBody] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -168,7 +175,7 @@ export function RssDetail() {
             aria-label="概括语言"
             className="ml-auto min-h-11 w-32"
             value={lang}
-            onChange={(e) => setLang(e.target.value)}
+            onChange={(e) => { pickedLanguage.current = true; setLang(e.target.value); }}
           >
             <option value="original">原文语言</option>
             <option value="zh">中文</option>

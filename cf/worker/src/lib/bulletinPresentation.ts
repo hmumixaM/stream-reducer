@@ -1,6 +1,9 @@
+import { isEnglishLanguage } from "./chinese";
+
 type Point = { text: string; timestamp: number | null };
 export type BulletinRow = {
   thumbnail?: string | null;
+  source_language?: string | null;
   id: number; title: string | null; headline: string | null; subhead: string | null;
   author: string | null; source_url: string; platform: string; duration_s: number | null;
   published_at: string | null; created_at: string; sort_date: number; saved: number;
@@ -28,7 +31,10 @@ export function serializeBulletin(row: BulletinRow, language: string, detail = f
   const structured = parseObject(row.summary_structured);
   let points = parsePoints(structured.bulletin);
   let localized = false;
-  if (language === "zh" && row.localized_bulletin) {
+  const nativeEnglish = language === "en" && isEnglishLanguage(row.source_language);
+  const requested = language === "zh" || (language === "en" && !nativeEnglish);
+  const pendingTitle = language === "zh" ? "中文简报整理中" : "English bulletin is being prepared";
+  if (requested && row.localized_bulletin) {
     try {
       const translated = parsePoints(JSON.parse(row.localized_bulletin || "[]"));
       if (translated.length) { points = translated; localized = true; }
@@ -37,22 +43,22 @@ export function serializeBulletin(row: BulletinRow, language: string, detail = f
   const localizedIntro = localized && Boolean(row.localized_headline?.trim() && row.localized_tldr?.trim());
   const localizationStatus = row.localized_bulletin_status === "processing" && row.localized_updated_at && Date.parse(row.localized_updated_at) < Date.now() - 120_000 ? "error" : row.localized_bulletin_status;
   const keyPoints = parsePoints(structured.key_points);
-  if (language === "zh" && !localized) points = [];
+  if (requested && !localized) points = [];
   else if (!points.length) points = keyPoints.slice(0, 4);
   const base = {
-    id: row.id, title: language === "zh" ? (localizedIntro ? row.localized_headline! : "中文简报整理中") : row.headline || row.title || row.source_url,
+    id: row.id, source_language: row.source_language || null, title: requested ? (localizedIntro ? row.localized_headline! : pendingTitle) : row.headline || row.title || row.source_url,
     source_title: row.title || row.headline || row.source_url,
-    subhead: language === "zh" ? (localizedIntro ? row.localized_subhead || "" : "") : row.subhead, author: row.author, platform: row.platform,
+    subhead: requested ? (localizedIntro ? row.localized_subhead || "" : "") : row.subhead, author: row.author, platform: row.platform,
     source_url: row.source_url, duration_s: row.duration_s, published_at: row.published_at,
     created_at: row.created_at, saved: Boolean(row.saved),
     bulletin: points.slice(0, 5).map((point) => point.text),
     bulletin_points: points.slice(0, 5),
-    bulletin_language: localized ? "zh" : "original",
-    bulletin_overview: language === "zh" ? (localizedIntro ? row.localized_tldr! : "") : text(structured.tldr),
-    bulletin_intro_ready: language !== "zh" || localizedIntro,
-    localization_status: language === "zh" ? (localizedIntro ? "done" : localizationStatus === "done" ? "missing" : localizationStatus || "missing") : "original",
+    bulletin_language: localized ? language as "zh" | "en" : nativeEnglish ? "en" : "original",
+    bulletin_overview: requested ? (localizedIntro ? row.localized_tldr! : "") : text(structured.tldr),
+    bulletin_intro_ready: !requested || localizedIntro,
+    localization_status: requested ? (localizedIntro ? "done" : localizationStatus === "done" ? "missing" : localizationStatus || "missing") : "original",
     // Used only for historical content without bulletin points; no duplicate lead on cards.
-    summary: points.length ? "" : language === "zh" ? (localizedIntro ? row.localized_tldr || "" : "") : text(structured.tldr) || text(structured.background),
+    summary: points.length ? "" : requested ? (localizedIntro ? row.localized_tldr || "" : "") : text(structured.tldr) || text(structured.background),
   };
   if (!detail) return base;
   return {
@@ -69,7 +75,7 @@ export function serializeBulletin(row: BulletinRow, language: string, detail = f
   };
 }
 
-export const bulletinMetadata = `i.id, i.title, i.thumbnail, i.headline, i.subhead, i.author, i.source_url, i.platform,
+export const bulletinMetadata = `(SELECT language FROM transcript WHERE item_id=i.id) AS source_language, i.id, i.title, i.thumbnail, i.headline, i.subhead, i.author, i.source_url, i.platform,
   i.duration_s, i.published_at, i.created_at, (ui.id IS NOT NULL) AS saved,
   COALESCE(julianday(i.published_at),julianday(i.created_at),0) AS sort_date,
   bt.bulletin AS localized_bulletin, bt.status AS localized_bulletin_status,

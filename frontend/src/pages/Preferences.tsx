@@ -8,7 +8,7 @@ import { ErrorState, LoadingState, PageHeader, TextColumn } from "@/components/s
 export function Preferences() {
   const qc = useQueryClient();
   const preference = useQuery({ queryKey: ["bulletin-preference"], queryFn: api.getBulletinPreference });
-  const [language, setLanguage] = useState<"auto" | "zh">("auto");
+  const [language, setLanguage] = useState<"auto" | "zh" | "en">("auto");
   useEffect(() => {
     if (preference.data) setLanguage(preference.data.preferred_language);
   }, [preference.data]);
@@ -21,6 +21,8 @@ export function Preferences() {
       qc.invalidateQueries({ queryKey: ["research"] });
       qc.invalidateQueries({ queryKey: ["bulletin"] });
       qc.invalidateQueries({ queryKey: ["item"] });
+      qc.invalidateQueries({ queryKey: ["collection-bulletin"] });
+      qc.invalidateQueries({ queryKey: ["rss"] });
     },
   });
   const backfill = useMutation({
@@ -29,6 +31,8 @@ export function Preferences() {
       qc.invalidateQueries({ queryKey: ["bulletin"] });
       qc.invalidateQueries({ queryKey: ["research"] });
       qc.invalidateQueries({ queryKey: ["item"] });
+      qc.invalidateQueries({ queryKey: ["collection-bulletin"] });
+      qc.invalidateQueries({ queryKey: ["rss"] });
     },
   });
 
@@ -38,15 +42,16 @@ export function Preferences() {
 
   return (
     <TextColumn>
-            <PageHeader title="Preferences" subtitle="Choose the language of the full reading edition. A Chinese preference can still be opened in English." />
+            <PageHeader title="Preferences" subtitle="Choose your preferred bulletin and reading language. You can switch languages on each reading page." />
       <Card className="p-5">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 rounded-full bg-accent p-2 text-primary"><Languages className="h-4 w-4" /></div>
           <div className="min-w-0 flex-1">
             <h2 className="font-serif text-xl font-semibold tracking-tight">Preferred bulletin language</h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">中文偏好会把还不是中文的全文排成简体中文，已经是中文的内容保持原文。阅读页上仍可改成 English。简报列表继续用较短的中文简报。 Chinese queues a full Chinese edition only when the summary is not already Chinese. On any reading page you can switch that edition to English.</p>
-            <Select value={language} onChange={(event) => setLanguage(event.target.value as "auto" | "zh")} className="mt-4 max-w-sm">
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">Choose English or 简体中文 for translated bulletins and reading editions. Auto keeps the source language. You can still switch to the original or another available language on each reading page.</p>
+            <Select value={language} onChange={(event) => setLanguage(event.target.value as "auto" | "zh" | "en")} className="mt-4 max-w-sm">
               <option value="auto">Auto · keep the source language</option>
+              <option value="en">English · English bulletin</option>
               <option value="zh">简体中文 · Chinese bulletin</option>
             </Select>
             <div className="mt-4 flex flex-wrap items-center gap-3">

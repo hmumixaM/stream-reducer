@@ -279,9 +279,9 @@ rssRoutes.get("/articles/:id", async (c) => {
     .all<{ lang: string; content: string; model: string; tokens: number }>();
   const requested = c.req.query("lang") || c.get("user").preferred_language;
   if (
-    requested === "zh" &&
+    (requested === "zh" || requested === "en") &&
     article.status === "done" &&
-    !editions.results.some((e) => e.lang === "zh")
+    !editions.results.some((e) => e.lang === requested)
   ) {
     const changed = await c.env.DB.prepare(
       "UPDATE rss_article SET status='queued',attempts=0,next_attempt_at='' WHERE id=? AND status='done'",

@@ -18,10 +18,10 @@ import { OAUTH_RETURN_COOKIE } from "./oauth";
 
 export const authRoutes = new Hono<AppContext>();
 
-const PREFERRED_LANGUAGES = new Set(["auto", "zh"]);
+const PREFERRED_LANGUAGES = new Set(["auto", "zh", "en"]);
 
 async function backfillBulletins(c: Parameters<typeof requireAuth>[0], lang: string): Promise<number> {
-  if (lang !== "zh") return 0;
+  if (lang !== "zh" && lang !== "en") return 0;
   const rows = await all<{ id: number }>(c.env.DB.prepare(
     `SELECT i.id
        FROM item i
@@ -31,7 +31,7 @@ async function backfillBulletins(c: Parameters<typeof requireAuth>[0], lang: str
   ));
   const bulletins = await enqueueBulletinTranslations(c.env, rows.map((row) => row.id), lang);
   // The short bulletin and the full reading edition are separate jobs. Library
-  // owners who asked for Chinese get the full edition queued here too.
+  // owners who asked for a translated language get the full edition queued here too.
   await enqueueLibraryContentTranslations(c.env, c.get("user").id, lang);
   return bulletins;
 }

@@ -1,8 +1,9 @@
 import type { Env } from "../env";
 import { all } from "../db";
+import { isEnglishLanguage } from "./chinese";
 import { isoNow } from "./crypto";
 
-export const BULLETIN_LANGUAGES = new Set(["zh"]);
+export const BULLETIN_LANGUAGES = new Set(["zh", "en"]);
 
 export function parseBulletin(value: string | null | undefined): string[] {
   if (!value) return [];
@@ -39,8 +40,12 @@ export async function enqueueBulletinTranslations(
       `SELECT item_id, status, headline, tldr FROM bulletin_translation
         WHERE lang = ? AND item_id IN (${placeholders})`,
     ).bind(lang, ...batchIds));
+    const native = lang === "en" ? await all<{ item_id: number; language: string }>(env.DB.prepare(
+      `SELECT item_id, language FROM transcript WHERE item_id IN (${placeholders})`,
+    ).bind(...batchIds)) : [];
+    const nativeIds = new Set(native.filter((row) => isEnglishLanguage(row.language)).map((row) => row.item_id));
     const byId = new Map(existing.map((row) => [row.item_id, row]));
-    const pending = batchIds.filter((id) => !byId.has(id) || byId.get(id)?.status === "error" || (byId.get(id)?.status === "done" && (!byId.get(id)?.headline || !byId.get(id)?.tldr)));
+    const pending = batchIds.filter((id) => !nativeIds.has(id) && (!byId.has(id) || byId.get(id)?.status === "error" || (byId.get(id)?.status === "done" && (!byId.get(id)?.headline || !byId.get(id)?.tldr))));
     if (!pending.length) continue;
     await env.DB.batch(pending.map((id) => env.DB.prepare(
       `INSERT INTO bulletin_translation (item_id, lang, bulletin, status, error, updated_at)
@@ -67,10 +72,12 @@ export async function enqueueBulletinTranslation(env: Env, itemId: number, lang:
   return enqueueBulletinTranslations(env, [itemId], lang);
 }
 
-/** Keep newly completed sources in sync for every user who chose Chinese. */
+/** Keep newly completed sources in sync with the requested bulletin languages. */
 export async function enqueuePreferredBulletinTranslation(env: Env, itemId: number): Promise<number> {
-  const user = await env.DB.prepare(
-    "SELECT id FROM user WHERE preferred_language = 'zh' LIMIT 1",
-  ).first<{ id: number }>();
-  return user ? enqueueBulletinTranslation(env, itemId, "zh") : 0;
+  const readers = await all<{ lang: string }>(env.DB.prepare(
+    "SELECT DISTINCT preferred_language AS lang FROM user WHERE preferred_language IN ('zh','en')",
+  ));
+  let enqueued = 0;
+  for (const { lang } of readers) enqueued += await enqueueBulletinTranslation(env, itemId, lang);
+  return enqueued;
 }

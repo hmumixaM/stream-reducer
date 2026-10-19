@@ -146,7 +146,7 @@ collectionRoutes.get("/:slug/bulletin", async (c) => {
   const params = c.req.query();
   const limit = boundedInt(params.limit, 24, 1, 60);
   const user = await resolveUser(c.env, c);
-  const binds: unknown[] = [user?.id ?? -1, collection.id];
+  const binds: unknown[] = [user?.id ?? -1, user?.preferred_language || "auto", collection.id];
   let filters = "";
   if (params.section || params.track_id) {
     filters += ` AND EXISTS (SELECT 1 FROM collection_track_item cti
@@ -172,7 +172,7 @@ collectionRoutes.get("/:slug/bulletin", async (c) => {
     SELECT ${bulletinMetadata}, ${shortSummarySql} AS summary_structured
     FROM collection_item ci JOIN item i ON i.id=ci.item_id JOIN summary s ON s.item_id=i.id
     LEFT JOIN user_item ui ON ui.item_id=i.id AND ui.user_id=?
-    LEFT JOIN bulletin_translation bt ON bt.item_id=i.id AND bt.lang='zh'
+    LEFT JOIN bulletin_translation bt ON bt.item_id=i.id AND bt.lang=?
     WHERE ci.collection_id=? AND i.status='done' ${filters}
     ORDER BY ${bulletinSortDate} DESC, i.id DESC LIMIT ?
   `).bind(...binds, limit + 1));
