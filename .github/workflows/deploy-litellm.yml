@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - uses: actions/setup-node@v4
         with:
@@ -31,6 +33,20 @@ jobs:
         run: |
           npm run typecheck
           npm test
+
+      - name: Choose container rollout
+        id: rollout
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          strategy=gradual
+          if [ "$EVENT_NAME" = push ] && git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            if ! git diff --name-only "$BEFORE_SHA" HEAD -- xgoose-litellm/Dockerfile xgoose-litellm/config.yaml xgoose-litellm/.dockerignore | rg -q .; then
+              strategy=none
+            fi
+          fi
+          echo "strategy=$strategy" >> "$GITHUB_OUTPUT"
 
       - name: Prepare Oracle service credentials
         working-directory: xgoose-litellm
@@ -54,4 +70,4 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: xgoose-litellm
-          command: deploy --secrets-file .deploy-secrets.json
+          command: deploy --secrets-file .deploy-secrets.json --containers-rollout ${{ steps.rollout.outputs.strategy }}

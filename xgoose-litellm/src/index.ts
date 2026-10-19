@@ -1,4 +1,4 @@
-import { Container, getContainer } from "@cloudflare/containers";
+import { Container } from "@cloudflare/containers";
 import { validGatewayAuth } from "./auth";
 
 interface Env {
@@ -51,7 +51,7 @@ export class LiteLLMContainer extends Container<Env> {
   sleepAfter = "5m";
   enableInternet = true;
 
-  override envVars = {
+  override envVars: Record<string, string> = {
     HOME: "/tmp",
     LITELLM_LOCAL_MODEL_COST_MAP: "True",
     LITELLM_TELEMETRY: "False",
@@ -113,11 +113,8 @@ export default {
       }
     }
 
-    const container = getContainer(
-      env.LITELLM,
-      // Fresh instance: the old container may still hold the removed ADC env.
-      "litellm-primary-1-103-5",
-    );
+    // Use the namespace API directly; retain one on-demand gateway instance.
+    const container = env.LITELLM.getByName("litellm-primary-1-103-5-sdk011");
     return container.fetch(request);
   },
 } satisfies ExportedHandler<Env>;

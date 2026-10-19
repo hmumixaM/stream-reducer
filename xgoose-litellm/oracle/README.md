@@ -127,3 +127,22 @@ Before a rollback, preserve the new authentication boundary. Do not restore
 ADC access to LiteLLM just to restore a route; repair or roll back the relay
 separately. Restore the prior Worker version together with its matching
 endpoint and bearer if necessary. Keep NAS's original deployment unchanged.
+
+## Legacy gateway cold starts
+
+The gateway pins `@cloudflare/containers` 0.1.1: it moves slow port readiness
+outside Durable Objects' 30-second `blockConcurrencyWhile` deadline. Increasing
+the port timeout on 0.0.18 cannot fix the reset caused by that deadline.
+Readiness is retried only before forwarding the caller's model request.
+
+Do not upgrade this dependency solely by version number. Upstream currently
+reports abandoned-response inflight-counter leaks in 0.2.4/0.3.7 that can keep
+an idle container billing indefinitely ([issue 241](https://github.com/cloudflare/containers/issues/241),
+[issue 242](https://github.com/cloudflare/containers/issues/242)). Version 0.1.1
+predates the affected response-tracking implementation. Recheck those fixes
+and verify both slow cold boot and idle shutdown before a later SDK upgrade.
+
+Worker-only releases skip container builds/rollouts. The workflow rebuilds the
+image when its Dockerfile, copied config, or dockerignore changes; manual
+workflow dispatch still requests a full image release. This avoids replacing
+healthy model processes for an SDK/authentication-only fix.
