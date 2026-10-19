@@ -136,7 +136,9 @@ def download(raw: str, *, headers=None, method="GET", payload=None):
 
 
 def folo_api(path: str, token: str = "", body=None):
-    headers = {"Content-Type": "application/json"}
+    headers = {"Accept": "application/json"}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
     if token:
         headers["Authorization"] = f"Bearer {token}"
         headers["Cookie"] = f"__Secure-better-auth.session_token={token}; better-auth.session_token={token}"

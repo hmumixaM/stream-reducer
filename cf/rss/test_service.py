@@ -393,3 +393,20 @@ def test_folo_podcast_follow_inspection_survives_blocked_rsshub(monkeypatch):
     result = s.source_inspect(s.SourceRequest(url="https://app.folo.is/feed/123"))
     assert result["kind"] == "media" and result["folo_id"] == "123"
     assert s.media_feed(s.SourceRequest(url=result["feed_url"]))["entries"][0]["duration_s"] == 3600
+
+
+def test_folo_catalog_get_does_not_declare_an_empty_json_body(monkeypatch):
+    calls = []
+    def upstream(url, **kwargs):
+        calls.append(kwargs)
+        if kwargs["method"] == "GET":
+            assert "Content-Type" not in kwargs["headers"]
+            assert kwargs["payload"] is None
+        else:
+            assert kwargs["headers"]["Content-Type"] == "application/json"
+            assert kwargs["payload"] is not None
+        return b'{"data":{"feed":{}}}', "application/json", url
+    monkeypatch.setattr(s, "download", upstream)
+    s.folo_api("/feeds?id=123&entriesLimit=1")
+    s.folo_api("/entries", body={"feedId": "123"})
+    assert len(calls) == 2
