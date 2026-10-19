@@ -8,6 +8,7 @@ services:
     read_only: true
     user: "10001:10001"
     cpus: 2
+    cpu_shares: 2048
     mem_limit: 1g
     memswap_limit: 1g
     pids_limit: 96

@@ -2,6 +2,7 @@
 
 import hashlib
 import importlib.util
+import socket
 import subprocess
 import sys
 import threading
@@ -175,3 +176,37 @@ def test_invalid_media_never_returns_partial_success(api):
     assert state["status"] == "failed"
     assert state["attempts"] == 3
     assert "chunks" not in state
+
+
+def test_slow_upload_does_not_block_other_jobs_or_progress(api, monkeypatch):
+    reading = threading.Event()
+    original_body = service.Handler.body
+
+    def observed_body(handler, maximum):
+        if maximum == service.PART_BYTES:
+            reading.set()
+        return original_body(handler, maximum)
+
+    monkeypatch.setattr(service.Handler, "body", observed_body)
+    job = register(api, b"1234567890")
+    path = "/jobs/" + job["id"]
+    address = api.base_url
+    sock = socket.create_connection((address.host, address.port), timeout=2)
+    try:
+        headers = (
+            f"PUT {path}/parts/0 HTTP/1.0\r\nHost: localhost\r\n"
+            f"Authorization: Bearer {'x' * 48}\r\nContent-Length: 10\r\n\r\n1"
+        )
+        sock.sendall(headers.encode())
+        assert reading.wait(2)
+        # The original implementation timed out here: receiving the other nine
+        # bytes held LOCK, so every other job and the encoders stopped as well.
+        assert api.get(path, timeout=1).status_code == 200
+        other = register(api, b"different audio")
+        assert other["status"] == "uploading"
+        api.put("/jobs/" + other["id"] + "/parts/0", content=b"different audio").raise_for_status()
+        assert api.get("/jobs/" + other["id"], timeout=1).json()["uploaded_parts"] == [0]
+        sock.sendall(b"234567890")
+        assert b"200" in sock.recv(4096)
+    finally:
+        sock.close()

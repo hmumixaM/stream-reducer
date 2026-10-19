@@ -327,38 +327,54 @@ class Handler(BaseHTTPRequestHandler):
                 raise Rejected(401, "unauthorized")
             if self.command == "GET" and self.path == "/health":
                 return self.reply(200, {"status": "ok", "version": 1})
+            # Never hold the state lock during network I/O. In particular, a
+            # partial/slow upload must not block progress polls or the encoders.
+            if self.command == "POST" and self.path == "/jobs":
+                spec = json.loads(self.body(2048))
+                with LOCK:
+                    result = create(spec)
+                return self.reply(200, result)
+            match = re.fullmatch(
+                r"/jobs/([a-f0-9]{64})(?:/(submit|parts/[0-9]{1,3}|chunk_[0-9]{4}\.mp3))?",
+                self.path,
+            )
+            if not match:
+                raise Rejected(404, "not found")
+            folder, action = ROOT / match[1], match[2]
             with LOCK:
-                if self.command == "POST" and self.path == "/jobs":
-                    return self.reply(200, create(json.loads(self.body(2048))))
-                match = re.fullmatch(
-                    r"/jobs/([a-f0-9]{64})(?:/(submit|parts/[0-9]{1,3}|chunk_[0-9]{4}\.mp3))?",
-                    self.path,
-                )
-                if not match:
-                    raise Rejected(404, "not found")
-                folder, action = ROOT / match[1], match[2]
-                job = load(folder)
-                if self.command == "GET" and action is None:
-                    return self.reply(200, status(folder))
-                if self.command == "PUT" and action and action.startswith("parts/"):
-                    upload(folder, int(action.split("/")[1]), self.body(PART_BYTES))
-                    return self.reply(200, {"ok": True})
-                if self.command == "POST" and action == "submit":
-                    self.body(0)
-                    return self.reply(200, submit(folder))
-                if self.command == "GET" and action and action.startswith("chunk_"):
+                load(folder)
+            if self.command == "GET" and action is None:
+                with LOCK:
+                    result = status(folder)
+                return self.reply(200, result)
+            if self.command == "PUT" and action and action.startswith("parts/"):
+                data = self.body(PART_BYTES)
+                with LOCK:
+                    upload(folder, int(action.split("/")[1]), data)
+                return self.reply(200, {"ok": True})
+            if self.command == "POST" and action == "submit":
+                self.body(0)
+                with LOCK:
+                    result = submit(folder)
+                return self.reply(200, result)
+            if self.command == "GET" and action and action.startswith("chunk_"):
+                with LOCK:
+                    job = load(folder)
                     if job["status"] != "done" or action not in {c["name"] for c in job["chunks"]}:
                         raise Rejected(404, "chunk not available")
                     path = folder / action
+                    # Open before releasing the lock so expiry cannot race us.
+                    stream = path.open("rb")
+                    size = os.fstat(stream.fileno()).st_size
+                with stream:
                     self.send_response(200)
                     self.send_header("Content-Type", "audio/mpeg")
-                    self.send_header("Content-Length", str(path.stat().st_size))
+                    self.send_header("Content-Length", str(size))
                     self.send_header("Cache-Control", "no-store")
                     self.end_headers()
-                    with path.open("rb") as f:
-                        shutil.copyfileobj(f, self.wfile, 65536)
-                    return
-                raise Rejected(405, "method not allowed")
+                    shutil.copyfileobj(stream, self.wfile, 65536)
+                return
+            raise Rejected(405, "method not allowed")
         except Rejected as exc:
             self.reply(exc.status, {"error": exc.message})
         except (ValueError, TypeError, KeyError):
@@ -375,7 +391,7 @@ class Handler(BaseHTTPRequestHandler):
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
-    slots = threading.BoundedSemaphore(8)
+    slots = threading.BoundedSemaphore(16)
 
     def process_request(self, request, address):
         if not self.slots.acquire(blocking=False):
@@ -399,8 +415,8 @@ if __name__ == "__main__":
         raise SystemExit("AUDIO_OFFLOAD_TOKEN must be a strong secret")
     os.umask(0o077)
     recover()
-    # Two jobs can run at once; each MP3 encoder uses one thread. The entire
+    # Four jobs can run at once; each MP3 encoder uses one thread. The entire
     # container is capped at two CPUs by Compose, including validation/upload.
-    for _ in range(2):
+    for _ in range(4):
         threading.Thread(target=worker, daemon=True).start()
     Server(("0.0.0.0", 8080), Handler).serve_forever()

@@ -28,7 +28,8 @@ services:
       core: {soft: 0, hard: 0}
     pids_limit: 256
     mem_limit: 3g
-    cpus: "1.5"
+    cpus: "0.5"
+    cpu_shares: 512
     restart: unless-stopped
     logging:
       driver: json-file
