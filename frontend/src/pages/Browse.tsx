@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Film, Plus, Star } from "lucide-react";
 import { api, type Item, type Platform } from "@/lib/api";
@@ -36,7 +36,10 @@ function readBrowseView(): BrowseView {
 }
 
 export function Browse() {
-  const [q, setQ] = useState("");
+  const [params, setParams] = useSearchParams();
+  const q = params.get("q") || "";
+  const initialOffset = Math.max(0, Math.min(1000000, Math.floor(Number(params.get("offset")) || 0)));
+  const setQ = (value: string) => setParams(previous => {const next = new URLSearchParams(previous); next.delete("offset"); if(value) next.set("q",value); else next.delete("q"); return next;}, {replace:true});
   const [platform, setPlatform] = useState("");
   const [sort, setSort] = useState("published");
   const [view, setView] = useState<BrowseView>(readBrowseView);
@@ -49,7 +52,7 @@ export function Browse() {
   }, [view]);
 
   const items = useInfiniteQuery({
-    queryKey: ["browse", { q, platform, sort }],
+    queryKey: ["browse", { q, platform, sort, initialOffset }],
     queryFn: ({ pageParam }) =>
       api.browseItems({
         q: q || undefined,
@@ -59,9 +62,9 @@ export function Browse() {
         limit: PAGE_SIZE,
         offset: pageParam,
       }),
-    initialPageParam: 0,
+    initialPageParam: initialOffset,
     getNextPageParam: (last, all) =>
-      last.length === PAGE_SIZE ? all.length * PAGE_SIZE : undefined,
+      last.length === PAGE_SIZE ? initialOffset + all.length * PAGE_SIZE : undefined,
     refetchInterval: 10000,
   });
 

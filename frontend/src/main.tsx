@@ -1,13 +1,14 @@
 import React, { lazy } from "react";
 import ReactDOM from "react-dom/client";
-import { createBrowserRouter, RouterProvider, Navigate, Link } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Login } from "@/pages/Login";
 import { useMe } from "@/lib/auth";
 import { sessionSnapshot } from "@/lib/session";
 import { MIRROR } from "@/lib/mirror";
-import { Button, Card, Spinner } from "@/components/ui";
+import { PublicHome } from "@/pages/Home";
+import { Button, Spinner } from "@/components/ui";
 import "./index.css";
 
 // Every page is code-split so the initial load only ships the shell + the
@@ -114,59 +115,6 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
   if (!me.data?.user) return <Navigate to="/login" replace />;
   if (!me.data.user.is_admin) return <Navigate to="/" replace />;
   return <>{children}</>;
-}
-
-function PublicHome() {
-  return (
-    <div className="mx-auto max-w-4xl py-12">
-      <div className="mb-10">
-        <p className="mb-3 text-sm font-medium uppercase tracking-wide text-primary">
-          Public stream-reduce
-        </p>
-        <h1 className="mb-4 text-4xl font-semibold tracking-tight md:text-5xl">
-          Browse shared episode summaries before you sign in.
-        </h1>
-        <p className="max-w-2xl text-lg text-muted-foreground">
-          Explore the public catalog, read processed summaries, and sign in with
-          email when you want your own library, subscriptions, notes, highlights,
-          and knowledge graph.
-        </p>
-      </div>
-
-      <div className="mb-8 flex flex-wrap gap-3">
-        <Link to="/browse">
-          <Button>Browse public catalog</Button>
-        </Link>
-        <Link to="/subscriptions">
-          <Button variant="outline">Browse channels</Button>
-        </Link>
-        <Link to="/login">
-          <Button variant="outline">Sign in with email</Button>
-        </Link>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="p-5">
-          <h2 className="mb-2 font-semibold">Public summaries</h2>
-          <p className="text-sm text-muted-foreground">
-            Anyone can browse and read episodes that have already been processed.
-          </p>
-        </Card>
-        <Card className="p-5">
-          <h2 className="mb-2 font-semibold">Personal library</h2>
-          <p className="text-sm text-muted-foreground">
-            Signing in lets you save episodes, subscribe to channels, and track waiting work.
-          </p>
-        </Card>
-        <Card className="p-5">
-          <h2 className="mb-2 font-semibold">Your graph and notes</h2>
-          <p className="text-sm text-muted-foreground">
-            Highlights, comments, and the knowledge graph stay scoped to your account.
-          </p>
-        </Card>
-      </div>
-    </div>
-  );
 }
 
 // Signed-in users land on their reading bulletin; the read-only mirror has

@@ -23,6 +23,7 @@
     // Worker first too — otherwise the assets layer serves the SPA (GET) or a
     // bare 405 (POST) and the MCP/OAuth endpoints never get reached.
     "run_worker_first": [
+      "/", "/browse", "/items/*", "/bulletin/*", "/robots.txt", "/llms.txt", "/sitemap.xml", "/sitemaps/*",
       "/api/*",
       "/media/*",
       "/mcp",

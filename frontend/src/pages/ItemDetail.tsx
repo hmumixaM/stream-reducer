@@ -1,3 +1,4 @@
+import { useArticleMetadata } from "@/lib/seo";
 import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -95,11 +96,11 @@ export function ItemDetail() {
     }
   }, [itemId, preferChinese, item.data?.summary, item.data?.localized_bulletin?.complete, item.data?.localized_bulletin?.status]);
   const articleTitle = item.data?.title?.trim() || item.data?.source_url;
+  useArticleMetadata(itemId, item.data?.headline || articleTitle, item.data?.subhead || item.data?.summary?.markdown, item.data?.status === "done");
 
   useEffect(() => {
     if (!articleTitle) return;
 
-    document.title = articleTitle;
     const pageLocation = window.location.href;
     let active = true;
     void import("@/lib/firebase").then(({ trackPageView }) => {
@@ -108,7 +109,6 @@ export function ItemDetail() {
 
     return () => {
       active = false;
-      if (document.title === articleTitle) document.title = "stream-reduce";
     };
   }, [articleTitle]);
 

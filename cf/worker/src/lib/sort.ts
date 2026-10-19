@@ -9,6 +9,7 @@ export type SortColumns = Record<string, string>;
 /** Item-level columns, addressed via the `item` table name. */
 export const SORT_COLUMNS: SortColumns = {
   added: "item.created_at",
+  completed: "item.completed_at",
   published: "item.published_at",
   views: "item.view_count",
   likes: "item.like_count",

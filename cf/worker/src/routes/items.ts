@@ -41,8 +41,8 @@ itemsRoutes.get("/", async (c) => {
     binds.push(u.platform);
   }
   if (u.q) {
-    where.push("item.title LIKE ?");
-    binds.push(`%${u.q}%`);
+    where.push("(item.title LIKE ? OR item.headline LIKE ? OR item.subhead LIKE ? OR item.author LIKE ?)");
+    binds.push(...Array(4).fill(`%${u.q}%`));
   }
   const sortCol = sortColumn(SORT_COLUMNS, u.sort, "published");
   const order = sortOrder(u.order);

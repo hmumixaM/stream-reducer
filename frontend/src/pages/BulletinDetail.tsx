@@ -1,3 +1,4 @@
+import { useArticleMetadata } from "@/lib/seo";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
@@ -77,6 +78,7 @@ export function BulletinDetail() {
     queryKey, queryFn: () => api.getBulletin(itemId), enabled: Number.isInteger(itemId) && itemId > 0,
     refetchInterval: (query) => query.state.data?.reading_summary.status === "processing" || query.state.data?.reading_summary_zh?.status === "processing" || (zh && query.state.data?.localization_status === "processing") ? 3000 : false,
   });
+  useArticleMetadata(itemId, bulletin.data?.title, bulletin.data?.subhead || bulletin.data?.tldr);
   const preparation = useMutation({
     mutationFn: ({ id, lang }: { id: number; lang?: "zh" }) => api.prepareReadingSummary(id, lang),
     onSuccess: (result, { id, lang }) => qc.setQueryData<BulletinItem>(["bulletin", id, me.data?.user?.id, zh], (old) => old ? { ...old, ...(lang === "zh" ? { reading_summary_zh: result } : { reading_summary: result }) } : old),

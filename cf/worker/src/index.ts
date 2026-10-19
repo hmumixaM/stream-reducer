@@ -1,3 +1,4 @@
+import { serveSeo } from "./lib/seo";
 import { rssRoutes } from "./routes/rss";
 import { substackRoutes } from "./routes/substack";
 import { wakeRss, drainRss, pollRss, type RssMessage } from "./lib/rss";
@@ -76,6 +77,9 @@ app.get("/media/*", async (c) => {
   headers.set("cache-control", "private, max-age=3600");
   return new Response(object.body, { headers });
 });
+for (const path of ["/", "/browse", "/items/:id", "/bulletin/:id", "/robots.txt", "/llms.txt", "/sitemap.xml", "/sitemaps/:file"]) {
+  app.get(path, (c) => serveSeo(c.req.raw, c.env));
+}
 // Anything else: serve the built SPA (assets binding handles SPA fallback).
 app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 

@@ -1,4 +1,5 @@
-import { useState, useEffect, Suspense } from "react";
+import { updateMetadata, siteTitle, siteDescription } from "@/lib/seo";
+import { useState, useEffect, useLayoutEffect, useRef, Suspense } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -159,6 +160,15 @@ export function Layout() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+  const initialMetadata = useRef(true);
+  useLayoutEffect(() => {
+    if (initialMetadata.current) { initialMetadata.current = false; return; }
+    if (/^\/(items|bulletin)\/\d+$/.test(location.pathname)) return;
+    const publicPage = location.pathname === "/" || location.pathname === "/browse";
+    document.getElementById("seo-schema")?.remove();
+    document.head.querySelector('meta[property="og:image"]')?.remove();
+    updateMetadata(location.pathname === "/browse" ? "Browse Video & Podcast Summaries | Stream Reducer" : siteTitle, siteDescription, "https://reducer.xgoose.org" + location.pathname, publicPage && !new URLSearchParams(location.search).has("q"));
+  }, [location.pathname, location.search]);
   
   const [dark, setDark] = useState(
     () => document.documentElement.classList.contains("dark"),
