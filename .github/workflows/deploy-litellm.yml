@@ -42,7 +42,7 @@ jobs:
         run: |
           strategy=gradual
           if [ "$EVENT_NAME" = push ] && git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
-            if ! git diff --name-only "$BEFORE_SHA" HEAD -- xgoose-litellm/Dockerfile xgoose-litellm/config.yaml xgoose-litellm/.dockerignore | rg -q .; then
+            if git diff --quiet "$BEFORE_SHA" HEAD -- xgoose-litellm/Dockerfile xgoose-litellm/config.yaml xgoose-litellm/.dockerignore; then
               strategy=none
             fi
           fi
