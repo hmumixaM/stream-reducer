@@ -14,7 +14,11 @@ The dedicated Cloudflare Tunnel is `stream-reducer-audio`, ID
 port is needed. The audio container has no external network route.
 
 Compose limits the entire audio service to two CPUs, 1 GiB RAM, 96 processes and
-two concurrent encoders. It runs as UID 10001, with a read-only root filesystem,
+four concurrent encoders. The service has CPU shares 2048; LiteLLM has a 0.5 CPU
+cap and shares 512, so audio work has higher weight during CPU contention.
+Network uploads, downloads and responses run outside the state lock so a slow
+connection cannot block unrelated jobs or encoder completion.
+It runs as UID 10001, with a read-only root filesystem,
 all capabilities dropped, no-new-privileges, a bounded temporary filesystem and
 rotated logs. It has no model, NAS, SSH or Cloudflare API credentials. ffmpeg and
 ffprobe accept only file/pipe protocols; no caller-supplied URLs or shell commands.
