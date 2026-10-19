@@ -34,6 +34,8 @@ export class PipelineContainer extends Container<Env> {
   // Secrets/config the container needs are injected as container env vars.
   override envVars = {
     GEMINI_API_KEY: this.env.GEMINI_API_KEY,
+    LLM_ACCESS_CLIENT_ID: this.env.LLM_ACCESS_CLIENT_ID ?? "",
+    LLM_ACCESS_CLIENT_SECRET: this.env.LLM_ACCESS_CLIENT_SECRET ?? "",
     GEMINI_BASE_URL: this.env.LLM_BASE_URL,
     GEMINI_MODEL: this.env.LLM_MODEL,
     // Backup summarize model: a summarize call that times out/errors on

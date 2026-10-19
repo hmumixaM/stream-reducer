@@ -6,7 +6,8 @@ name: Deploy to Cloudflare
 #   CLOUDFLARE_API_TOKEN   - scoped token (Workers Scripts, D1, R2, Queues,
 #                            Vectorize, Workers AI, Durable Objects edit)
 #   CLOUDFLARE_ACCOUNT_ID  - 6789acff6cdae2c3d5073a701c708db7
-#   GEMINI_API_KEY         - Gemini summary proxy bearer token
+#   ORACLE_LITELLM_API_KEY - Oracle LiteLLM bearer token
+#   LLM_ACCESS_CLIENT_ID / LLM_ACCESS_CLIENT_SECRET - independent Access identity
 #   OPENROUTER_API_KEY     - OpenRouter Whisper key
 #   RIGHTCODE_API_KEY      - RightCode Draw API key for 4K infographic generation
 
@@ -73,23 +74,33 @@ jobs:
           workingDirectory: cf/worker
           command: d1 migrations apply stream_reduce --remote
 
-      # 4. Deploy the Worker + Container, and push runtime secrets
+      # Upload credentials with the new version. Updating a live secret first
+      # would break the previous LLM endpoint during an endpoint/key migration.
+      - name: Prepare atomic runtime secrets
+        working-directory: cf/worker
+        env:
+          GEMINI_API_KEY: ${{ secrets.ORACLE_LITELLM_API_KEY }}
+          LLM_ACCESS_CLIENT_ID: ${{ secrets.LLM_ACCESS_CLIENT_ID }}
+          LLM_ACCESS_CLIENT_SECRET: ${{ secrets.LLM_ACCESS_CLIENT_SECRET }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          RIGHTCODE_API_KEY: ${{ secrets.RIGHTCODE_API_KEY }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          AUDIO_OFFLOAD_TOKEN: ${{ secrets.AUDIO_OFFLOAD_TOKEN }}
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          const names = ['GEMINI_API_KEY', 'LLM_ACCESS_CLIENT_ID', 'LLM_ACCESS_CLIENT_SECRET', 'OPENROUTER_API_KEY', 'RIGHTCODE_API_KEY', 'ADMIN_TOKEN', 'AUDIO_OFFLOAD_TOKEN'];
+          for (const name of names) {
+            if (!process.env[name]) throw new Error(`Missing runtime secret: ${name}`);
+          }
+          writeFileSync('.deploy-secrets.json', JSON.stringify(Object.fromEntries(names.map(name => [name, process.env[name]]))), {mode: 0o600});
+          JS
+
+      # 4. Deploy the Worker + Container with its matching runtime secrets.
       - name: Deploy Worker + Container
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: cf/worker
-          command: deploy
-          secrets: |
-            GEMINI_API_KEY
-            OPENROUTER_API_KEY
-            RIGHTCODE_API_KEY
-            ADMIN_TOKEN
-            AUDIO_OFFLOAD_TOKEN
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          RIGHTCODE_API_KEY: ${{ secrets.RIGHTCODE_API_KEY }}
-          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
-          AUDIO_OFFLOAD_TOKEN: ${{ secrets.AUDIO_OFFLOAD_TOKEN }}
+          command: deploy --secrets-file .deploy-secrets.json

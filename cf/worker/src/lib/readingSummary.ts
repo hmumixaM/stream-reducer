@@ -1,3 +1,4 @@
+import { llmHeaders } from "./llmHeaders";
 import type { Env } from "../env";
 import { first } from "../db";
 import { sourceAlreadyChinese } from "./chinese";
@@ -127,7 +128,7 @@ export async function generateReadingSummary(env: Env, source: ReadingSource, la
     const context = readingContext(sourceText(source));
     const response = await fetch(`${env.LLM_BASE_URL.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
-      headers: { authorization: `Bearer ${env.GEMINI_API_KEY}`, "content-type": "application/json" },
+      headers: llmHeaders(env),
       signal: AbortSignal.timeout(90_000),
       body: JSON.stringify({
         model: env.LLM_MODEL, temperature: 0.2, max_tokens: 16000,

@@ -1,0 +1,102 @@
+name: litellm-oracle
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm@sha256:16fa922a07d13a974862990105573ecb541dc1ea4937817833db1fb991779b12
+    user: "65532:65532"
+    entrypoint: ["litellm"]
+    command: ["--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "4000", "--num_workers", "1"]
+    env_file: .env
+    environment:
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/cache
+      PYTHONDONTWRITEBYTECODE: "1"
+      LITELLM_LOG: WARNING
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      LITELLM_TELEMETRY: "False"
+    ports: ["127.0.0.1:4000:4000"]
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro,Z
+    networks: [gateway, vertex]
+    depends_on:
+      vertex-relay:
+        condition: service_healthy
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=256m,uid=65532,gid=65532"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ulimits:
+      core: {soft: 0, hard: 0}
+    pids_limit: 256
+    mem_limit: 3g
+    cpus: "1.5"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"]
+      start_period: 90s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  cloudflared:
+    image: cloudflare/cloudflared@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07
+    user: "65532:65532"
+    command: ["tunnel", "--no-autoupdate", "--metrics", "0.0.0.0:2000", "run", "--token-file", "/run/secrets/tunnel-token"]
+    volumes:
+      - ./secrets/tunnel-token:/run/secrets/tunnel-token:ro,Z
+    networks: [gateway, connector-egress]
+    depends_on:
+      litellm:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ulimits:
+      core: {soft: 0, hard: 0}
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: "0.5"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+  vertex-relay:
+    image: ghcr.io/berriai/litellm@sha256:16fa922a07d13a974862990105573ecb541dc1ea4937817833db1fb991779b12
+    user: "65531:65531"
+    entrypoint: ["python", "/app/vertex_broker.py"]
+    env_file: relay.env
+    environment:
+      HOME: /tmp
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./vertex_broker.py:/app/vertex_broker.py:ro,Z
+      - ./secrets/vertex-adc.json:/run/secrets/vertex-adc.json:ro,Z
+    networks: [vertex, vertex-egress]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=32m,uid=65531,gid=65531"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ulimits:
+      core: {soft: 0, hard: 0}
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: "0.5"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/liveliness', timeout=5)"]
+      start_period: 20s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+networks:
+  # LiteLLM has no Internet route. Only the relay can contact providers.
+  gateway:
+    internal: true
+  vertex:
+    internal: true
+  vertex-egress: {}
+  connector-egress: {}

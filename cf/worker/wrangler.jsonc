@@ -202,10 +202,9 @@
     "FOLO_OWNER_EMAIL": "huyangmax@gmail.com",
     "APP_ORIGIN": "https://reducer.xgoose.org",
     "EMAIL_FROM": "noreply@xgoose.org",
-    // OpenAI-compatible LiteLLM deployment. Its gemini-3.7-flash alias routes
-    // through RightCode instead of the failure-prone Gemini web reverse proxy.
+    // Oracle LiteLLM behind Tunnel + Access; no dependency on Cloudflare LiteLLM.
     // Verify the live route with `GET /api/admin/llm-check`.
-    "LLM_BASE_URL": "https://xgoose-litellm.max-678.workers.dev/v1",
+    "LLM_BASE_URL": "https://litellm-origin.xgoose.org/v1",
     "LLM_MODEL": "gemini-3.8-flash",
     // Keep the previous RightCode route as a fallback for transient 3.8
     // failures. Empty/diagnostic responses are rejected by cf/pipeline/llm.py.
@@ -228,10 +227,11 @@
     "TS_EXIT_NODE": "100.77.236.1",
     // Bump to force all container jobs onto fresh instances (new image) after a
     // deploy — avoids long-lived DO instances running a stale container image.
-    "CONTAINER_GEN": "36"
+    "CONTAINER_GEN": "37"
   }
 
   // Secrets (set via `wrangler secret put`):
+  // LLM_ACCESS_CLIENT_ID / LLM_ACCESS_CLIENT_SECRET authenticate at Access.
   //   GEMINI_API_KEY        - bearer token for the Gemini summary proxy
   //   OPENROUTER_API_KEY    - OpenRouter key for Whisper STT
   //   RIGHTCODE_API_KEY     - RightCode Draw API key for 4K infographics

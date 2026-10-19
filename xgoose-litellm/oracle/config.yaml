@@ -1,0 +1,44 @@
+# Stream Reducer only. No calls to the Cloudflare LiteLLM deployment.
+model_list:
+  - model_name: gemini-3.8-flash
+    litellm_params:
+      model: openai/google/gemini-3.8-flash
+      api_base: http://vertex-relay:8080/v1
+      api_key: os.environ/VERTEX_RELAY_KEY
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000002
+  - model_name: gemini-3.8-flash-rightcode
+    litellm_params:
+      model: openai/gemini-3.8-flash
+      api_base: http://vertex-relay:8080/rightcode/v1
+      api_key: os.environ/VERTEX_RELAY_KEY
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000002
+  - model_name: gemini-3.7-flash
+    litellm_params:
+      model: openai/gemini-3.7-flash
+      api_base: http://vertex-relay:8080/rightcode/v1
+      api_key: os.environ/VERTEX_RELAY_KEY
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000002
+  - model_name: gemini-3.5-flash-vertex
+    litellm_params:
+      model: openai/google/gemini-3.5-flash
+      api_base: http://vertex-relay:8080/v1
+      api_key: os.environ/VERTEX_RELAY_KEY
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000002
+litellm_settings:
+  # A client must never override the fixed provider targets in this file.
+  drop_params: true
+  num_retries: 2
+  request_timeout: 120
+  fallbacks:
+    - gemini-3.8-flash: [gemini-3.8-flash-rightcode, gemini-3.7-flash]
+    - gemini-3.7-flash: [gemini-3.5-flash-vertex]
+router_settings:
+  routing_strategy: simple-shuffle
+  allowed_fails: 2
+  cooldown_time: 30
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

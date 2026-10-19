@@ -30,17 +30,19 @@
 # that from the streamed `usage` frame and enforces the $5/day budget in D1.
 #
 # Secrets are injected from the environment (see src/index.ts + wrangler
-# secrets): GEMINI_PROXY_KEY (shared proxy secret), VERTEX_CREDENTIALS (the
-# Vertex ADC JSON, as a string), RIGHTCODE_API_KEY, LITELLM_MASTER_KEY.
+# secrets): GEMINI_PROXY_KEY, RIGHTCODE_API_KEY, LITELLM_MASTER_KEY and the
+# Oracle API/Access service credentials. Google ADC never enters this container.
 
 model_list:
   # --- Primary summary model: Vertex AI Gemini 3.8 ---
   - model_name: gemini-3.8-flash
     litellm_params:
-      model: vertex_ai/gemini-3.8-flash
-      vertex_project: "x-p-x-shared-ai-services-988d"
-      vertex_location: "global"
-      vertex_credentials: os.environ/VERTEX_CREDENTIALS
+      model: openai/gemini-3.8-flash
+      api_base: https://litellm-origin.xgoose.org/v1
+      api_key: os.environ/ORACLE_LITELLM_API_KEY
+      extra_headers:
+        CF-Access-Client-Id: os.environ/ORACLE_ACCESS_CLIENT_ID
+        CF-Access-Client-Secret: os.environ/ORACLE_ACCESS_CLIENT_SECRET
       input_cost_per_token: 0.000002
       output_cost_per_token: 0.000002
 
@@ -89,10 +91,12 @@ model_list:
   # --- Fallback: Vertex AI (internal alias, not client-facing) ---
   - model_name: gemini-3.5-flash-vertex
     litellm_params:
-      model: vertex_ai/gemini-3.5-flash
-      vertex_project: "x-p-x-shared-ai-services-988d"
-      vertex_location: "global"
-      vertex_credentials: os.environ/VERTEX_CREDENTIALS
+      model: openai/gemini-3.5-flash-vertex
+      api_base: https://litellm-origin.xgoose.org/v1
+      api_key: os.environ/ORACLE_LITELLM_API_KEY
+      extra_headers:
+        CF-Access-Client-Id: os.environ/ORACLE_ACCESS_CLIENT_ID
+        CF-Access-Client-Secret: os.environ/ORACLE_ACCESS_CLIENT_SECRET
       input_cost_per_token: 0.000002
       output_cost_per_token: 0.000002
 

@@ -7,7 +7,9 @@ interface Env {
   GEMINI_PROXY_BASE: string;
   GEMINI_PROXY_KEY: string;
   LITELLM_MASTER_KEY: string;
-  VERTEX_CREDENTIALS: string;
+  ORACLE_LITELLM_API_KEY: string;
+  ORACLE_ACCESS_CLIENT_ID: string;
+  ORACLE_ACCESS_CLIENT_SECRET: string;
   ANTHROPIC_PROXY_KEY: string;
   RIGHTCODE_API_KEY: string;
 }
@@ -44,14 +46,17 @@ async function isDisabledUser(env: Env, userField: string): Promise<boolean> {
 
 export class LiteLLMContainer extends Container<Env> {
   defaultPort = 4000;
-  sleepAfter = "30m";
+  // Stream Reducer uses Oracle; other clients retain this on-demand gateway.
+  sleepAfter = "5m";
   enableInternet = true;
 
   override envVars = {
     GEMINI_PROXY_BASE: this.env.GEMINI_PROXY_BASE,
     GEMINI_PROXY_KEY: this.env.GEMINI_PROXY_KEY,
     LITELLM_MASTER_KEY: this.env.LITELLM_MASTER_KEY,
-    VERTEX_CREDENTIALS: this.env.VERTEX_CREDENTIALS,
+    ORACLE_LITELLM_API_KEY: this.env.ORACLE_LITELLM_API_KEY,
+    ORACLE_ACCESS_CLIENT_ID: this.env.ORACLE_ACCESS_CLIENT_ID,
+    ORACLE_ACCESS_CLIENT_SECRET: this.env.ORACLE_ACCESS_CLIENT_SECRET,
     ANTHROPIC_PROXY_KEY: this.env.ANTHROPIC_PROXY_KEY,
     RIGHTCODE_API_KEY: this.env.RIGHTCODE_API_KEY,
   };
@@ -78,7 +83,8 @@ export default {
 
     const container = getContainer(
       env.LITELLM,
-      "litellm-primary",
+      // Fresh instance: the old container may still hold the removed ADC env.
+      "litellm-primary-no-vertex-v1",
     );
     return container.fetch(request);
   },

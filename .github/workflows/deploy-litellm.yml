@@ -47,10 +47,26 @@ jobs:
           jq -r '.result.password' <<<"$creds" \
             | docker login registry.cloudflare.com -u "$(jq -r '.result.username' <<<"$creds")" --password-stdin
 
+      - name: Prepare Oracle service credentials
+        working-directory: xgoose-litellm
+        env:
+          ORACLE_LITELLM_API_KEY: ${{ secrets.ORACLE_LITELLM_API_KEY }}
+          ORACLE_ACCESS_CLIENT_ID: ${{ secrets.LEGACY_LLM_ACCESS_CLIENT_ID }}
+          ORACLE_ACCESS_CLIENT_SECRET: ${{ secrets.LEGACY_LLM_ACCESS_CLIENT_SECRET }}
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          const names = ['ORACLE_LITELLM_API_KEY', 'ORACLE_ACCESS_CLIENT_ID', 'ORACLE_ACCESS_CLIENT_SECRET'];
+          for (const name of names) {
+            if (!process.env[name]) throw new Error(`Missing runtime secret: ${name}`);
+          }
+          writeFileSync('.deploy-secrets.json', JSON.stringify(Object.fromEntries(names.map(name => [name, process.env[name]]))), {mode: 0o600});
+          JS
+
       - name: Deploy Worker + container
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: xgoose-litellm
-          command: deploy
+          command: deploy --secrets-file .deploy-secrets.json

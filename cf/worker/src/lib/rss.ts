@@ -1,3 +1,4 @@
+import { llmHeaders } from "./llmHeaders";
 import { HTTPException } from "hono/http-exception";
 import { Container, getContainer } from "@cloudflare/containers";
 import type { Env } from "../env";
@@ -522,10 +523,7 @@ async function llmJson(
         `${env.LLM_BASE_URL.replace(/\/$/, "")}/chat/completions`,
         {
           method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${env.GEMINI_API_KEY}`,
-          },
+          headers: llmHeaders(env),
           signal: AbortSignal.timeout(180000),
           body: JSON.stringify({
             model,

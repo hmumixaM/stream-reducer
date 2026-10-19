@@ -1,3 +1,4 @@
+import { llmHeaders } from "../lib/llmHeaders";
 import { Hono } from "hono";
 import type { AppContext } from "../auth";
 import { requireAuth } from "../auth";
@@ -150,10 +151,7 @@ async function answerWithModel(env: Env, question: string, items: ResearchItem[]
   try {
     const response = await fetch(`${env.LLM_BASE_URL.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${env.GEMINI_API_KEY}`,
-        "content-type": "application/json",
-      },
+      headers: llmHeaders(env),
       body: JSON.stringify({
         model: env.LLM_MODEL,
         temperature: 0.2,

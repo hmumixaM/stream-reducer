@@ -78,6 +78,8 @@ export interface Env {
 
   // Secrets
   GEMINI_API_KEY: string;
+  LLM_ACCESS_CLIENT_ID?: string;
+  LLM_ACCESS_CLIENT_SECRET?: string;
   OPENROUTER_API_KEY: string;
   // RightCode Draw API key for gpt-image-2-vip infographic generation.
   RIGHTCODE_API_KEY: string;

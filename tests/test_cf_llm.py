@@ -8,6 +8,23 @@ import pytest
 from cf.pipeline import llm
 
 
+def test_chat_sends_independent_access_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_ACCESS_CLIENT_ID", "access-id")
+    monkeypatch.setenv("LLM_ACCESS_CLIENT_SECRET", "access-secret")
+    assert llm._chat_headers("origin-key") == {
+        "Authorization": "Bearer origin-key", "Content-Type": "application/json",
+        "CF-Access-Client-Id": "access-id", "CF-Access-Client-Secret": "access-secret",
+    }
+
+
+def test_chat_does_not_send_partial_access_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_ACCESS_CLIENT_ID", "id")
+    monkeypatch.delenv("LLM_ACCESS_CLIENT_SECRET", raising=False)
+    assert llm._chat_headers("legacy-key") == {
+        "Authorization": "Bearer legacy-key", "Content-Type": "application/json",
+    }
+
+
 def _response(content: object) -> dict:
     return {
         "choices": [{"message": {"content": content}}],

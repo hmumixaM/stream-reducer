@@ -1,3 +1,4 @@
+import { llmHeaders } from "../lib/llmHeaders";
 import { Hono } from "hono";
 import type { AppContext } from "../auth";
 import type { Env } from "../env";
@@ -9,7 +10,7 @@ export const adminLlmRoutes = new Hono<AppContext>();
 
 async function listModels(env: Env): Promise<{ models: string[] } | { error: string }> {
   const response = await fetch(`${env.LLM_BASE_URL}/models`, {
-    headers: { authorization: `Bearer ${env.GEMINI_API_KEY}` },
+    headers: llmHeaders(env),
     signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
   });
   const body = await response.text();
@@ -22,14 +23,12 @@ async function probeModel(env: Env, model: string) {
   const started = Date.now();
   const response = await fetch(`${env.LLM_BASE_URL}/chat/completions`, {
     method: "POST",
-    headers: {
-      authorization: `Bearer ${env.GEMINI_API_KEY}`,
-      "content-type": "application/json",
-    },
+    headers: llmHeaders(env),
     body: JSON.stringify({
       model,
       messages: [{ role: "user", content: "Reply with the single word: ok" }],
-      max_tokens: 16,
+      // Leave room for Gemini's reasoning before the short visible answer.
+      max_tokens: 256,
     }),
     signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
   });

@@ -34,6 +34,16 @@ def _gemini_base() -> str:
     return os.environ.get("GEMINI_BASE_URL", "").rstrip("/")
 
 
+def _chat_headers(key: str) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    client_id = os.environ.get("LLM_ACCESS_CLIENT_ID", "")
+    client_secret = os.environ.get("LLM_ACCESS_CLIENT_SECRET", "")
+    if client_id and client_secret:
+        headers["CF-Access-Client-Id"] = client_id
+        headers["CF-Access-Client-Secret"] = client_secret
+    return headers
+
+
 def _gemini_model() -> str:
     return os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 
@@ -106,7 +116,7 @@ def _chat_once(model: str, messages: list[dict], temperature: float, max_tokens:
                 resp = client.post(
                     f"{_gemini_base()}/chat/completions",
                     json=payload,
-                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    headers=_chat_headers(key),
                 )
                 resp.raise_for_status()
                 box["data"] = resp.json()
