@@ -36,9 +36,9 @@ reduce its authority; do not assume the user's existing ADC is project-scoped.
 
 All services run without capabilities, with no-new-privileges, read-only root
 filesystems, disabled core dumps, bounded memory/PIDs/CPU and rotating logs.
-Images use immutable digests. Oracle inbound port 4000 is not opened: the only
-published address is `127.0.0.1:4000`, for SSH-local diagnostics. The relay and
-connector publish no ports. `/ui`, configuration, filesystem paths and other
+Images use immutable digests. No service publishes a host port, including
+loopback. Diagnostics run inside the private Docker networks. Oracle inbound
+port 4000 is not opened. The relay and connector publish no ports. `/ui`, configuration, filesystem paths and other
 management endpoints are not routed through the tunnel.
 
 ## Installation and secret storage

@@ -1,7 +1,7 @@
 name: litellm-oracle
 services:
   litellm:
-    image: ghcr.io/berriai/litellm@sha256:16fa922a07d13a974862990105573ecb541dc1ea4937817833db1fb991779b12
+    image: ghcr.io/berriai/litellm@sha256:af523173af0a0fc109a39793962fd3acb405c0358a81e48a3beeaece7ef03030
     user: "65532:65532"
     entrypoint: ["litellm"]
     command: ["--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "4000", "--num_workers", "1"]
@@ -13,7 +13,6 @@ services:
       LITELLM_LOG: WARNING
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
       LITELLM_TELEMETRY: "False"
-    ports: ["127.0.0.1:4000:4000"]
     volumes:
       - ./config.yaml:/app/config.yaml:ro,Z
     networks: [gateway, vertex]
@@ -63,7 +62,7 @@ services:
       driver: json-file
       options: {max-size: "5m", max-file: "2"}
   vertex-relay:
-    image: ghcr.io/berriai/litellm@sha256:16fa922a07d13a974862990105573ecb541dc1ea4937817833db1fb991779b12
+    image: ghcr.io/berriai/litellm@sha256:af523173af0a0fc109a39793962fd3acb405c0358a81e48a3beeaece7ef03030
     user: "65531:65531"
     entrypoint: ["python", "/app/vertex_broker.py"]
     env_file: relay.env

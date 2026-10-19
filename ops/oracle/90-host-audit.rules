@@ -1,0 +1,12 @@
+# Watch changes and secret access; do not capture every command's arguments.
+-w /etc/passwd -p wa -k identity_change
+-w /etc/group -p wa -k identity_change
+-w /etc/shadow -p wa -k identity_change
+-w /etc/gshadow -p wa -k identity_change
+-w /etc/sudoers -p wa -k privilege_change
+-w /etc/sudoers.d -p wa -k privilege_change
+-w /etc/ssh/sshd_config -p wa -k ssh_configuration
+-w /home/opc/.ssh/authorized_keys -p wa -k ssh_keys
+-w /var/oled/litellm/secrets -p rwa -k llm_secret_access
+-w /var/oled/litellm/.env -p wa -k llm_configuration
+-w /var/oled/litellm/relay.env -p wa -k llm_configuration

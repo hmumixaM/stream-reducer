@@ -26,26 +26,11 @@ jobs:
         working-directory: xgoose-litellm
         run: npm ci
 
-      - name: Type-check
+      - name: Type-check and test
         working-directory: xgoose-litellm
-        run: npx tsc --noEmit
-
-      # The Dockerfile builds on the account's private registry.cloudflare.com
-      # image, so the runner must be able to pull it.
-      - name: Log in to Cloudflare registry
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          creds=$(curl -sf -X POST \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/containers/registries/registry.cloudflare.com/credentials" \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d '{"expiration_minutes":30,"permissions":["pull"]}')
-          password=$(jq -r '.result.password' <<<"$creds")
-          echo "::add-mask::${password}"
-          jq -r '.result.password' <<<"$creds" \
-            | docker login registry.cloudflare.com -u "$(jq -r '.result.username' <<<"$creds")" --password-stdin
+          npm run typecheck
+          npm test
 
       - name: Prepare Oracle service credentials
         working-directory: xgoose-litellm

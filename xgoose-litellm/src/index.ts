@@ -1,4 +1,5 @@
 import { Container, getContainer } from "@cloudflare/containers";
+import { validGatewayBearer } from "./auth";
 
 interface Env {
   LITELLM: DurableObjectNamespace<LiteLLMContainer>;
@@ -51,6 +52,10 @@ export class LiteLLMContainer extends Container<Env> {
   enableInternet = true;
 
   override envVars = {
+    HOME: "/tmp",
+    LITELLM_LOCAL_MODEL_COST_MAP: "True",
+    LITELLM_TELEMETRY: "False",
+    EXPERIMENTAL_UI_LOGIN: "false",
     GEMINI_PROXY_BASE: this.env.GEMINI_PROXY_BASE,
     GEMINI_PROXY_KEY: this.env.GEMINI_PROXY_KEY,
     LITELLM_MASTER_KEY: this.env.LITELLM_MASTER_KEY,
@@ -60,10 +65,27 @@ export class LiteLLMContainer extends Container<Env> {
     ANTHROPIC_PROXY_KEY: this.env.ANTHROPIC_PROXY_KEY,
     RIGHTCODE_API_KEY: this.env.RIGHTCODE_API_KEY,
   };
+
+  override async fetch(request: Request): Promise<Response> {
+    // The old SDK's default startup window can reject a healthy cold boot.
+    await this.startAndWaitForPorts(4000, {
+      instanceGetTimeoutMS: 120_000,
+      portReadyTimeoutMS: 120_000,
+      abort: request.signal,
+    });
+    return super.fetch(request);
+  }
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // Authenticate before starting a billable container or querying user state.
+    if (!(await validGatewayBearer(request.headers.get("authorization"), env.LITELLM_MASTER_KEY))) {
+      return new Response(JSON.stringify({ error: { message: "Unauthorized" } }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      });
+    }
     if (
       request.method === "POST" &&
       new URL(request.url).pathname.endsWith("/chat/completions")
@@ -84,7 +106,7 @@ export default {
     const container = getContainer(
       env.LITELLM,
       // Fresh instance: the old container may still hold the removed ADC env.
-      "litellm-primary-no-vertex-v1",
+      "litellm-primary-1-103-5",
     );
     return container.fetch(request);
   },

@@ -173,4 +173,5 @@ router_settings:
   cooldown_time: 30
 
 general_settings:
+  allow_client_side_credentials: false
   master_key: os.environ/LITELLM_MASTER_KEY
