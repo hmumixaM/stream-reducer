@@ -2,6 +2,12 @@
 
 **Turn videos and podcasts into source-linked bulletins, readable summaries, and a searchable knowledge base.**
 
+<p align="center">
+  <a href="https://reducer.xgoose.org/">
+    <img src="docs/assets/visit-website.svg" width="520" alt="Visit Stream Reducer — reducer.xgoose.org" />
+  </a>
+</p>
+
 [Open the app](https://reducer.xgoose.org) · [Explore collections](https://reducer.xgoose.org/collections) · [Cloudflare setup](cf/README.md) · [Self-hosting](docs/self-hosting.md)
 
 Stream Reducer gives long-form media a reading interface. Follow the sources you
