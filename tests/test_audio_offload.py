@@ -212,7 +212,8 @@ def test_slow_upload_does_not_block_other_jobs_or_progress(api, monkeypatch):
         sock.close()
 
 
-def test_estimated_source_duration_does_not_reject_complete_audio(api, tmp_path, monkeypatch):
+@pytest.mark.parametrize("missing_segment", [False, True])
+def test_estimated_duration_and_decoded_coverage(api, tmp_path, monkeypatch, missing_segment):
     tone = tmp_path / 'estimated.wav'
     subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=duration=65', str(tone)], check=True)
     data = tone.read_bytes()
@@ -221,9 +222,20 @@ def test_estimated_source_duration_does_not_reject_complete_audio(api, tmp_path,
     api.put(path + '/parts/0', content=data).raise_for_status()
     api.post(path + '/submit', content=b'').raise_for_status()
     actual_probe = service.probe
-    monkeypatch.setattr(service, 'probe', lambda p: 62 if p.name == 'input' else actual_probe(p))
+    def reported_duration(p):
+        if p.name == 'input':
+            return 62  # Simulate an inaccurate source MP3 duration.
+        if missing_segment and p.name == 'chunk_0001.mp3':
+            return 1
+        return actual_probe(p)
+
+    monkeypatch.setattr(service, 'probe', reported_duration)
     service.encode(service.ROOT / job['id'])
     result = api.get(path).json()
+    if missing_segment:
+        assert result['status'] == 'queued', result
+        assert result['error'] == 'ValueError'
+        return
     assert result['status'] == 'done', result
     assert abs(result['duration_s'] - 65) < 0.2
     assert len(result['chunks']) == 3
