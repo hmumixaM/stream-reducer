@@ -210,3 +210,30 @@ def test_slow_upload_does_not_block_other_jobs_or_progress(api, monkeypatch):
         assert b"200" in sock.recv(4096)
     finally:
         sock.close()
+
+
+def test_estimated_source_duration_does_not_reject_complete_audio(api, tmp_path, monkeypatch):
+    tone = tmp_path / 'estimated.wav'
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'sine=duration=65', str(tone)], check=True)
+    data = tone.read_bytes()
+    job = register(api, data)
+    path = '/jobs/' + job['id']
+    api.put(path + '/parts/0', content=data).raise_for_status()
+    api.post(path + '/submit', content=b'').raise_for_status()
+    actual_probe = service.probe
+    monkeypatch.setattr(service, 'probe', lambda p: 62 if p.name == 'input' else actual_probe(p))
+    service.encode(service.ROOT / job['id'])
+    result = api.get(path).json()
+    assert result['status'] == 'done', result
+    assert abs(result['duration_s'] - 65) < 0.2
+    assert len(result['chunks']) == 3
+
+
+def test_decoder_timeline_requires_complete_eof(tmp_path):
+    progress = tmp_path / 'progress'
+    progress.write_text('out_time_us=65000000\nprogress=continue\n')
+    with pytest.raises(ValueError, match='did not complete'):
+        service.decoded_duration(progress)
+    progress.write_text('out_time_us=0\nprogress=end\n')
+    with pytest.raises(ValueError, match='unsupported decoded'):
+        service.decoded_duration(progress)

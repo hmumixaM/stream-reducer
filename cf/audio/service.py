@@ -79,13 +79,26 @@ def probe(path):
     return duration
 
 
+def decoded_duration(progress):
+    # Input MP3 headers can contain estimated durations. Compare segments to
+    # the completed decoder timeline instead, while requiring successful EOF.
+    fields = dict(line.split("=", 1) for line in progress.read_text().splitlines() if "=" in line)
+    if fields.get("progress") != "end":
+        raise ValueError("audio decode did not complete")
+    duration = int(fields.get("out_time_us", "0")) / 1_000_000
+    if not math.isfinite(duration) or not 0 < duration <= MAX_DURATION:
+        raise ValueError("unsupported decoded duration")
+    return duration
+
+
 def encode(folder):
     with LOCK:
         job = load(folder)
         job.update(status="processing", attempts=job.get("attempts", 0) + 1)
         save(folder, job)
     try:
-        duration = probe(folder / "input")
+        probe(folder / "input")  # Preflight only; headers are not the decoded length.
+        (folder / "progress").unlink(missing_ok=True)
         for stale in folder.glob("chunk_*.mp3"):
             stale.unlink()
         # Container has no internet route; whitelist also prevents playlist inputs
@@ -133,6 +146,7 @@ def encode(folder):
                 timeout=900,
                 check=True,
             )
+        duration = decoded_duration(folder / "progress")
         chunks = []
         for path in sorted(folder.glob("chunk_*.mp3")):
             chunks.append(

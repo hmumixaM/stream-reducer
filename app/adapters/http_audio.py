@@ -8,6 +8,9 @@ from urllib.parse import urlparse
 
 import httpx
 
+# Podcast hosts may reject the default python-httpx user agent.
+_AUDIO_HEADERS = {"User-Agent": "Mozilla/5.0 stream-reduce"}
+
 _AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac", ".opus", ".mp4", ".m4b"}
 
 
@@ -36,7 +39,7 @@ def _ext_from(url: str, content_type: str | None) -> str:
 def download_url(url: str, dest_dir: Path, basename: str, on_progress=None) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", basename)[:80] or "audio"
-    with httpx.stream("GET", url, follow_redirects=True, timeout=120) as resp:
+    with httpx.stream("GET", url, headers=_AUDIO_HEADERS, follow_redirects=True, timeout=120) as resp:
         resp.raise_for_status()
         ext = _ext_from(str(resp.url), resp.headers.get("content-type"))
         dest = dest_dir / f"{safe}{ext}"

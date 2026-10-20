@@ -63,7 +63,7 @@ jobs:
           sudo apt-get install -y ffmpeg
           pip install -r cf/rss/requirements.txt pytest httpx
           pytest cf/rss/test_service.py
-          pytest tests/test_audio_offload.py
+          pytest tests/test_http_audio.py tests/test_audio_offload.py
 
       # 3. Apply D1 migrations (idempotent)
       - name: Apply D1 migrations
