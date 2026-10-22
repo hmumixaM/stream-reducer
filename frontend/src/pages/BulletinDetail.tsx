@@ -1,3 +1,4 @@
+import { ProgramInfo } from "@/components/ProgramInfo";
 import { ReaderHeader, ReaderTabs, ReaderOutline, ReaderOverview, useReaderNavigation } from "@/components/Reader";
 import { useArticleMetadata } from "@/lib/seo";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
@@ -195,6 +196,7 @@ export function BulletinDetail() {
         </>}
       />
       {(save.isError || printError) && <p role="alert" className="mb-4 text-sm text-danger">{save.isError ? String(save.error) : zh ? "内容尚未加载完毕，请稍后重试导出。" : "Content is still loading. Please try exporting again."}</p>}
+      <ProgramInfo item={item} zh={zh} />
       <ContentLanguageBar active={lang} translations={translations} authed={authed} zhUi={zh} nativeChinese={nativeChinese} nativeEnglish={nativeEnglish} busy={requestEdition.isPending} onSelect={setLang} onRequest={requestLanguage} />
       <ReaderTabs view={view} onChange={setView} zh={zh}>
         <div className="content-reader-grid">

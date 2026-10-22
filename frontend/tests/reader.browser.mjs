@@ -7,14 +7,14 @@ const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const errors = [];
 const summary = { status: 'done', content: { lead: 'A concise reading of the evidence.', sections: [{ heading: 'Evidence before assumptions', body: 'Compare the evidence before drawing a conclusion. '.repeat(25), timestamp: 12 }, { heading: 'Keep a useful record', body: 'A useful record keeps claims close to their sources.', timestamp: null }], conclusion: 'Keep checking the source.' } };
 const points = Array.from({ length: 8 }, (_, i) => ({ text: `Evidence point ${i + 1}`, timestamp: i * 20 }));
-async function setup({ authed = false, preferred = 'auto', failed = false, blockedStorage = false } = {}) {
+async function setup({ authed = false, preferred = 'auto', failed = false, blockedStorage = false, metadataFailed = false } = {}) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
   page.on('pageerror', e => errors.push(e.message));
   if (blockedStorage) await page.addInitScript(() => Object.defineProperty(window, 'sessionStorage', { get() { throw new Error('Blocked storage'); } }));
   const writes = [], requests = [];
   let fail = failed;
-  const media = { id: 1, platform: 'youtube', title: 'How to read the evidence', source_url: 'https://example.com/video', author: 'Research notes', status: 'done', created_at: '2026-10-20', published_at: '2026-10-20', channel: { id: 1, title: 'Research notes' }, saved: false, total_tokens: 0, total_processing_ms: 0, total_cost_usd: 0, total_api_requests: 0, summary: { markdown: '## Full original notes\n\nA careful account of the original evidence.', structured: { tldr: 'An overview of the evidence.', bulletin: points, headline: 'How to read the evidence' } }, transcript: { source: 'native', language: 'en', text: 'Original transcript evidence for highlighting.', segments: [{ start: 0, end: 20, text: 'Original transcript evidence for highlighting.' }] }, stages: [], highlights: [], comments: [], translations: [{ lang: 'zh', status: 'done' }], localized_bulletin: { complete: true, status: 'done' }, infographic: null };
+  const media = { id: 1, platform: 'youtube', title: 'How to read the evidence', source_url: 'https://example.com/video', author: 'Research notes', status: 'done', created_at: '2026-10-20', published_at: '2026-10-20', channel: { id: 1, title: 'Research notes' }, saved: false, duration_s: 80, view_count: 12345, like_count: 0, description: '<p>Original show notes &amp; references.</p>', total_tokens: 0, total_processing_ms: 0, total_cost_usd: 0, total_api_requests: 0, summary: { markdown: '## Full original notes\n\nA careful account of the original evidence.', structured: { tldr: 'An overview of the evidence.', bulletin: points, headline: 'How to read the evidence' } }, transcript: { source: 'native', language: 'en', text: 'Original transcript evidence for highlighting.', segments: [{ start: 0, end: 20, text: 'Original transcript evidence for highlighting.' }] }, stages: [], highlights: [], comments: [], translations: [{ lang: 'zh', status: 'done' }], localized_bulletin: { complete: true, status: 'done' }, infographic: null };
   const bulletin = { id: 1, title: media.title, source_title: media.title, source_url: media.source_url, author: media.author, platform: 'youtube', source_language: 'en', published_at: '2026-10-20', created_at: '2026-10-20', channel: media.channel, saved: false, bulletin_points: points, key_point_details: points, bulletin: points.map(p => p.text), bulletin_overview: 'An overview of the evidence.', bulletin_intro_ready: true, bulletin_language: 'original', localization_status: 'done', markdown: media.summary.markdown, walkthrough: media.summary.markdown, tldr: 'An overview of the evidence.', summary: 'An overview of the evidence.', background: 'A discussion with the original researchers.', quotes: [{ text: 'Follow the evidence.', speaker: 'Researcher', timestamp: 12 }], entities: [], content_translations: [{ lang: 'zh', status: 'done' }], reading_summary: summary, reading_summary_zh: summary, reading_summary_en: summary };
   const edition = { level: 'article', headline: 'An article about evidence', intro: 'The article introduces the evidence.', points: points.map(p => p.text), sections: [{ title: 'Article evidence', text: 'Read the original evidence carefully. '.repeat(50) }, { title: 'Article conclusion', text: 'The source remains available.' }], based_on_excerpt: false };
   const article = { id: 2, title: 'An article about evidence', url: 'https://example.com/article', author: 'Research notes', published_at: '2026-10-20', status: 'done', completeness: 'full', word_count: 800, sources: [], read: { saved: 0 }, editions: [{ lang: 'original', content: edition }, { lang: 'en', content: { ...edition, headline: 'English article edition' } }, { lang: 'zh', content: { ...edition, headline: '中文文章版本' } }] };
@@ -23,7 +23,7 @@ async function setup({ authed = false, preferred = 'auto', failed = false, block
     requests.push(path + url.search);
     if (request.method() !== 'GET') writes.push({ path, method: request.method(), data: request.postDataJSON() });
     if (path === '/api/auth/me') return route.fulfill({ json: { user: authed ? { id: 7, email: 'reader@example.com', preferred_language: preferred, is_admin: false } : null } });
-    if (path === '/api/items/1') return route.fulfill({ json: media });
+    if (path === '/api/items/1') return metadataFailed ? route.fulfill({ status: 503, json: { error: 'Metadata unavailable' } }) : route.fulfill({ json: media });
     if (path === '/api/items/3') return route.fulfill({ json: { ...media, id: 3, status: 'transcribing', summary: null, transcript: null } });
     if (path === '/api/bulletin/1') { if (fail) { fail = false; return route.fulfill({ status: 503, json: { error: 'Temporary failure' } }); } return route.fulfill({ json: bulletin }); }
     if (path === '/api/items/1/translation') return route.fulfill({ json: { lang: 'zh', status: 'done', markdown: '## 中文完整笔记\n\n保留原始论述。', structured: { headline: '中文媒体版本', tldr: '中文概览', bulletin: ['中文要点'], walkthrough: '## 中文完整笔记\n\n保留原始论述。' } } });
@@ -46,6 +46,22 @@ try {
     assert.deepEqual(await p.getByRole('tab').allTextContents(), ['Overview', 'Read', 'Original & sources']);
     assert.equal(await p.locator('.content-reader-header h1').count(), 1);
     assert.equal(await p.getByText('Infographic', { exact: true }).count(), 0);
+    if (!path.includes('/rss/')) {
+      const info = p.getByRole('region', { name: 'Program information' });
+      await info.getByText('1:20', { exact: true }).waitFor();
+      assert.equal(await info.getByText('12K', { exact: true }).count(), 1);
+      assert.equal(await info.getByText('0', { exact: true }).count(), 1);
+      assert.equal(await info.getByRole('link', { name: 'Research notes', exact: true }).getAttribute('href'), '/channels/1');
+      assert((await info.boundingBox()).y < (await p.getByRole('tablist').boundingBox()).y);
+      await info.locator('summary').click();
+      await info.getByText('Original show notes & references.', { exact: true }).waitFor();
+      await info.getByText('0:20 (25%)', { exact: true }).waitFor();
+      await info.getByText('Native captions', { exact: true }).waitFor();
+      await p.setViewportSize({ width: 320, height: 844 });
+      assert.equal(await p.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'expanded program details overflow');
+      await p.setViewportSize({ width: 1440, height: 1000 });
+      await info.locator('summary').click();
+    }
     await p.getByRole('tab', { name: 'Overview', exact: true }).click();
     assert.equal(await p.locator('.reader-overview li').count(), 5);
     await p.getByRole('button', { name: 'Show 3 more points' }).click();
@@ -64,6 +80,13 @@ try {
     await p.setViewportSize({ width: 1440, height: 1000 });
   }
   assert.deepEqual(anon.writes, []);
+  const partial = await setup({ metadataFailed: true });
+  await partial.page.goto(base + '/bulletin/1');
+  await partial.page.getByText('Some program details could not load.', { exact: false }).waitFor();
+  await partial.page.getByRole('tab', { name: 'Read', exact: true }).waitFor();
+  assert.equal(await partial.page.getByRole('region', { name: 'Program information' }).getByRole('link', { name: 'Research notes', exact: true }).count(), 1);
+  assert.deepEqual(partial.writes, []);
+  await partial.context.close();
   await p.goto(base + '/bulletin/1?view=notes');
   await p.getByRole('heading', { name: 'Full original notes', exact: true }).waitFor();
   await p.getByRole('button', { name: '简体中文', exact: true }).click();
