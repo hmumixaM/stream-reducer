@@ -21,6 +21,7 @@ export function ContentLanguageBar({
   zhUi,
   nativeChinese = false,
   nativeEnglish = false,
+  allowMoreLanguages = true,
   onSelect,
   onRequest,
 }: {
@@ -31,6 +32,7 @@ export function ContentLanguageBar({
   zhUi: boolean;
   nativeChinese?: boolean;
   nativeEnglish?: boolean;
+  allowMoreLanguages?: boolean;
   onSelect: (lang: string | null) => void;
   onRequest: (lang: string) => void;
 }) {
@@ -78,7 +80,7 @@ export function ContentLanguageBar({
       {chip("zh", "简体中文")}
       {chip("en", "English")}
       {extras.map((row) => chip(row.lang, languageLabel(row.lang)))}
-      {authed && remaining.length > 0 && (
+      {authed && allowMoreLanguages && remaining.length > 0 && (
         <span className="ml-auto flex items-center gap-1.5">
           <Select value={pick} onChange={(event) => setPick(event.target.value)} className="h-8 w-auto py-0 text-xs" aria-label={zhUi ? "翻译成其他语言" : "Translate to another language"}>
             <option value="">{zhUi ? "其他语言…" : "More languages…"}</option>

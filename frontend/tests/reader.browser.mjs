@@ -98,6 +98,7 @@ try {
   const signed = await setup({ authed: true, preferred: 'en' }); const a = signed.page;
   await a.goto(base + '/rss/articles/2');
   await a.getByRole('heading', { name: 'English article edition', exact: true }).waitFor();
+  assert.equal(await a.getByRole('combobox', { name: 'Translate to another language' }).count(), 0);
   assert.equal(await a.getByRole('button', { name: 'English', exact: true }).getAttribute('aria-pressed'), 'true');
   await a.getByRole('button', { name: 'Save article', exact: true }).click();
   await a.getByRole('button', { name: 'Saved', exact: true }).waitFor();
