@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { ReaderLink as Link } from "@/components/Reader";
 import { ArrowUpRight, Clock3, ExternalLink, RefreshCw } from "lucide-react";
 import type { BulletinCardItem } from "@/lib/api";
 import { formatLength } from "@/lib/utils";

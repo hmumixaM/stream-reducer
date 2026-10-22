@@ -20,6 +20,7 @@ export function ContentLanguageBar({
   busy,
   zhUi,
   nativeChinese = false,
+  nativeEnglish = false,
   onSelect,
   onRequest,
 }: {
@@ -29,6 +30,7 @@ export function ContentLanguageBar({
   busy: boolean;
   zhUi: boolean;
   nativeChinese?: boolean;
+  nativeEnglish?: boolean;
   onSelect: (lang: string | null) => void;
   onRequest: (lang: string) => void;
 }) {
@@ -37,8 +39,9 @@ export function ContentLanguageBar({
   const extras = translations.filter((row) => !PRIMARY.includes(row.lang));
   const remaining = TRANSLATE_LANGS.filter((lang) => !PRIMARY.includes(lang.code) && !status.has(lang.code));
 
+  const isOriginalLanguage = (code: string | null) => (code === "zh" && nativeChinese) || (code === "en" && nativeEnglish);
   const choose = (code: string | null) => {
-    if (code === "zh" && nativeChinese) {
+    if (isOriginalLanguage(code)) {
       onSelect(null);
       return;
     }
@@ -47,16 +50,19 @@ export function ContentLanguageBar({
   };
 
   const chip = (code: string | null, label: string) => {
-    const pending = code != null && !(code === "zh" && nativeChinese) && status.has(code) && !["done", "error"].includes(status.get(code) || "");
+    const pending = code != null && !isOriginalLanguage(code) && status.has(code) && !["done", "error"].includes(status.get(code) || "");
     return (
       <button
         key={label}
         type="button"
+        aria-pressed={active === code}
+        disabled={busy || (!authed && code != null && !isOriginalLanguage(code) && !status.has(code))}
+        title={!authed && code != null && !status.has(code) && !isOriginalLanguage(code) ? (zhUi ? "登录后生成此语言版本" : "Sign in to prepare this language") : undefined}
         onClick={() => choose(code)}
         className={cn(
-          "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
+          "min-h-11 rounded-md border px-3 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50",
           active === code
-            ? "border-primary bg-primary text-primary-foreground"
+            ? "border-primary bg-primary text-primary-foreground dark:text-background"
             : "border-border text-muted-foreground hover:bg-accent",
         )}
       >

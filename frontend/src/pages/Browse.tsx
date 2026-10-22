@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { ReaderLink as Link } from "@/components/Reader";
+import { useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Film, Plus, Star } from "lucide-react";
 import { api, type Item, type Platform } from "@/lib/api";
@@ -102,7 +103,8 @@ export function Browse() {
               ))}
             </Select>
             <Input
-              placeholder="Search titles..."
+              aria-label="Search titles"
+              placeholder="Search titles…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               className="max-w-[220px]"
@@ -111,6 +113,7 @@ export function Browse() {
         }
       />
 
+      <nav aria-label="Browse content" className="mb-5 flex gap-2"><Link to="/browse" aria-current="page" className="reader-control bg-accent font-medium">Videos &amp; podcasts</Link><Link to="/articles" className="reader-control">Articles</Link></nav>
       <ChipRow>
         <FilterChip label="All" active={!platform} onClick={() => setPlatform("")} />
         {PLATFORMS.map((p) => (

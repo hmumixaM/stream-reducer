@@ -34,6 +34,8 @@ import { SkeletonGrid } from "@/components/shell";
 import { cn } from "@/lib/utils";
 import { LogIn } from "lucide-react";
 import { FeedbackDialog } from "@/components/FeedbackDialog";
+import { ReaderScrollRestoration } from "@/components/Reader";
+import { GuestLoginGuide } from "@/components/GuestLoginGuide";
 
 const SECTIONS = ["main", "discover", "system"] as const;
 type Section = (typeof SECTIONS)[number];
@@ -328,9 +330,11 @@ export function Layout() {
         <SidebarContent />
       </aside>
 
+      <ReaderScrollRestoration />
       {/* Main Content */}
       <main className="min-w-0 flex-1 overflow-auto">
         <div className="mx-auto w-full max-w-7xl p-4 md:p-6">
+          <GuestLoginGuide />
           <Suspense fallback={<SkeletonGrid count={6} />}>
             <Outlet />
           </Suspense>

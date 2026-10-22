@@ -20,7 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button, Input, Select } from "@/components/ui";
 import { BulletinCard } from "@/components/BulletinCard";
-import { EmptyState, ErrorState } from "@/components/shell";
+import { EmptyState, ErrorState, PageHeader } from "@/components/shell";
 
 export function Bulletin() {
   const me = useMe();
@@ -102,35 +102,10 @@ export function Bulletin() {
 
   return (
     <div className="bulletin-desk mx-auto max-w-5xl pb-14">
-      <div className="desk-masthead">
-        <div className="flex items-center justify-between gap-3">
-          <p className="desk-eyebrow">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" />{" "}
-            {zh ? "你的每日阅读" : "YOUR DAILY READING"}
-          </p>
-          <Link to="/subscriptions?tab=articles" className="desk-utility">
-            {zh ? "关注文章来源" : "Follow article sources"}
-          </Link>
-          <Link to="/preferences" className="desk-utility">
-            <Settings2 size={14} /> {zh ? "中文简报" : "Reading preferences"}
-          </Link>
-        </div>
-        <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="desk-title">
-              The Bulletin<span className="text-primary">.</span>
-            </h1>
-            <p className="mt-3 max-w-xl text-sm leading-7 text-muted-foreground">
-              {zh
-                ? "先读重点，再读懂来龙去脉。来自你关注和收藏的每一个来源。"
-                : "The essential ideas from the sources you follow. A short read now, a deeper understanding when you need it."}
-            </p>
-          </div>
-          <p className="pb-1 font-mono text-[11px] text-muted-foreground">
-            {dateLabel(new Date().toISOString(), zh)}
-          </p>
-        </div>
-      </div>
+      <PageHeader title={zh ? "简报" : "Bulletin"} subtitle={zh ? "来自你关注和收藏的来源。先读重点，再深入了解。" : "The key ideas from the sources you follow and save. Read at your own depth."} actions={<>
+        <Link to="/subscriptions?tab=articles" className="reader-control">{zh ? "关注来源" : "Follow sources"}</Link>
+        <Link to="/preferences" className="reader-control"><Settings2 size={15} />{zh ? "阅读偏好" : "Reading preferences"}</Link>
+      </>} />
 
       <div className="desk-toolbar">
         <div

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { ReaderLink as Link } from "@/components/Reader";
 import { useMutation } from "@tanstack/react-query";
 import { ExternalLink, Search as SearchIcon } from "lucide-react";
 import { api, type SearchHit } from "@/lib/api";

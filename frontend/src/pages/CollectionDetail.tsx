@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { ReaderLink as Link } from "@/components/Reader";
+import { useParams, useSearchParams } from "react-router-dom";
 import {
   useInfiniteQuery,
   useMutation,

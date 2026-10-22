@@ -1,4 +1,5 @@
-import { Link, useNavigate } from "react-router-dom";
+import { ReaderLink as Link } from "@/components/Reader";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Search, BookOpen, ExternalLink, Languages } from "lucide-react";
 import { api } from "@/lib/api";

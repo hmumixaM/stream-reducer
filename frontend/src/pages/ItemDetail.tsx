@@ -1,7 +1,7 @@
 import { SourceCover } from "@/components/SourceCover";
 import { useArticleMetadata } from "@/lib/seo";
-import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { lazy, Suspense, useState, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { Link, useNavigate, useParams, useSearchParams, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -33,10 +33,11 @@ import {
   type Summary,
 } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
+import { safeReaderReturn } from "@/components/Reader";
 import { dateLabel } from "@/lib/bulletin";
 import { useMe } from "@/lib/auth";
 import { Button, Card, Spinner } from "@/components/ui";
-import { BackLink, ErrorState, LoadingState } from "@/components/shell";
+import { ErrorState, LoadingState } from "@/components/shell";
 import { ContentLanguageBar, languageLabel } from "@/components/ContentLanguage";
 import { isPredominantlyChinese } from "@/lib/chinese";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
@@ -53,10 +54,30 @@ import {
   cn,
 } from "@/lib/utils";
 
+const MediaReader = lazy(() => import("@/pages/BulletinDetail").then(module => ({ default: module.BulletinDetail })));
+
 export function ItemDetail() {
+  const { id } = useParams();
+  const [params] = useSearchParams();
+  const me = useMe();
+  const workspace = MIRROR || params.get("workspace") === "1";
+  const item = useQuery({
+    queryKey: ["item", Number(id), me.data?.user?.id, me.data?.user?.preferred_language || "auto"],
+    queryFn: () => api.getItem(Number(id)), enabled: !workspace,
+  });
+  if (workspace) return <ItemWorkspace />;
+  if (item.isLoading) return <LoadingState />;
+  if (item.isError) return <ErrorState message="This item could not be loaded." onRetry={() => item.refetch()} />;
+  return item.data?.status === "done"
+    ? <Suspense fallback={<LoadingState />}><MediaReader /></Suspense>
+    : <ItemWorkspace />;
+}
+
+function ItemWorkspace() {
   const { id } = useParams();
   const itemId = Number(id);
   const navigate = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
   const me = useMe();
   // Personal actions (favorite, archive, comments, highlights, retry, delete)
@@ -92,7 +113,7 @@ export function ItemDetail() {
   const attemptedBulletins = useRef(new Set<string>());
   useEffect(() => {
     const localized = item.data?.localized_bulletin;
-    if (preferred !== "auto" && !(preferred === "en" && /^(en(?:[-_].+)?|english)$/i.test(item.data?.transcript?.language || "")) && item.data?.summary && !localized?.complete && localized?.status !== "processing" && !attemptedBulletins.current.has(`${itemId}:${preferred}`)) {
+    if (canEdit && preferred !== "auto" && !(preferred === "en" && /^(en(?:[-_].+)?|english)$/i.test(item.data?.transcript?.language || "")) && item.data?.summary && !localized?.complete && localized?.status !== "processing" && !attemptedBulletins.current.has(`${itemId}:${preferred}`)) {
       attemptedBulletins.current.add(`${itemId}:${preferred}`);
       prepareBulletin.mutate(itemId);
     }
@@ -184,17 +205,16 @@ export function ItemDetail() {
   const onUpdateHighlight = (id: number, note: string) =>
     updateHighlight.mutate({ id, note });
   const onDeleteHighlight = (id: number) => deleteHighlight.mutate(id);
-  // "/" is the mirror library, the signed-in timeline, or the public catalog.
-  const backTo = MIRROR
-    ? { to: "/", label: "Library" }
-    : me.data?.user
-      ? { to: "/", label: "Timeline" }
-      : { to: "/browse", label: "Browse" };
+  const readerParams = new URLSearchParams(location.search);
+  readerParams.delete("workspace");
+  const backTo = MIRROR ? { to: "/", label: "Library" } : d.status === "done"
+    ? { to: `/items/${itemId}?${readerParams}`, label: preferChinese ? "返回阅读" : "Back to reading" }
+    : { to: safeReaderReturn(location.state?.readerFrom) || safeReaderReturn(readerParams.get("from")) || (canEdit ? "/bulletin" : "/browse"), label: preferChinese ? "返回列表" : "Back to list" };
 
   return (
     <>
     <div className={cn("screen-only", readMode ? "mx-auto max-w-3xl" : "")}>
-      <BackLink to={backTo.to} label={backTo.label} />
+      <Link to={backTo.to} state={location.state} className="reader-control mb-3"><span aria-hidden>←</span>{backTo.label}</Link>
 
       <div className="mb-5 flex flex-col gap-4">
         <div className="source-heading">
@@ -306,7 +326,7 @@ export function ItemDetail() {
             </Button>
           )}
           {!readMode && canEdit && (
-            <Button variant="danger" size="sm" onClick={() => remove.mutate()}>
+            <Button variant="danger" size="sm" aria-label="Remove from library" onClick={() => { if (window.confirm("Remove this item from your library?")) remove.mutate(); }}>
               <Trash2 className="h-4 w-4" />
             </Button>
           )}
@@ -321,15 +341,6 @@ export function ItemDetail() {
 
       <div className={readMode ? "block" : "grid grid-cols-1 gap-6 lg:grid-cols-3"}>
         <div className={readMode ? "" : "lg:col-span-2"}>
-          {d.summary && (
-            <InfographicView
-              itemId={itemId}
-              initial={d.infographic ?? null}
-              authed={!!me.data?.user}
-              readMode={readMode}
-            />
-          )}
-
           {d.description && <ShowNotesView description={d.description} readMode={readMode} />}
 
           {d.summary ? (
@@ -365,6 +376,8 @@ export function ItemDetail() {
               )}
             </Card>
           )}
+
+          {d.summary && <details className="my-6 rounded-lg border p-4"><summary className="reader-control">{preferChinese ? "信息图" : "Infographic"}</summary><InfographicView itemId={itemId} initial={d.infographic ?? null} authed={canEdit} readMode={readMode} /></details>}
 
           {d.transcript && (
             <Card className={cn("mt-4 p-4", readMode && "border-dashed bg-transparent shadow-none")}>
@@ -613,10 +626,11 @@ function SummaryView({
   onUpdateNote: (id: number, note: string) => void;
   onDelete: (id: number) => void;
 }) {
-  const picked = useRef(false);
+  const readerLanguage = new URLSearchParams(window.location.search).get("lang");
+  const picked = useRef(readerLanguage != null);
   const askedEditions = useRef(new Set<string>());
   const nativeChinese = isPredominantlyChinese(summaryMarkdown || sourceText);
-  const [lang, setLang] = useState<string | null>(preferEnglish ? "en" : preferChinese && !nativeChinese ? "zh" : null);
+  const [lang, setLang] = useState<string | null>(readerLanguage != null ? (readerLanguage === "original" ? null : readerLanguage) : preferEnglish ? "en" : preferChinese && !nativeChinese ? "zh" : null);
   const [summaryMode, setSummaryMode] = useState<"bulletin" | "detailed">("bulletin");
   const qc = useQueryClient();
   const mdClass = readMode ? "prose-read max-w-none" : "prose-sr max-w-none text-sm";
@@ -1068,6 +1082,7 @@ function CommentsSection({
   comments: Comment[];
 }) {
   const qc = useQueryClient();
+  const zh = useMe().data?.user?.preferred_language === "zh";
   const [body, setBody] = useState("");
   const refresh = () => qc.invalidateQueries({ queryKey: ["item", itemId] });
   const add = useMutation({
@@ -1085,7 +1100,7 @@ function CommentsSection({
   return (
     <Card className="mt-4 p-4">
       <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-        <MessageSquare className="h-4 w-4" /> Comments
+        <MessageSquare className="h-4 w-4" /> {zh ? "笔记与评论" : "Notes & comments"}
         {comments.length > 0 && (
           <span className="text-muted-foreground">({comments.length})</span>
         )}
@@ -1098,8 +1113,9 @@ function CommentsSection({
               <span>{timeAgo(c.created_at)}</span>
               <button
                 onClick={() => remove.mutate(c.id)}
-                className="opacity-0 transition-opacity group-hover:opacity-100 hover:text-danger"
-                title="Delete comment"
+                className="min-h-11 min-w-11 transition-colors hover:text-danger focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={zh ? "删除笔记" : "Delete note"}
+                title={zh ? "删除笔记" : "Delete note"}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -1108,10 +1124,11 @@ function CommentsSection({
           </div>
         ))}
         {comments.length === 0 && (
-          <p className="text-sm text-muted-foreground">No comments yet.</p>
+          <p className="text-sm text-muted-foreground">{zh ? "还没有笔记。" : "No notes yet."}</p>
         )}
       </div>
 
+      {(add.isError || remove.isError) && <p role="alert" className="mt-3 text-sm text-danger">{zh ? "笔记未能保存，请重试。" : "Your note could not be saved. Please try again."}</p>}
       <form
         className="mt-3 flex items-end gap-2"
         onSubmit={(e) => {
@@ -1121,12 +1138,13 @@ function CommentsSection({
       >
         <textarea
           rows={2}
-          placeholder="Add a note or comment…"
+          aria-label={zh ? "添加笔记或评论" : "Add a note or comment"}
+          placeholder={zh ? "添加笔记或评论…" : "Add a note or comment…"}
           value={body}
           onChange={(e) => setBody(e.target.value)}
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
-        <Button type="submit" size="sm" disabled={add.isPending || !body.trim()}>
+        <Button type="submit" size="sm" aria-label={zh ? "保存笔记" : "Save note"} disabled={add.isPending || !body.trim()}>
           {add.isPending ? <Spinner /> : <Send className="h-4 w-4" />}
         </Button>
       </form>
@@ -1135,6 +1153,7 @@ function CommentsSection({
 }
 
 function TranscriptBody({
+  fullHeight = false,
   segments,
   highlights,
   readOnly,
@@ -1142,6 +1161,7 @@ function TranscriptBody({
   onUpdateNote,
   onDelete,
 }: {
+  fullHeight?: boolean;
   segments: { start: number; end: number; text: string }[];
   highlights: Highlight[];
   readOnly: boolean;
@@ -1170,7 +1190,7 @@ function TranscriptBody({
       onCreate={onCreate}
       onUpdateNote={onUpdateNote}
       onDelete={onDelete}
-      className="mt-3 max-h-96 overflow-auto text-sm text-muted-foreground"
+      className={fullHeight ? "reader-prose mt-3" : "mt-3 max-h-96 overflow-auto text-sm text-muted-foreground"}
     >
       {body}
     </HighlightLayer>
@@ -1235,4 +1255,43 @@ function formatTs(seconds: number): string {
   const h = Math.floor(m / 60);
   if (h) return `${h}:${String(m % 60).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+
+function useMediaAnnotations(itemId: number) {
+  const me = useMe();
+  const authed = !!me.data?.user && !MIRROR;
+  const qc = useQueryClient();
+  const queryKey = ["item", itemId, me.data?.user?.id, me.data?.user?.preferred_language || "auto"];
+  const item = useQuery({ queryKey, queryFn: () => api.getItem(itemId) });
+  const refresh = () => { qc.invalidateQueries({ queryKey: ["item", itemId] }); qc.invalidateQueries({ queryKey: ["annotations"] }); };
+  const create = useMutation({ mutationFn: (highlight: NewHighlight) => api.addHighlight(itemId, highlight), onSuccess: refresh });
+  const update = useMutation({ mutationFn: ({ id, note }: { id: number; note: string }) => api.updateHighlight(itemId, id, { note }), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: (id: number) => api.deleteHighlight(itemId, id), onSuccess: refresh });
+  return { authed, item, create, update, remove };
+}
+
+export function MediaSourceContent({ itemId, zh }: { itemId: number; zh: boolean }) {
+  const { authed, item, create, update, remove } = useMediaAnnotations(itemId);
+  if (item.isLoading) return <LoadingState />;
+  if (!item.data || item.isError) return <ErrorState message={zh ? "逐字稿暂时无法打开。" : "The transcript could not be loaded."} onRetry={() => item.refetch()} />;
+  const d = item.data;
+  return <section>
+    <h2 className="mb-4 text-xl font-semibold">{zh ? "原始逐字稿" : "Original transcript"}</h2>
+    {(create.isError || update.isError || remove.isError) && <p role="alert" className="mb-4 text-sm text-danger">{zh ? "标注未能保存，请重试。" : "The highlight could not be saved. Please try again."}</p>}
+    {d.transcript?.segments?.length ? <TranscriptBody segments={d.transcript.segments} highlights={(d.highlights || []).filter(h => h.source === "transcript")} readOnly={!authed} onCreate={highlight => create.mutate(highlight)} onUpdateNote={(id, note) => update.mutate({ id, note })} onDelete={id => remove.mutate(id)} fullHeight /> : <p className="reader-prose whitespace-pre-line">{d.transcript?.text || (zh ? "此内容尚无逐字稿，可打开原始来源。" : "No transcript is available. You can open the original source.")}</p>}
+    {d.description && <ShowNotesView description={d.description} readMode />}
+    {!!d.highlights?.length && <HighlightsList highlights={d.highlights} readOnly={!authed} onDelete={id => remove.mutate(id)} />}
+    {authed && <CommentsSection itemId={itemId} comments={d.comments || []} />}
+  </section>;
+}
+
+export function MediaSummaryNotes({ itemId, markdown }: { itemId: number; markdown: string }) {
+  const { authed, item, create, update, remove } = useMediaAnnotations(itemId);
+  const zh = useMe().data?.user?.preferred_language === "zh";
+  return <>
+    {(create.isError || update.isError || remove.isError) && <p role="alert" className="mb-4 text-sm text-danger">{zh ? "标注未能保存，请重试。" : "The highlight could not be saved. Please try again."}</p>}
+    {item.isError && <p role="alert" className="mb-4 text-sm text-warning">{zh ? "个人标注暂时无法加载，正文仍可阅读。" : "Your highlights could not load. You can still read the notes."}<button className="reader-control" onClick={() => item.refetch()}>{zh ? "重试" : "Retry"}</button></p>}
+    <HighlightableMarkdown markdown={markdown} highlights={(item.data?.highlights || []).filter(h => h.source === "summary")} source="summary" readOnly={!authed || !item.data || item.isError} onCreate={highlight => create.mutate(highlight)} onUpdateNote={(id, note) => update.mutate({ id, note })} onDelete={id => remove.mutate(id)} className="prose-sr reader-prose" />
+  </>;
 }

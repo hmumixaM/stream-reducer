@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { ReaderLink as Link } from "@/components/Reader";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,

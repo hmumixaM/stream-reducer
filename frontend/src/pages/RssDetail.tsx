@@ -1,371 +1,100 @@
 import { updateMetadata } from "@/lib/seo";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  ArrowLeft,
-  Bookmark,
-  ExternalLink,
-  RefreshCw,
-  ChevronDown,
-} from "lucide-react";
-import { Button, Select, Spinner } from "@/components/ui";
+import { Bookmark, ExternalLink, FileDown, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui";
+import { ErrorState, LoadingState } from "@/components/shell";
+import { ContentLanguageBar, languageLabel } from "@/components/ContentLanguage";
+import { ReaderHeader, ReaderTabs, ReaderOutline, ReaderOverview, useReaderNavigation } from "@/components/Reader";
 import { useMe } from "@/lib/auth";
-import {
-  rssApi,
-  rssDate,
-  completenessLabel,
-  levelLabel,
-  type RssDetail as Detail,
-  type RssBody,
-} from "@/lib/rss";
+import { dateLabel, readingMinutes } from "@/lib/bulletin";
+import { rssApi, type RssDetail as Detail, type RssBody } from "@/lib/rss";
 
 export function RssDetail() {
   const { id } = useParams();
   const me = useMe();
   const client = useQueryClient();
   const authed = !!me.data?.user;
+  const zh = me.data?.user?.preferred_language === "zh";
+  const navigation = useReaderNavigation(authed ? "/bulletin" : "/articles");
+  const { view, setView, params, location } = navigation;
+  const lang = params.get("lang") || (me.data?.user?.preferred_language === "en" ? "en" : zh ? "zh" : "original");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const publicRead = async <T,>(suffix: string): Promise<T> => {
     const response = await fetch(`/api/public/articles/${id}${suffix}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Article unavailable");
     return data as T;
   };
-  const [lang, setLang] = useState(
-    me.data?.user?.preferred_language === "zh" || me.data?.user?.preferred_language === "en" ? me.data.user.preferred_language : "original",
-  );
-  const pickedLanguage = useRef(false);
-  useEffect(() => {
-    if (!pickedLanguage.current) {
-      const preferred = me.data?.user?.preferred_language;
-      setLang(preferred === "zh" || preferred === "en" ? preferred : "original");
-    }
-  }, [me.data?.user?.preferred_language]);
-  const [showBody, setShowBody] = useState(false);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
   const article = useQuery({
-    queryKey: ["rss", "article", id, lang, authed],
-    queryFn: () =>
-      authed
-        ? rssApi<Detail>(`/articles/${id}?lang=${lang}`).catch(() =>
-            publicRead<Detail>(""),
-          )
-        : publicRead<Detail>(""),
-    refetchInterval: (q) =>
-      ["done", "missing"].includes(q.state.data?.status || "") ? false : 10000,
+    queryKey: ["rss", "article", id, lang, me.data?.user?.id],
+    queryFn: () => authed ? rssApi<Detail>(`/articles/${id}?lang=${encodeURIComponent(lang)}`).catch(() => publicRead<Detail>("")) : publicRead<Detail>(""),
+    refetchInterval: q => !["done", "missing", "error"].includes(q.state.data?.status || "") ? 10000 : false,
   });
   const body = useQuery({
-    queryKey: ["rss", "body", id, authed],
-    queryFn: () =>
-      authed
-        ? rssApi<RssBody>(`/articles/${id}/body`).catch(() =>
-            publicRead<RssBody>("/body"),
-          )
-        : publicRead<RssBody>("/body"),
-    enabled: showBody,
+    queryKey: ["rss", "body", id, me.data?.user?.id],
+    queryFn: () => authed ? rssApi<RssBody>(`/articles/${id}/body`).catch(() => publicRead<RssBody>("/body")) : publicRead<RssBody>("/body"),
+    enabled: view === "sources",
   });
   const action = async (fn: () => Promise<void>) => {
-    setBusy(true);
-    setError("");
-    try {
-      await fn();
-      await Promise.all([
-        client.invalidateQueries({ queryKey: ["rss"] }),
-        client.invalidateQueries({ queryKey: ["bulletin", "feed"] }),
-      ]);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    setBusy(true); setError("");
+    try { await fn(); await Promise.all([client.invalidateQueries({ queryKey: ["rss"] }), client.invalidateQueries({ queryKey: ["bulletin", "feed"] })]); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
   };
   useEffect(() => {
     const a = article.data;
     if (!a) return;
-    const edition = a.editions.find((e) => e.lang === "original")?.content;
-    updateMetadata(
-      `${edition?.headline || a.title} | Stream Reducer`,
-      (edition?.intro || a.title).slice(0, 180),
-      `https://reducer.xgoose.org/rss/articles/${a.id}`,
-      a.status === "done",
-    );
+    const edition = a.editions.find(e => e.lang === "original")?.content;
+    updateMetadata(`${edition?.headline || a.title} | Stream Reducer`, (edition?.intro || a.title).slice(0, 180), `https://reducer.xgoose.org/rss/articles/${a.id}`, a.status === "done");
   }, [article.data]);
-  if (article.isLoading)
-    return (
-      <div className="flex items-center gap-2 p-10">
-        <Spinner />
-        正在打开文章…
-      </div>
-    );
-  if (article.error || !article.data)
-    return (
-      <p role="alert" className="p-6 text-danger">
-        {article.error?.message || "文章不存在"}
-      </p>
-    );
+  if (article.isLoading) return <LoadingState label={zh ? "正在打开文章…" : "Opening article…"} />;
+  if (article.isError || !article.data) return <ErrorState message={article.error?.message || (zh ? "文章不存在" : "Article unavailable")} onRetry={() => article.refetch()} />;
   const a = article.data;
-  const edition =
-    a.editions.find((e) => e.lang === lang)?.content ||
-    a.editions.find((e) => e.lang === "original")?.content;
-  return (
-    <div className="mx-auto max-w-4xl pb-16">
-      <Link
-        to={authed ? "/bulletin" : "/articles"}
-        className="mb-6 inline-flex min-h-11 items-center gap-2 text-sm text-muted-foreground hover:text-primary"
-      >
-        <ArrowLeft size={16} />
-        {authed ? "Bulletin" : "Articles"}
-      </Link>
-      <article className="rounded-lg border bg-card px-5 py-7 sm:px-10 sm:py-10">
-        <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
-          {a.sources.map((s) => (
-            <Link
-              key={s.id}
-              to={`/subscriptions?tab=articles&source=${s.id}`}
-              className="hover:text-primary"
-            >
-              {s.title}
-            </Link>
-          ))}
-          <time>{rssDate(a.published_at)}</time>
-          <span>{Math.max(1, Math.ceil(a.word_count / 250))} 分钟阅读</span>
-          <span className={a.completeness === "partial" ? "text-warning" : ""}>
-            {completenessLabel(a.completeness)}
-          </span>
+  const selectedEdition = a.editions.find(e => e.lang === lang)?.content;
+  const edition = selectedEdition || a.editions.find(e => e.lang === "original")?.content;
+  const incomplete = a.completeness === "partial" || edition?.based_on_excerpt;
+  const summaryText = edition ? [edition.intro, ...edition.sections.map(s => s.text)].join(" ") : "";
+  const originalStatus = incomplete ? (zh ? "仅有摘录" : "Excerpt only") : a.completeness === "full" ? (zh ? "原文已保存" : "Original available") : (zh ? "原文待准备" : "Original pending");
+  return <div className="content-reader article-reader">
+    <ReaderHeader title={edition?.headline || a.title} originalTitle={a.title} source={a.sources[0]?.title || a.author || new URL(a.url).hostname} sourceUrl={a.url} sourceLink={a.sources[0] ? `/subscriptions?tab=articles&source=${a.sources[0].id}` : undefined} zh={zh} backTo={navigation.backTo} backState={navigation.backState}
+      meta={<>{a.published_at && <span>{dateLabel(a.published_at, zh)}</span>}<span>{readingMinutes(summaryText)} {zh ? "分钟阅读" : "min read"}</span><span>{zh ? "文章" : "Article"}</span><span className={incomplete ? "text-warning" : ""}>{originalStatus}</span></>}
+      actions={authed ? <Button variant="outline" className="min-h-11" disabled={busy} onClick={() => void action(async () => { await rssApi(`/articles/${id}`, { saved: !a.read.saved }, "PATCH"); })}><Bookmark size={15} className={a.read.saved ? "fill-current" : ""} />{a.read.saved ? (zh ? "已收藏" : "Saved") : (zh ? "收藏" : "Save article")}</Button> : <Link to="/login" state={{ returnTo: location.pathname + location.search }} className="reader-control">{zh ? "登录后收藏" : "Sign in to save"}</Link>}
+      more={<>
+        <Button variant="outline" onClick={() => window.print()}><FileDown size={15} />{zh ? "导出当前阅读" : "Export current view"}</Button>
+        {authed && <><Button variant="outline" disabled={busy} onClick={() => void action(async () => { await rssApi(`/articles/${id}/retry`, {}); })}><RefreshCw size={15} />{zh ? "重试概括" : "Retry summary"}</Button><Button variant="ghost" disabled={busy} onClick={() => void action(async () => { await rssApi(`/articles/${id}/retry`, { refetch: true }); })}>{zh ? "重新获取正文" : "Fetch original again"}</Button></>}
+      </>}
+    />
+    <div className="screen-only"><ContentLanguageBar active={lang === "original" ? null : lang} translations={a.editions.filter(e => e.lang !== "original").map(e => ({ lang: e.lang, status: "done" }))} authed={authed} busy={busy} zhUi={zh} onSelect={navigation.setLanguage} onRequest={navigation.setLanguage} /></div>
+    {error && <p role="alert" className="my-4 text-sm text-danger">{error}</p>}
+    {lang !== "original" && !selectedEdition && <p role="status" className="my-4 text-sm text-muted-foreground">{zh ? `${languageLabel(lang)}版本暂未就绪，当前显示原文语言。` : `The ${languageLabel(lang)} edition is not available yet. Showing the original language.`}<button className="reader-control ml-2" onClick={() => article.refetch()}>{zh ? "检查更新" : "Check again"}</button></p>}
+    {incomplete && <p className="my-4 rounded-md border border-warning/30 p-3 text-sm text-warning">{zh ? "当前仅保存摘录，概括基于已有内容。" : "Only an excerpt is available. This summary covers the saved content."}</p>}
+    <ReaderTabs view={view} onChange={setView} zh={zh}>
+      <div className="content-reader-grid">
+        <div className="content-reader-body">
+          {view !== "sources" && !edition && <div className="reader-preparing" role="status">{a.error || (zh ? "正文与概括暂未就绪，可以先打开原始来源。" : "This reading is not ready yet. You can open the original source.")}</div>}
+          {view === "overview" && edition && <ReaderOverview key={`${id}:${lang}`} intro={edition.intro} points={edition.points} zh={zh} />}
+          {view === "summary" && edition && <>
+            <p className="reader-lead">{edition.intro}</p>
+            {edition.sections.map((section, i) => <section key={i} id={`article-section-${i}`} className="reader-section"><h2 className="mb-3">{section.title}</h2><p className="reader-prose whitespace-pre-line">{section.text}</p></section>)}
+            {!edition.sections.length && <><p className="mt-6 text-sm text-muted-foreground">{zh ? "这篇内容较短，以下要点已覆盖主要信息。" : "This is a short piece. These points cover the main ideas."}</p><ReaderOverview intro="" points={edition.points} zh={zh} /></>}
+          </>}
+          {view === "sources" && <>
+            <h2 className="mb-4 text-xl font-semibold">{zh ? "已保存原文" : "Saved original"}</h2>
+            <a href={a.url} target="_blank" rel="noreferrer" className="reader-control mb-5"><ExternalLink size={15} />{zh ? "打开原始来源" : "Open original source"}</a>
+            {body.isLoading ? <LoadingState /> : body.isError ? <ErrorState message={body.error.message} onRetry={() => body.refetch()} /> : body.data && <>
+              {body.data.warning && <p className="mb-5 text-sm text-warning">{body.data.warning}</p>}
+              <div className="reader-prose">{body.data.paragraphs.map(paragraph => <div key={paragraph.id} className="mb-5"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: () => null, a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer">{children}</a> }}>{paragraph.text}</ReactMarkdown></div>)}</div>
+              {!body.data.paragraphs.length && <p className="reader-prose whitespace-pre-line">{body.data.text || (zh ? "没有可显示的正文。" : "No original text is available.")}</p>}
+            </>}
+          </>}
         </div>
-        <h1 className="max-w-3xl text-2xl font-semibold leading-tight tracking-tight sm:text-4xl">
-          {edition?.headline || a.title}
-        </h1>
-        {edition && edition.headline !== a.title && (
-          <p className="mt-3 text-sm text-muted-foreground">{a.title}</p>
-        )}
-        <div className="mt-5 flex flex-wrap items-center gap-3 border-b pb-5">
-          <a
-            href={a.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex min-h-11 items-center gap-2 text-sm text-primary"
-          >
-            打开原文
-            <ExternalLink size={14} />
-          </a>
-          <Button
-            variant="ghost"
-            disabled={busy || !authed}
-            onClick={() =>
-              void action(async () => {
-                await rssApi(
-                  `/articles/${id}`,
-                  { saved: !a.read.saved },
-                  "PATCH",
-                );
-              })
-            }
-          >
-            <Bookmark
-              size={15}
-              className={a.read.saved ? "fill-current" : ""}
-            />
-            {a.read.saved ? "已收藏" : "收藏"}
-          </Button>
-          <Select
-            aria-label="概括语言"
-            className="ml-auto min-h-11 w-32"
-            value={lang}
-            onChange={(e) => { pickedLanguage.current = true; setLang(e.target.value); }}
-          >
-            <option value="original">原文语言</option>
-            <option value="zh">中文</option>
-          </Select>
-        </div>
-        {error && (
-          <p role="alert" className="mt-4 text-sm text-danger">
-            {error}
-          </p>
-        )}
-        {lang === "zh" &&
-          !a.editions.some((e) => e.lang === "zh") &&
-          edition && (
-            <p role="status" className="mt-4 text-sm text-muted-foreground">
-              中文版本正在准备，当前显示原文语言。
-            </p>
-          )}
-        {edition ? (
-          <>
-            <section className="mt-7" aria-label="文章简报">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-lg font-semibold">简报</h2>
-                <span className="text-xs text-muted-foreground">
-                  {levelLabel(edition.level)}
-                  {edition.based_on_excerpt ? " · 基于摘录" : ""}
-                </span>
-              </div>
-              {edition.based_on_excerpt && (
-                <p className="mb-4 rounded-md bg-warning/10 p-3 text-sm text-warning">
-                  尚未获取完整正文。以下简报仅基于已保存摘录。
-                </p>
-              )}
-              <p className="text-base leading-8">{edition.intro}</p>
-              {edition.points.length > 0 && (
-                <ul className="mt-5 list-disc space-y-3 pl-5 text-base leading-7">
-                  {edition.points.map((p, i) => (
-                    <li key={i}>{p}</li>
-                  ))}
-                </ul>
-              )}
-            </section>
-            {edition.sections.length > 0 ? (
-              <section className="mt-9 border-t pt-7">
-                <h2 className="mb-5 text-lg font-semibold">精炼概括</h2>
-                {edition.sections.length > 3 && (
-                  <nav
-                    aria-label="文章主题"
-                    className="mb-7 flex flex-wrap gap-2"
-                  >
-                    {edition.sections.map((s, i) => (
-                      <a
-                        key={i}
-                        href={`#rss-section-${i}`}
-                        className="rounded-md bg-muted/60 px-3 py-2 text-sm hover:text-primary"
-                      >
-                        {s.title}
-                      </a>
-                    ))}
-                  </nav>
-                )}
-                <div className="space-y-7">
-                  {edition.sections.map((s, i) => (
-                    <section
-                      key={i}
-                      id={`rss-section-${i}`}
-                      className="scroll-mt-20"
-                    >
-                      <h3 className="mb-2 font-semibold">{s.title}</h3>
-                      <p className="whitespace-pre-line text-base leading-8">
-                        {s.text}
-                      </p>
-                    </section>
-                  ))}
-                </div>
-              </section>
-            ) : !edition.based_on_excerpt ? (
-              <p className="mt-7 border-t pt-5 text-sm text-muted-foreground">
-                简报已覆盖主要信息。
-              </p>
-            ) : null}
-          </>
-        ) : (
-          <section className="py-9">
-            <h2 className="font-semibold">
-              {a.status === "missing"
-                ? "暂时没有可读取的正文"
-                : "正文与概括正在准备中"}
-            </h2>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              {a.error ||
-                "文章会先保存正文，再生成简报和精炼概括。可以稍后回来，或先打开原文。"}
-            </p>
-          </section>
-        )}
-        <section className="mt-9 border-t pt-5">
-          <button
-            onClick={() => setShowBody(!showBody)}
-            className="flex min-h-11 w-full items-center justify-between gap-3 text-left font-medium"
-            aria-expanded={showBody}
-          >
-            已保存原文
-            <ChevronDown size={18} className={showBody ? "rotate-180" : ""} />
-          </button>
-          {showBody && (
-            <div className="mt-5">
-              {body.isLoading ? (
-                <Spinner />
-              ) : body.error ? (
-                <p role="alert" className="text-sm text-warning">
-                  {body.error.message}
-                </p>
-              ) : body.data ? (
-                <>
-                  <p className="mb-5 break-all text-xs text-muted-foreground">
-                    {completenessLabel(body.data.completeness)} · 版本{" "}
-                    {a.body_version} · {body.data.method}
-                    <br />
-                    <a
-                      className="underline"
-                      target="_blank"
-                      rel="noreferrer"
-                      href={body.data.source_url}
-                    >
-                      {body.data.source_url}
-                    </a>
-                  </p>
-                  {body.data.paragraphs.map((p) => (
-                    <div
-                      key={p.id}
-                      className="rss-original mb-5 rounded-md p-2"
-                    >
-                      <div className="prose prose-sm max-w-none break-words dark:prose-invert">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            img: () => null,
-                            a: ({ children, href }) => (
-                              <a href={href} target="_blank" rel="noreferrer">
-                                {children}
-                              </a>
-                            ),
-                          }}
-                        >
-                          {p.text}
-                        </ReactMarkdown>
-                      </div>
-                    </div>
-                  ))}
-                </>
-              ) : null}
-            </div>
-          )}
-        </section>
-        {!authed && (
-          <p className="mt-5 text-sm">
-            <Link className="underline" to="/login">
-              Sign in to save articles and follow sources
-            </Link>
-          </p>
-        )}
-        {authed && (
-          <div className="mt-5 flex flex-wrap gap-2 border-t pt-5">
-            <Button
-              disabled={busy || !authed}
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                void action(async () => {
-                  await rssApi(`/articles/${id}/retry`, {});
-                })
-              }
-            >
-              <RefreshCw size={13} />
-              重试概括
-            </Button>
-            <Button
-              disabled={busy || !authed}
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                void action(async () => {
-                  await rssApi(`/articles/${id}/retry`, { refetch: true });
-                })
-              }
-            >
-              重新获取正文
-            </Button>
-          </div>
-        )}
-      </article>
-    </div>
-  );
+        {view === "summary" && edition && <ReaderOutline sections={edition.sections.map((section, i) => ({ id: `article-section-${i}`, title: section.title }))} zh={zh} />}
+      </div>
+    </ReaderTabs>
+  </div>;
 }

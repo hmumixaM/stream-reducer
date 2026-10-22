@@ -1,10 +1,17 @@
-import { useEffect } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { ReaderLink as Link } from "@/components/Reader";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { updateMetadata } from "@/lib/seo";
+import { PageHeader, EmptyState, ErrorState, LoadingState } from "@/components/shell";
+import { Button, Input } from "@/components/ui";
+import { dateLabel } from "@/lib/bulletin";
+
 export function PublicArticles() {
   const [params, setParams] = useSearchParams();
   const q = params.get("q") || "";
+  const [search, setSearch] = useState(q);
+  useEffect(() => setSearch(q), [q]);
   const offset = Math.max(0, Math.floor(Number(params.get("offset")) || 0));
   const page = Math.floor(offset / 24);
   const articles = useQuery({
@@ -36,51 +43,50 @@ export function PublicArticles() {
     [q, offset],
   );
   return (
-    <main className="mx-auto max-w-4xl py-8">
-      <h1 className="text-3xl font-semibold">RSS &amp; Substack articles</h1>
-      <p className="my-4 text-muted-foreground">
-        Read bulletins, summaries and original articles. No account required.
-      </p>
+    <div className="mx-auto max-w-5xl">
+      <PageHeader title="Articles" subtitle="Read summaries and originals from RSS and Substack. No account required." />
+      <nav aria-label="Browse content" className="mb-5 flex gap-2"><Link to="/browse" className="reader-control">Videos & podcasts</Link><Link to="/articles" aria-current="page" className="reader-control bg-accent font-medium">Articles</Link></nav>
       <form
         role="search"
         className="my-6 flex gap-3"
         onSubmit={(e) => {
           e.preventDefault();
           setParams({
-            q: String(new FormData(e.currentTarget).get("q") || ""),
+            q: search.trim(),
           });
         }}
       >
         <label className="sr-only" htmlFor="article-search">
           Search articles
         </label>
-        <input
+        <Input
           id="article-search"
           name="q"
           type="search"
-          defaultValue={q}
+          value={search}
+          onChange={e => setSearch(e.target.value)}
           placeholder="Search titles and authors"
-          className="min-w-0 flex-1 rounded border bg-background p-3"
+          className="min-h-11 min-w-0 flex-1"
         />
-        <button className="rounded bg-primary px-5 text-primary-foreground">
+        <Button className="min-h-11">
           Search
-        </button>
+        </Button>
       </form>
-      {articles.isLoading && <p>Loading articles…</p>}
-      {articles.error && <p role="alert">{articles.error.message}</p>}
+      {articles.isLoading && <LoadingState label="Loading articles…" />}
+      {articles.error && <ErrorState message={articles.error.message} onRetry={() => articles.refetch()} />}
       {articles.data?.articles.map((a) => (
         <article className="border-b py-5" key={a.id}>
-          <h2 className="text-xl font-semibold">
-            <Link to={`/rss/articles/${a.id}`}>{a.title}</Link>
+          <h2 className="text-lg font-semibold leading-snug">
+            <Link className="hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring" to={`/rss/articles/${a.id}`}>{a.title}</Link>
           </h2>
           <p className="mt-2 text-sm text-muted-foreground">
             {a.author}
-            {a.published_at ? ` · ${a.published_at.slice(0, 10)}` : ""}
+            {a.published_at ? ` · ${dateLabel(a.published_at, false)}` : ""}
           </p>
         </article>
       ))}
       {articles.data && !articles.data.articles.length && (
-        <p>No articles found.</p>
+        <EmptyState title="No articles found" description="Try another title or author." />
       )}
       <nav className="my-6 flex gap-6">
         {offset > 0 && (
@@ -98,6 +104,6 @@ export function PublicArticles() {
           </Link>
         )}
       </nav>
-    </main>
+    </div>
   );
 }

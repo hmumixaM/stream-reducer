@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { ReaderLink as Link } from "@/components/Reader";
 import { CalendarDays, Eye, Film, Plus } from "lucide-react";
 import type { ChannelItemRead } from "@/lib/api";
 import { Button, Card, Spinner } from "@/components/ui";

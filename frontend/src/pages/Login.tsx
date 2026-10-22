@@ -1,12 +1,18 @@
 import { useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button, Card, Spinner } from "@/components/ui";
 
 export function Login() {
   const [email, setEmail] = useState("");
+  const location = useLocation();
   const params = new URLSearchParams(location.search);
   const linkError = params.get("error");
+  const returnTo = location.state?.returnTo;
+  const browseTo = typeof returnTo === "string" && returnTo.startsWith("/") &&
+    !returnTo.startsWith("//") && !/[\\\s]/.test(returnTo) &&
+    returnTo.split(/[?#]/)[0] !== "/login" ? returnTo : "/browse";
 
   const mutation = useMutation({
     mutationFn: (e: string) => api.requestMagicLink(e),
@@ -14,7 +20,7 @@ export function Login() {
 
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-md p-8">
+      <Card className="w-full max-w-md p-6 sm:p-8">
         <div className="mb-6 flex items-center gap-2">
           <img src="/logo-192.png" alt="" className="h-9 w-9 rounded-md" />
           <span className="text-xl font-semibold tracking-tight">stream-reduce</span>
@@ -59,7 +65,9 @@ export function Login() {
               </p>
             )}
             <input
+              aria-label="Email address"
               autoFocus
+              autoComplete="email"
               type="email"
               required
               placeholder="you@example.com"
@@ -77,6 +85,17 @@ export function Login() {
             )}
           </form>
         )}
+        <div className="mt-6 border-t border-border pt-4">
+          <Link
+            to={browseTo}
+            className="inline-flex min-h-11 items-center rounded-md text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Continue browsing
+          </Link>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Public summaries and articles are open to everyone.
+          </p>
+        </div>
       </Card>
     </div>
   );

@@ -1,15 +1,14 @@
-import { SourceCover } from "@/components/SourceCover";
+import { ReaderHeader, ReaderTabs, ReaderOutline, ReaderOverview, useReaderNavigation } from "@/components/Reader";
 import { useArticleMetadata } from "@/lib/seo";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, ArrowUpRight, BookOpen, Clock3, ExternalLink, FileDown, List, Radio, RefreshCw } from "lucide-react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { ArrowUpRight, BookOpen, Bookmark, Check, FileDown } from "lucide-react";
+import { Link, useParams } from "react-router-dom";
 import { api, type BulletinItem, type ReadingSummary } from "@/lib/api";
 import { useMe } from "@/lib/auth";
-import { bulletinBackPath, dateLabel, readingMinutes, sourceAt, timestampLabel } from "@/lib/bulletin";
-import { cn } from "@/lib/utils";
+import { dateLabel, readingMinutes, sourceAt, timestampLabel } from "@/lib/bulletin";
 import { Button, Select } from "@/components/ui";
 import { ContentLanguageBar, languageLabel } from "@/components/ContentLanguage";
 import { isPredominantlyChinese } from "@/lib/chinese";
@@ -17,7 +16,8 @@ import { ErrorState, LoadingState } from "@/components/shell";
 
 const FullMarkdown = lazy(() => import("@/components/Highlightable").then((module) => ({ default: module.HighlightableMarkdown })));
 const noOp = () => undefined;
-type View = "summary" | "notes" | "sources";
+const MediaSummaryNotes = lazy(() => import("@/pages/ItemDetail").then(module => ({ default: module.MediaSummaryNotes })));
+const MediaSourceContent = lazy(() => import("@/pages/ItemDetail").then(module => ({ default: module.MediaSourceContent })));
 function Markdown({ children }: { children: string }) { return <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>; }
 
 function SummaryBody({ summary, source, zh, print = false }: { summary: ReadingSummary; source: string; zh: boolean; print?: boolean }) {
@@ -56,21 +56,14 @@ export function BulletinDetail() {
   const authed = !!me.data?.user;
   const preferred = me.data?.user?.preferred_language || "auto";
   const zh = preferred === "zh";
-  const [params, setParams] = useSearchParams();
+  const navigation = useReaderNavigation(authed ? "/bulletin" : "/browse");
+  const { params, setParams, view, setView, location } = navigation;
   const collection = params.get("collection");
   const returnParams = new URLSearchParams({ view: "bulletin" });
   for (const key of ["section", "track_id"]) if (params.get(key)) returnParams.set(key, params.get(key)!);
-  const backPath = bulletinBackPath(params.get("from"));
-  const backTo = collection ? `/collections/${encodeURIComponent(collection)}?${returnParams}` : backPath ?? (authed ? "/bulletin" : "/browse");
-  const backLabel = collection
-    ? (zh ? "返回 Collection 简报" : "Back to collection")
-    : backPath?.startsWith("/channels/")
-      ? (zh ? "返回该来源" : "Back to source")
-      : backPath === "/browse" || !authed
-        ? (zh ? "返回目录" : "Back to catalog")
-        : (zh ? "返回 Bulletin" : "Back to Bulletin");
-  const selected = params.get("view");
-  const view: View = selected === "notes" || selected === "sources" ? selected : "summary";
+  const backTo = collection && !location.state?.readerFrom ? `/collections/${encodeURIComponent(collection)}?${returnParams}` : navigation.backTo;
+  const fullNotes = params.get("view") === "notes" || params.get("detail") === "full";
+  const setFullNotes = (full: boolean) => setParams(previous => { const p = new URLSearchParams(previous); p.set("view", "summary"); if (full) p.set("detail", "full"); else p.delete("detail"); return p; }, { state: location.state });
   const [printFull, setPrintFull] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState(false);
@@ -98,17 +91,17 @@ export function BulletinDetail() {
     }
   }, [authed, itemId, preferred, bulletin.data?.bulletin_intro_ready, bulletin.data?.localization_status]);
   const attempted = useRef(new Set<string>());
-  const picked = useRef(false);
   const askedEditions = useRef(new Set<string>());
   const nativeEnglish = /^(en(?:[-_].+)?|english)$/i.test(bulletin.data?.source_language || "");
   const nativeChinese = isPredominantlyChinese(bulletin.data?.markdown || bulletin.data?.tldr || "");
-  const [lang, setLang] = useState<string | null>(zh ? "zh" : null);
-  useEffect(() => { if (!picked.current) setLang(preferred === "en" && !nativeEnglish ? "en" : zh && !nativeChinese ? "zh" : null); }, [preferred, zh, nativeChinese, nativeEnglish]);
+  const requestedLanguage = params.get("lang");
+  const lang = requestedLanguage != null ? (requestedLanguage === "original" ? null : requestedLanguage) : preferred === "en" && !nativeEnglish ? "en" : zh && !nativeChinese ? "zh" : null;
+  const setLang = navigation.setLanguage;
   const translations = bulletin.data?.content_translations ?? [];
   const translation = useQuery({
     queryKey: ["translation", itemId, lang],
     queryFn: () => api.getTranslation(itemId, lang!),
-    enabled: lang != null && Number.isInteger(itemId),
+    enabled: lang != null && Number.isInteger(itemId) && !!bulletin.data,
     retry: false,
     refetchInterval: (query) => query.state.data && ["queued", "processing"].includes(query.state.data.status) ? 3000 : false,
   });
@@ -125,7 +118,6 @@ export function BulletinDetail() {
     },
   });
   const requestLanguage = (code: string) => {
-    picked.current = true;
     if (!authed) return;
     if (code === "zh" && nativeChinese) { setLang(null); return; }
     if (code === "zh" && zh) { requestEdition.mutate(code); return; }
@@ -152,6 +144,10 @@ export function BulletinDetail() {
   }, [authed, itemId, briefLang, briefStatus]); // A missing concise brief is prepared once; errors require an explicit retry.
   useEffect(() => { setPrintFull(false); }, [itemId]);
 
+  const save = useMutation({
+    mutationFn: () => api.addItems([bulletin.data!.source_url]),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["bulletin"] }); qc.invalidateQueries({ queryKey: ["items"] }); },
+  });
   if (bulletin.isLoading) return <LoadingState label={zh ? "正在打开阅读稿…" : "Opening your reading edition…"} />;
   if (bulletin.isError || !bulletin.data) return <ErrorState message={zh ? "这篇简报暂时无法打开。" : "This bulletin could not be loaded."} onRetry={() => bulletin.refetch()} />;
   const item = bulletin.data;
@@ -167,11 +163,8 @@ export function BulletinDetail() {
   const brief = briefLang === "zh" ? item.reading_summary_zh : briefLang === "en" ? item.reading_summary_en : item.reading_summary;
   const summary = brief?.content ?? null;
   const preparing = (preparation.isPending && preparation.variables?.id === itemId && preparation.variables.lang === briefLang) || brief?.status === "processing";
-  const notesMarkdown = edition
-    ? (typeof editionStructured.walkthrough === "string" && editionStructured.walkthrough.trim() ? editionStructured.walkthrough : edition.markdown)
-    : (item.walkthrough || item.markdown);
+  const notesMarkdown = edition ? edition.markdown : item.markdown;
   const summaryText = summary ? [summary.lead, ...summary.sections.map((section) => section.body), summary.conclusion].join(" ") : item.tldr;
-  const setView = (next: View) => setParams((previous) => { const p = new URLSearchParams(previous); if (next === "summary") p.delete("view"); else p.set("view", next); return p; }, { replace: true });
   const exportPdf = async () => {
     setPrinting(true);
     setPrintError(false);
@@ -190,72 +183,51 @@ export function BulletinDetail() {
       window.print();
     } catch { setPrintError(true); } finally { setPrinting(false); }
   };
-  const tabs: { value: View; label: string }[] = [{ value: "summary", label: zh ? "精炼概括" : "Summary" }, { value: "notes", label: zh ? "完整逐段内容" : "Deep dive" }, { value: "sources", label: zh ? "引文与来源" : "Sources & quotes" }];
-
-  return <div className="reading-edition mx-auto max-w-6xl">
+  return <div className="reading-edition content-reader">
     <div className="reader-screen screen-only">
-      <div className="mb-7 flex flex-wrap items-center justify-between gap-3">
-        <Link to={backTo} className="desk-utility"><ArrowLeft size={15} />{backLabel}</Link>
-        <div className="flex items-center gap-2"><Select value={printFull ? "full" : "summary"} onChange={(event) => setPrintFull(event.target.value === "full")} aria-label={zh ? "PDF 内容" : "PDF contents"} className="w-auto bg-transparent text-xs"><option value="summary">{zh ? "简报 + 精炼概括" : "Bulletin + summary"}</option><option value="full">{zh ? "包含完整逐段内容" : "Include deep dive"}</option></Select><Button variant="outline" aria-label={zh ? "导出 PDF" : "Export PDF"} disabled={printing || waitingEdition || (lang == null && zh && !item.bulletin_intro_ready) || (lang == null && !summary && !printFull)} onClick={exportPdf}>{printing ? <RefreshCw size={14} className="animate-spin" /> : <FileDown size={14} />}<span className="hidden sm:inline">{zh ? "导出 PDF" : "Export PDF"}</span></Button></div>
-      </div>
-      {printError && <p role="alert" className="mb-4 text-sm text-muted-foreground">{zh ? "完整内容尚未加载完毕，请稍后重试导出。" : "The full edition is still loading. Please try exporting again in a moment."}</p>}
-      <div className="reader-heading">
-        <p className="desk-eyebrow">{item.channel ? <Link to={`/channels/${item.channel.id}`} title={zh ? "查看该来源全部内容" : "All from this source"} className="inline-flex items-center gap-1 text-foreground underline-offset-4 hover:text-primary hover:underline">{item.author || item.channel.title || item.platform}<ArrowUpRight size={11} /></Link> : item.author || item.platform}<span className="text-border">/</span>{dateLabel(item.published_at || item.created_at, zh)}</p>
-        <div className="source-heading mt-5">
-          <h1 className="!mt-0">{pageTitle}</h1>
-          <SourceCover src={item.thumbnail} title={item.source_title} author={item.author} href={item.source_url} />
-        </div>
-
-        <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Clock3 size={13} />{readingMinutes(edition?.markdown || summaryText)} {zh ? "分钟精读" : "min read"}</span><span>{lang == null ? (zh ? "正文为原文" : "Summary in the source language") : waitingEdition ? (zh ? `正在生成${languageLabel(lang)}全文` : `Preparing the ${languageLabel(lang)} edition`) : failedEdition ? (zh ? "全文翻译失败" : "Translation failed") : (zh ? `全文为${languageLabel(lang)}` : `Full summary in ${languageLabel(lang)}`)}</span><a href={item.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 hover:text-primary">{zh ? "原始来源" : "Original source"}<ExternalLink size={12} /></a>{item.channel && <Link to={`/channels/${item.channel.id}`} className="inline-flex items-center gap-1.5 hover:text-primary"><Radio size={12} />{zh ? "该来源全部内容" : "More from this source"}</Link>}</div>
-      </div>
-      <ContentLanguageBar active={lang} translations={translations} authed={authed} zhUi={zh} nativeChinese={nativeChinese} busy={requestEdition.isPending} onSelect={(code) => { picked.current = true; setLang(code); }} onRequest={requestLanguage} />
-      <div className="reader-columns">
-        <div className="min-w-0">
-          <section className="reader-bulletin" aria-label="Bulletin">
-            <div className="mb-4 flex items-center justify-between"><p className="desk-eyebrow text-primary">BULLETIN</p><span className="font-mono text-[10px] text-muted-foreground">{edition ? languageLabel(edition.lang) : lang == null ? (zh ? "原文" : "AT A GLANCE") : (item.bulletin_language === "zh" ? "中文简报" : item.bulletin_language === "en" ? "ENGLISH BULLETIN" : "AT A GLANCE")}</span></div>
-            {lang != null && !edition && <div className="mb-4 text-sm text-muted-foreground" role="status">{failedEdition ? <>{zh ? "全文翻译失败。" : "The full edition failed."} <button className="underline" onClick={() => requestEdition.mutate(lang)}>{zh ? "重试" : "Retry"}</button></> : (zh ? "全文与上面的简报使用同一次翻译，生成后会替换这里的预览。" : "The full edition replaces this preview when it is ready.")}</div>}
-            {lang == null && zh && !item.bulletin_intro_ready && <div className="mb-4 text-sm text-muted-foreground" role="status">{localization.isPending || item.localization_status === "processing" ? "正在补齐中文标题与概览…" : <button onClick={() => localization.mutate(itemId)} className="underline">中文概览暂未就绪，点击重试</button>}</div>}
-            {glanceOverview && <p className="mb-5 text-sm leading-7">{glanceOverview}</p>}
-            <ul>{glancePoints.map((point, index) => <li key={index}>{point.text}{point.timestamp !== null && <a href={sourceAt(item.source_url, point.timestamp)} target="_blank" rel="noreferrer" className="ml-2 whitespace-nowrap font-mono text-[10px] text-primary hover:underline">{timestampLabel(point.timestamp)}</a>}</li>)}</ul>
-            {lang == null && !zh && !glancePoints.length && !glanceOverview && <p className="text-sm leading-7">{item.summary || item.tldr}</p>}
-          </section>
-          <div className="reader-tabs" role="tablist" aria-label={zh ? "阅读层次" : "Reading views"}>{tabs.map((tab) => <button key={tab.value} id={`tab-${tab.value}`} role="tab" aria-selected={view === tab.value} aria-controls={`panel-${tab.value}`} tabIndex={view === tab.value ? 0 : -1} onKeyDown={(event) => {
-            const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
-            if (!keys.includes(event.key)) return;
-            event.preventDefault();
-            const index = tabs.findIndex((entry) => entry.value === tab.value);
-            const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
-            setView(tabs[next].value);
-            document.getElementById(`tab-${tabs[next].value}`)?.focus();
-          }} className={cn("reader-tab", view === tab.value && "is-active")} onClick={() => setView(tab.value)}>{tab.label}</button>)}</div>
-          <article className="reader-article" role="tabpanel" id={`panel-${view}`} aria-labelledby={`tab-${view}`}>
-            {view === "summary" && (summary ? <SummaryBody summary={summary} source={item.source_url} zh={zh || chineseBrief} /> : <>
-              <div className="reader-preparing" role="status">{preparing ? <RefreshCw size={18} className="shrink-0 animate-spin" /> : <BookOpen size={18} className="shrink-0" />}<div><p className="font-medium">{preparing ? (zh ? "正在整理这篇精炼概括" : "Preparing your reading edition") : (zh ? "精炼概括暂时未就绪" : "The reading edition isn’t ready yet")}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{zh ? "先阅读上面的简报，或切换到完整逐段内容。" : "You can read the bulletin above, or switch to the full notes."}</p>{!preparing && authed && <Button size="sm" variant="outline" className="mt-3" onClick={() => preparation.mutate({ id: itemId, lang: briefLang })}>{zh ? "重新生成概括" : "Retry summary"}</Button>}</div></div>
-              {(lang != null ? editionOverview : item.tldr) && <p className="reader-lead">{lang != null ? editionOverview : item.tldr}</p>}
-            </>)}
-            {view === "notes" && (waitingEdition || failedEdition ? <div className="reader-preparing" role="status"><RefreshCw size={18} className={cn("shrink-0", waitingEdition && "animate-spin")} /><div><p className="font-medium">{failedEdition ? (zh ? "全文翻译失败" : "The full edition failed") : (zh ? `正在生成${languageLabel(lang!)}逐段内容` : `Preparing the ${languageLabel(lang!)} notes`)}</p>{failedEdition && <Button size="sm" variant="outline" className="mt-3" onClick={() => requestEdition.mutate(lang!)}>{zh ? "重试" : "Retry"}</Button>}</div></div> : <><p className="mb-6 text-xs text-muted-foreground">{zh ? "保留完整论述、例子与时间线。" : "The full argument, examples and chronological notes."}</p><Suspense fallback={<LoadingState label={zh ? "加载完整内容…" : "Loading full notes…"} />}><FullMarkdown markdown={notesMarkdown} highlights={[]} source="summary" readOnly onCreate={noOp} onUpdateNote={noOp} onDelete={noOp} className="prose-sr reader-prose" /></Suspense></>)}
-            {view === "sources" && <><section className="reader-section pt-0"><p className="desk-eyebrow">{zh ? "原始来源" : "ORIGINAL SOURCE"}</p><h2 className="mt-3">{item.source_title}</h2><p className="reader-prose mt-4">{item.background}</p><a href={item.source_url} target="_blank" rel="noreferrer" className="reader-citation mt-4">{zh ? "打开原始来源" : "Open original source"}<ArrowUpRight size={12} /></a></section>{item.quotes.map((quote, index) => <blockquote className="reader-quote" key={index}><p>“{quote.text}”</p><footer>{quote.speaker}{quote.timestamp !== null && <a href={sourceAt(item.source_url, quote.timestamp)} target="_blank" rel="noreferrer"> · {timestampLabel(quote.timestamp)} ↗</a>}</footer></blockquote>)}{!item.quotes.length && <p className="text-sm text-muted-foreground">{zh ? "这篇内容未提取单独引文，可在完整内容中查阅。" : "No separate quotes were extracted. You can inspect the full notes."}</p>}<Link to={`/items/${item.id}`} className="reader-citation mt-8">{zh ? "查看逐字稿、笔记与标注" : "Open transcript, notes & highlights"}<ArrowUpRight size={13} /></Link></>}
-          </article>
-        </div>
-        <aside className="reader-toc">
-          <div className="sticky top-8 space-y-7">
-            <div><p className="desk-eyebrow"><List size={13} />{zh ? "本篇导读" : "IN THIS BRIEF"}</p>{summary ? <ol className="mt-4 space-y-3">{summary.sections.map((section, index) => <li key={index}><a href={`#section-${index}`} className="flex gap-2 text-xs leading-5 text-muted-foreground hover:text-primary" onClick={(event) => {
-              event.preventDefault();
-              setView("summary");
-              requestAnimationFrame(() => document.getElementById(`section-${index}`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
-            }}><span className="font-mono text-primary/70">{String(index + 1).padStart(2, "0")}</span>{section.heading}</a></li>)}</ol> : <p className="mt-3 text-xs leading-6 text-muted-foreground">{zh ? "概括就绪后显示阅读目录。" : "A reading guide appears when the summary is ready."}</p>}</div>
-            {item.entities.length > 0 && <div className="border-t border-border pt-5"><p className="desk-eyebrow">{zh ? "文中提及" : "MENTIONED"}</p><div className="mt-3 flex flex-wrap gap-2">{item.entities.slice(0, 12).map((entity) => <span key={entity} className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground">{entity}</span>)}</div></div>}
-            <Link to={`/items/${item.id}`} className="desk-utility text-xs">{zh ? "逐字稿与笔记" : "Transcript & notes"}<ArrowUpRight size={12} /></Link>
+      <ReaderHeader title={pageTitle} source={item.author || item.channel?.title || item.platform} sourceUrl={item.source_url} sourceLink={item.channel ? `/channels/${item.channel.id}` : undefined} thumbnail={item.thumbnail} zh={zh} backTo={backTo} backState={navigation.backState}
+        meta={<><span>{dateLabel(item.published_at || item.created_at, zh)}</span><span>{readingMinutes(edition?.markdown || summaryText)} {zh ? "分钟阅读" : "min read"}</span><span>{item.platform}</span></>}
+        actions={authed ? <Button variant="outline" className="min-h-11" disabled={item.saved || save.isPending} onClick={() => save.mutate()}>{item.saved ? <Check size={15} /> : <Bookmark size={15} />}{item.saved ? (zh ? "已加入知识库" : "In library") : (zh ? "加入知识库" : "Save to library")}</Button> : <Link to="/login" state={{ returnTo: location.pathname + location.search }} className="reader-control">{zh ? "登录后收藏" : "Sign in to save"}</Link>}
+        more={<>
+          <Select value={printFull ? "full" : "summary"} onChange={event => setPrintFull(event.target.value === "full")} aria-label={zh ? "PDF 内容" : "PDF contents"}><option value="summary">{zh ? "简报与精炼概括" : "Overview and summary"}</option><option value="full">{zh ? "包含完整笔记" : "Include full notes"}</option></Select>
+          <Button variant="outline" disabled={printing || waitingEdition || (!summary && !printFull)} onClick={exportPdf}><FileDown size={15} />{printing ? (zh ? "正在准备…" : "Preparing…") : (zh ? "导出 PDF" : "Export PDF")}</Button>
+          <Link to={`/items/${item.id}?${new URLSearchParams({ ...Object.fromEntries(params), workspace: "1", from: backTo })}`} state={location.state} className="reader-control">{zh ? "笔记与管理" : "Notes & tools"}</Link>
+        </>}
+      />
+      {(save.isError || printError) && <p role="alert" className="mb-4 text-sm text-danger">{save.isError ? String(save.error) : zh ? "内容尚未加载完毕，请稍后重试导出。" : "Content is still loading. Please try exporting again."}</p>}
+      <ContentLanguageBar active={lang} translations={translations} authed={authed} zhUi={zh} nativeChinese={nativeChinese} nativeEnglish={nativeEnglish} busy={requestEdition.isPending} onSelect={setLang} onRequest={requestLanguage} />
+      <ReaderTabs view={view} onChange={setView} zh={zh}>
+        <div className="content-reader-grid">
+          <div className="content-reader-body">
+            {view === "overview" && <>
+              {waitingEdition && <p role="status" className="mb-4 text-sm text-muted-foreground">{zh ? "所选语言版本准备中，暂时显示已有概览。" : "This language is being prepared. Showing the available overview."}</p>}
+              {failedEdition && <p role="alert" className="mb-4 text-sm text-danger">{zh ? "翻译失败，请稍后重试。" : "Translation failed. Please try again."}</p>}
+              <ReaderOverview key={`${itemId}:${lang}`} intro={glanceOverview || item.summary || item.tldr} points={glancePoints.map(point => <>{point.text}{point.timestamp !== null && <a href={sourceAt(item.source_url, point.timestamp)} target="_blank" rel="noreferrer" className="reader-citation ml-2">{timestampLabel(point.timestamp)}</a>}</>)} zh={zh} />
+            </>}
+            {view === "summary" && <>
+              <div className="reader-detail-toggle" role="group" aria-label={zh ? "精读深度" : "Reading depth"}>
+                <button className="reader-control" aria-pressed={!fullNotes} onClick={() => setFullNotes(false)}>{zh ? "精炼概括" : "Concise summary"}</button>
+                <button className="reader-control" aria-pressed={fullNotes} onClick={() => setFullNotes(true)}>{zh ? "完整笔记" : "Full notes"}</button>
+              </div>
+              {!fullNotes && (summary ? <SummaryBody summary={summary} source={item.source_url} zh={zh || chineseBrief} /> : <div className="reader-preparing" role="status"><BookOpen size={18} /><div><p>{preparing ? (zh ? "正在整理精炼概括…" : "Preparing the concise summary…") : (zh ? "精炼概括暂未就绪" : "The concise summary is not ready yet")}</p><p className="mt-2 text-sm">{zh ? "可先阅读概览或完整笔记。" : "You can read the overview or full notes."}</p>{!preparing && authed && <Button variant="outline" className="mt-3" onClick={() => preparation.mutate({ id: itemId, lang: briefLang })}>{zh ? "重试" : "Retry summary"}</Button>}</div></div>)}
+              {fullNotes && (waitingEdition || failedEdition ? <div className="reader-preparing" role="status"><div><p>{failedEdition ? (zh ? "翻译失败。" : "Translation failed.") : (zh ? "完整笔记翻译中…" : "Preparing the full notes…")}</p>{failedEdition && authed && <Button className="mt-3" variant="outline" onClick={() => requestEdition.mutate(lang!)}>{zh ? "重试" : "Retry"}</Button>}</div></div> : <Suspense fallback={<LoadingState />}>{authed && !edition ? <MediaSummaryNotes itemId={itemId} markdown={notesMarkdown} /> : <FullMarkdown markdown={notesMarkdown} highlights={[]} source="summary" readOnly onCreate={noOp} onUpdateNote={noOp} onDelete={noOp} className="prose-sr reader-prose" />}</Suspense>)}
+            </>}
+            {view === "sources" && <>
+              <section className="reader-section !pt-0"><h2>{zh ? "原始来源" : "Original source"}</h2><p className="reader-prose mt-3">{item.background}</p><a href={item.source_url} target="_blank" rel="noreferrer" className="reader-control mt-2">{zh ? "打开原始来源" : "Open original source"}<ArrowUpRight size={14} /></a></section>
+              <details className="my-6 border-y py-3"><summary className="reader-control">{zh ? `引用（${item.quotes.length}）` : `Quotes (${item.quotes.length})`}</summary>{item.quotes.map((quote, index) => <blockquote className="reader-quote" key={index}><p>“{quote.text}”</p><footer>{quote.speaker}{quote.timestamp !== null && <a href={sourceAt(item.source_url, quote.timestamp)} target="_blank" rel="noreferrer"> · {timestampLabel(quote.timestamp)} ↗</a>}</footer></blockquote>)}{!item.quotes.length && <p className="p-3 text-sm text-muted-foreground">{zh ? "未提取单独引文，可直接阅读逐字稿。" : "No separate quotes were extracted. You can read the transcript below."}</p>}</details>
+              <Suspense fallback={<LoadingState />}><MediaSourceContent itemId={itemId} zh={zh} /></Suspense>
+            </>}
           </div>
-        </aside>
-      </div>
+          {view === "summary" && !fullNotes && summary && <ReaderOutline sections={summary.sections.map((section, index) => ({ id: `section-${index}`, title: section.heading }))} zh={zh} />}
+        </div>
+      </ReaderTabs>
     </div>
     <article className="reading-print">
-      <p className="print-kicker">STREAM-REDUCE / THE BULLETIN</p><h1>{item.title}</h1><p className="print-meta">{item.author} · {dateLabel(item.published_at || item.created_at, zh)}</p>
-      {item.bulletin_overview && <p className="print-lead">{item.bulletin_overview}</p>}
-      <ul className="print-bulletin">{item.bulletin.map((point, index) => <li key={index}>{point}</li>)}</ul>
+      <p className="print-kicker">STREAM-REDUCE / THE BULLETIN</p><h1>{pageTitle}</h1><p className="print-meta">{item.author} · {dateLabel(item.published_at || item.created_at, zh)}</p>
+      {glanceOverview && <p className="print-lead">{glanceOverview}</p>}
+      <ul className="print-bulletin">{glancePoints.map((point, index) => <li key={index}>{point.text}</li>)}</ul>
       {summary && <div className="print-detailed"><SummaryBody summary={summary} source={item.source_url} zh={zh} print /></div>}
-      {printFull && <div className="print-detailed print-full-notes"><h2>{zh ? "完整逐段内容" : "Full notes"}</h2><Suspense fallback={<p>{zh ? "正在加载完整内容…" : "Loading full notes…"}</p>}><FullMarkdown markdown={item.walkthrough || item.markdown} highlights={[]} source="summary" readOnly onCreate={noOp} onUpdateNote={noOp} onDelete={noOp} className="prose-sr reader-prose" /></Suspense></div>}
+      {printFull && <div className="print-detailed print-full-notes"><h2>{zh ? "完整逐段内容" : "Full notes"}</h2><Suspense fallback={<p>{zh ? "正在加载完整内容…" : "Loading full notes…"}</p>}><FullMarkdown markdown={notesMarkdown} highlights={[]} source="summary" readOnly onCreate={noOp} onUpdateNote={noOp} onDelete={noOp} className="prose-sr reader-prose" /></Suspense></div>}
       <p className="print-source">{zh ? "来源" : "Source"}: {item.source_title}<br /><a href={item.source_url}>{item.source_url}</a></p>
     </article>
   </div>;

@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { ReaderLink as Link } from "@/components/Reader";
 import { useQuery } from "@tanstack/react-query";
 import { Film, Network, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
