@@ -183,12 +183,12 @@ export function Layout() {
   const zh = me.data?.user?.preferred_language === "zh";
 
   const queue = useQuery({
-    queryKey: ["queue"],
-    queryFn: api.listQueue,
+    queryKey: ["queue", "count"],
+    queryFn: api.queueCount,
     refetchInterval: 4000,
     enabled: !MIRROR && authed,
   });
-  const active = (queue.data ?? []).filter((i) => i.status !== "error").length;
+  const active = queue.data?.active ?? 0;
 
   const navItems = MIRROR
     ? NAV.filter((item) => MIRROR_NAV.has(item.to))

@@ -13,6 +13,16 @@ queueRoutes.use("*", requireAuth);
 const STALE_IN_PROGRESS_MS = 20 * 60 * 1000;
 const IN_PROGRESS = new Set(["fetching", "transcribing", "summarizing"]);
 
+// The navigation badge polls on every signed-in page. It only needs a count,
+// rather than thousands of serialized items and their global ranks.
+queueRoutes.get("/count", async (c) => {
+  const rows = await all<{ n: number }>(c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM user_item ui JOIN item i ON i.id=ui.item_id
+     WHERE ui.user_id=? AND i.status NOT IN ('done', 'excluded', 'error')`,
+  ).bind(c.get("user").id));
+  return c.json({ active: rows[0]?.n ?? 0 });
+});
+
 // The user's in-flight library: anything not yet done, plus recent errors,
 // ordered by processing priority (highest-demand first).
 queueRoutes.get("/", async (c) => {
@@ -25,18 +35,20 @@ queueRoutes.get("/", async (c) => {
 
   const rows = await all<ItemRow & { ui_folder: number | null; ui_fav: number; ui_arch: number; ui_status: string; current_stage: string | null; chunk_done: number; chunk_count: number; queue_position: number; progress_stage: string | null; progress_pct: number | null; progress_detail: string | null }>(
     c.env.DB.prepare(
-      `SELECT item.*, ui.folder_id AS ui_folder, ui.is_favorite AS ui_fav,
+      `WITH ranked AS (
+         SELECT id, RANK() OVER (
+           ORDER BY priority_score DESC, request_count DESC, enqueued_at ASC
+         ) AS queue_position
+         FROM item WHERE status NOT IN ('done', 'excluded')
+       )
+       SELECT item.*, ui.folder_id AS ui_folder, ui.is_favorite AS ui_fav,
               ui.is_archived AS ui_arch, ui.personal_status AS ui_status,
               (SELECT stage FROM stage_run WHERE item_id = item.id ORDER BY id DESC LIMIT 1) AS current_stage,
               (SELECT chunk_done FROM stage_run WHERE item_id = item.id ORDER BY id DESC LIMIT 1) AS chunk_done,
               (SELECT chunk_count FROM stage_run WHERE item_id = item.id ORDER BY id DESC LIMIT 1) AS chunk_count,
-              -- Rank in the global processing order (same ordering the worker
-              -- claims by): how many non-done items are scheduled ahead of this.
-              (SELECT COUNT(*) FROM item o WHERE o.status NOT IN ('done', 'excluded')
-                 AND (o.priority_score > item.priority_score
-                   OR (o.priority_score = item.priority_score AND o.request_count > item.request_count)
-                   OR (o.priority_score = item.priority_score AND o.request_count = item.request_count AND o.enqueued_at < item.enqueued_at))) + 1 AS queue_position
+              ranked.queue_position
          FROM user_item ui JOIN item ON item.id = ui.item_id
+         JOIN ranked ON ranked.id=item.id
         WHERE ui.user_id = ? AND item.status NOT IN ('done', 'excluded')
         ORDER BY item.priority_score DESC, item.enqueued_at DESC`,
     ).bind(userId),

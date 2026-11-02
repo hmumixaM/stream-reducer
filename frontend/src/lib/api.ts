@@ -1090,6 +1090,7 @@ export const api = {
   },
 
   listQueue: () => req<QueueItem[]>("/api/queue"),
+  queueCount: () => req<{ active: number }>("/api/queue/count"),
 
   listChannels: (params?: ListChannelsParams) =>
     req<ChannelRead[]>(`/api/channels${channelQuery(params)}`),
