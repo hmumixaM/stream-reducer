@@ -290,7 +290,7 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
       ),
     );
     const rows = await env.DB.prepare(
-      `SELECT i.*, substr(s.markdown,1,500) AS markdown FROM item i JOIN summary s ON s.item_id=i.id WHERE ${ELIGIBLE} ${url.pathname === "/" ? `AND i.id IN (${POPULAR_POOL_SQL})` : ""} ${q ? "AND (i.title LIKE ? OR i.headline LIKE ? OR i.subhead LIKE ? OR i.author LIKE ?)" : ""} ORDER BY ${url.pathname === "/" ? "RANDOM()" : "i.completed_at DESC, i.id DESC"} LIMIT ? OFFSET ?`,
+      `SELECT i.id, i.title, i.headline, i.subhead, i.author, i.platform, i.view_count, substr(s.markdown,1,500) AS markdown FROM item i JOIN summary s INDEXED BY ix_summary_public_item ON s.item_id=i.id WHERE ${ELIGIBLE} ${url.pathname === "/" ? `AND i.id IN (${POPULAR_POOL_SQL})` : ""} ${q ? "AND (i.title LIKE ? OR i.headline LIKE ? OR i.subhead LIKE ? OR i.author LIKE ?)" : ""} ORDER BY ${url.pathname === "/" ? "RANDOM()" : "i.completed_at DESC, i.id DESC"} LIMIT ? OFFSET ?`,
     )
       .bind(
         ...(q ? Array(4).fill(`%${q}%`) : []),
@@ -402,7 +402,7 @@ export async function serveSeo(request: Request, env: Env): Promise<Response> {
     };
     if (url.pathname === "/sitemap.xml") {
       const count = await env.DB.prepare(
-        `SELECT count(*) AS total FROM item i JOIN summary s ON s.item_id=i.id WHERE ${ELIGIBLE}`,
+        `SELECT count(*) AS total FROM item i JOIN summary s INDEXED BY ix_summary_public_item ON s.item_id=i.id WHERE ${ELIGIBLE}`,
       ).first<{ total: number }>();
       const articleCount = await env.DB.prepare(
         `SELECT count(*) AS total FROM rss_article a WHERE ${ARTICLE_ELIGIBLE}`,
@@ -421,7 +421,7 @@ export async function serveSeo(request: Request, env: Env): Promise<Response> {
     const rows = await env.DB.prepare(
       articles
         ? `SELECT a.id FROM rss_article a WHERE ${ARTICLE_ELIGIBLE} ORDER BY a.id LIMIT ? OFFSET ?`
-        : `SELECT i.id,i.thumbnail,i.title FROM item i JOIN summary s ON s.item_id=i.id WHERE ${ELIGIBLE} ORDER BY i.id LIMIT ? OFFSET ?`,
+        : `SELECT i.id,i.thumbnail,i.title FROM item i JOIN summary s INDEXED BY ix_summary_public_item ON s.item_id=i.id WHERE ${ELIGIBLE} ORDER BY i.id LIMIT ? OFFSET ?`,
     )
       .bind(PAGE_SIZE, (page - 1) * PAGE_SIZE)
       .all<{ id: number; thumbnail?: string; title?: string }>();

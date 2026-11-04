@@ -6,9 +6,9 @@ export const POPULAR_POOL_SQL = `WITH eligible AS (
     COALESCE(NULLIF(lower(trim(p.author)),''),
       (SELECT 'channel:'||min(ci.channel_id) FROM channel_item ci WHERE ci.item_id=p.id),
       'unknown') AS creator
-  FROM item p JOIN summary ps ON ps.item_id=p.id
+  FROM item p JOIN summary ps INDEXED BY ix_summary_public_item ON ps.item_id=p.id
   WHERE p.status='done' AND length(trim(ps.markdown))>0 AND p.view_count>0
-    AND EXISTS(SELECT 1 FROM transcript t WHERE t.item_id=p.id
+    AND EXISTS(SELECT 1 FROM transcript t INDEXED BY ix_transcript_item_language WHERE t.item_id=p.id
       AND (lower(t.language) IN ('en','english') OR lower(replace(t.language,'_','-')) LIKE 'en-%'))
 ), ranked AS (
   SELECT *,row_number() OVER(PARTITION BY creator ORDER BY view_count DESC,id DESC) AS popularity_rank

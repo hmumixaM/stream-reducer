@@ -259,4 +259,47 @@ describe("complete public HTML and article access", () => {
       expect(page.body).toContain("different creator");
     }
   });
+  it("uses metadata indexes for catalogue eligibility and ordered pagination", async () => {
+    const s = setup();
+    for (let id = 1; id <= 80; id++) s.item(id, "2026-10-01");
+    s.db.exec(`UPDATE item SET completed_at=printf('2026-10-%02d', id % 28 + 1),
+      author='Creator ' || id, view_count=id*100;
+      INSERT INTO transcript(item_id,language,source,text)
+      SELECT id,'en-US','native','Transcript' FROM item;
+      UPDATE summary SET markdown='   ' WHERE item_id=80;
+      UPDATE item SET status='excluded' WHERE id=79;`);
+    const queries = [];
+    const prepare = s.DB.prepare.bind(s.DB);
+    s.DB.prepare = (sql) => { queries.push(sql); return prepare(sql); };
+    const browse = await publicPage(s.env, new URL("https://reducer.xgoose.org/browse?offset=24"));
+    const ids = [...browse.body.matchAll(/href="\/items\/(\d+)"/g)].map(m => Number(m[1]));
+    const expected = s.db.prepare(`SELECT i.id FROM item i JOIN summary s ON s.item_id=i.id
+      WHERE i.status='done' AND length(trim(s.markdown))>0
+      ORDER BY i.completed_at DESC,i.id DESC LIMIT 24 OFFSET 24`).all().map(r => r.id);
+    expect(ids).toEqual(expected);
+    await publicPage(s.env, new URL("https://reducer.xgoose.org/"));
+    await serveSeo(new Request("https://reducer.xgoose.org/sitemap.xml"), s.env);
+    for (const sql of queries.filter(q => q.includes("ix_summary_public_item"))) {
+      const args = Array((sql.match(/\?/g) || []).length).fill(24);
+      const plan = s.db.prepare("EXPLAIN QUERY PLAN " + sql).all(...args).map(r => r.detail).join("\n");
+      expect(plan).toContain("ix_summary_public_item");
+      if (sql.includes("ORDER BY i.completed_at")) {
+        expect(plan).toContain("ix_item_status_completed");
+        expect(plan).not.toContain("USE TEMP B-TREE FOR ORDER BY");
+      }
+      if (sql.includes("ix_transcript_item_language")) {
+        expect(plan).toContain("COVERING INDEX ix_transcript_item_language");
+      }
+      // Eligibility is already recorded in the partial index. SQLite must not
+      // evaluate trim(markdown) against every complete summary on each visit.
+      const ops = s.db.prepare("EXPLAIN " + sql).all(...args);
+      expect(ops.filter(r => r.opcode === "Function" && String(r.p4).startsWith("length("))).toEqual([]);
+    }
+    // Index entries follow edits, so newly empty/usable summaries stay correct.
+    s.db.exec("UPDATE summary SET markdown='' WHERE item_id=1; UPDATE summary SET markdown='Restored' WHERE item_id=80;");
+    const eligible = s.db.prepare("SELECT item_id FROM summary INDEXED BY ix_summary_public_item WHERE length(trim(markdown))>0").all().map(r => r.item_id);
+    expect(eligible).not.toContain(1);
+    expect(eligible).toContain(80);
+  });
+
 });
