@@ -9,21 +9,32 @@ export async function processNextBulletin(env: Env): Promise<void> {
   const stale = new Date(Date.now() - 120_000).toISOString();
   await env.DB.prepare(`UPDATE bulletin_translation SET status='error',error='Translation timed out after 3 attempts'
     WHERE lang IN ('zh','en') AND status='processing' AND updated_at<? AND attempts>=3`).bind(stale).run();
+  // Materialize only pending statuses through the existing pending index.
+  // CROSS JOIN keeps this small candidate set ahead of the completed catalogue.
   for (let collision = 0; collision < 8; collision++) {
     const next = await first<{ item_id: number; lang: string }>(env.DB.prepare(`
-      SELECT bt.item_id, bt.lang FROM bulletin_translation bt
-      JOIN item i ON i.id=bt.item_id JOIN summary s ON s.item_id=i.id
-      WHERE bt.lang IN ('zh','en') AND i.status='done' AND (
-        bt.status='queued'
-        OR (bt.status='error' AND bt.attempts<3 AND (bt.next_attempt_at IS NULL OR bt.next_attempt_at<=?))
-        OR (bt.status='processing' AND bt.attempts<3 AND bt.updated_at<?))
+      WITH pending AS MATERIALIZED (
+        SELECT bt.item_id, bt.lang FROM bulletin_translation bt
+        WHERE bt.lang IN ('zh','en') AND bt.status IN ('queued','error','processing') AND (
+          bt.status='queued'
+          OR (bt.status='error' AND bt.attempts<3 AND (bt.next_attempt_at IS NULL OR bt.next_attempt_at<=?))
+          OR (bt.status='processing' AND bt.attempts<3 AND bt.updated_at<?))
+      )
+      SELECT bt.item_id, bt.lang FROM pending bt
+      CROSS JOIN item i ON i.id=bt.item_id CROSS JOIN summary s ON s.item_id=i.id
+      WHERE i.status='done'
       ORDER BY COALESCE(julianday(i.published_at),julianday(i.created_at),0) DESC, i.id DESC LIMIT 1
     `).bind(now, stale));
     if (!next) {
       const waiting = await first<{ item_id: number; lang: string }>(env.DB.prepare(`
-        SELECT bt.item_id, bt.lang FROM bulletin_translation bt JOIN item i ON i.id=bt.item_id
-        JOIN summary s ON s.item_id=i.id WHERE bt.lang IN ('zh','en') AND i.status='done'
-        AND (bt.status='processing' OR (bt.status='error' AND bt.attempts<3)) LIMIT 1
+        WITH waiting AS MATERIALIZED (
+          SELECT bt.item_id, bt.lang FROM bulletin_translation bt
+          WHERE bt.lang IN ('zh','en') AND bt.status IN ('processing','error')
+            AND (bt.status='processing' OR bt.attempts<3)
+        )
+        SELECT bt.item_id, bt.lang FROM waiting bt
+        CROSS JOIN item i ON i.id=bt.item_id CROSS JOIN summary s ON s.item_id=i.id
+        WHERE i.status='done' LIMIT 1
       `));
       // Recover evicted requests and delayed retries without waiting for cron.
       if (waiting) await env.BULLETIN_JOBS.send({ kind: "bulletin_drain" }, { delaySeconds: 60 });

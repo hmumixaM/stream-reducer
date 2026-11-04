@@ -136,7 +136,7 @@ itemsRoutes.get("/library", requireAuth, async (c) => {
          JOIN item ON item.id = ui.item_id
          LEFT JOIN item_interest ii ON ii.item_id = item.id AND ii.user_id = ui.user_id
          WHERE ${where.join(" AND ")}
-         ORDER BY ${sortCol} ${order}, ui.added_at DESC
+         ORDER BY ${sortCol} ${order}${sortCol === "ui.added_at" ? "" : ", ui.added_at DESC"}
          LIMIT ? OFFSET ?`,
     ).bind(...binds, limit, offset),
   );

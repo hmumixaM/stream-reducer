@@ -60,4 +60,33 @@ describe('durable newest-first bulletin processing',()=>{
     expect(calls).toEqual([2]);
     expect(env.BULLETIN_JOBS.send).toHaveBeenLastCalledWith({kind:'bulletin_drain'},{delaySeconds:60});
   });
+  it('checks an idle large catalogue through the pending-status index without scanning completed items',async()=>{
+    const {env,db,fetch}=setup();
+    db.exec(`WITH RECURSIVE ids(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM ids WHERE id<6500)
+      INSERT INTO item(id,title,source_url,status) SELECT id,'Source '||id,'https://example.com/'||id,'done' FROM ids;
+      INSERT INTO summary(item_id) SELECT id FROM item;
+      INSERT INTO bulletin_translation(item_id,lang,status) SELECT id,'zh','done' FROM item;`);
+    const queries=[]; const prepare=env.DB.prepare.bind(env.DB);
+    env.DB.prepare=sql=>{queries.push(sql);return prepare(sql);};
+    await processNextBulletin(env);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(env.BULLETIN_JOBS.send).not.toHaveBeenCalled();
+    const selections=queries.filter(sql=>sql.includes('AS MATERIALIZED'));
+    expect(selections).toHaveLength(2);
+    for(const sql of selections){
+      const args=sql.includes('WITH pending')?[new Date().toISOString(),'2000-01-01']:[];
+      const plan=db.prepare('EXPLAIN QUERY PLAN '+sql).all(...args).map(r=>r.detail).join('\n');
+      expect(plan).toContain('idx_bulletin_translation_pending (lang=? AND status=?)');
+      expect(plan).toMatch(/SEARCH i USING .*\(.*rowid=\?\)/);
+      expect(plan.indexOf('SCAN bt')).toBeLessThan(plan.indexOf('SEARCH i USING'));
+    }
+  });
+  it('ignores missing summaries, excluded sources and exhausted retries without keeping idle workers alive',async()=>{
+    const {env,db,item,fetch}=setup();
+    item(1,'2026-10-01');item(2,'2026-10-02');item(3,'2026-10-03','error');
+    db.exec("DELETE FROM summary WHERE item_id=1; UPDATE item SET status='excluded' WHERE id=2; UPDATE bulletin_translation SET attempts=3 WHERE item_id=3;");
+    await processNextBulletin(env);
+    expect(fetch).not.toHaveBeenCalled();expect(env.BULLETIN_JOBS.send).not.toHaveBeenCalled();
+  });
+
 });

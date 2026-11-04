@@ -17,7 +17,8 @@ const IN_PROGRESS = new Set(["fetching", "transcribing", "summarizing"]);
 // rather than thousands of serialized items and their global ranks.
 queueRoutes.get("/count", async (c) => {
   const rows = await all<{ n: number }>(c.env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM user_item ui JOIN item i ON i.id=ui.item_id
+    `SELECT COUNT(*) AS n FROM item i INDEXED BY ix_item_active_id
+     CROSS JOIN user_item ui ON ui.item_id=i.id
      WHERE ui.user_id=? AND i.status NOT IN ('done', 'excluded', 'error')`,
   ).bind(c.get("user").id));
   return c.json({ active: rows[0]?.n ?? 0 });
