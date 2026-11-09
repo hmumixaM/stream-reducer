@@ -46,6 +46,10 @@ describe("isTransientCapacity", () => {
     ).toBe(true);
   });
 
+  it("keeps a cold port timeout out of the content retry budget", () => {
+    expect(isTransientCapacity("pipeline container 500: Failed to start container: The container is not listening in the TCP address 10.0.0.1:8080")).toBe(true);
+  });
+
   it("does NOT classify real feed/content failures as transient", () => {
     // These must still mark the subscription broken so the reason stays visible.
     expect(

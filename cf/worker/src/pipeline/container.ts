@@ -31,6 +31,21 @@ export class PipelineContainer extends Container<Env> {
   // instance available" 503s.
   sleepAfter = "30s";
 
+  // Python imports compete with background proxy startup on the basic tier.
+  // SDK 0.1.1 waits outside blockConcurrencyWhile; allow a bounded cold boot
+  // without resetting the DO or spending a content retry.
+  override async fetch(request: Request): Promise<Response> {
+    try {
+      await this.startAndWaitForPorts({
+        ports: [this.defaultPort],
+        cancellationOptions: { abort: request.signal, portReadyTimeoutMS: 120000 },
+      });
+    } catch (error) {
+      throw new Error(`Failed to start container: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return super.fetch(request);
+  }
+
   // Secrets/config the container needs are injected as container env vars.
   override envVars = {
     GEMINI_API_KEY: this.env.GEMINI_API_KEY,

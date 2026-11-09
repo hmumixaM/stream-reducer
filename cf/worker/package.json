@@ -14,7 +14,7 @@
     "migrate:remote": "wrangler d1 migrations apply stream_reduce --remote"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.0.18",
+    "@cloudflare/containers": "0.1.1",
     "@cloudflare/workers-oauth-provider": "^0.8.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "agents": "^0.16.1",
