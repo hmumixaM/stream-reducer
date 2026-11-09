@@ -35,6 +35,10 @@ export class PipelineContainer extends Container<Env> {
   // SDK 0.1.1 waits outside blockConcurrencyWhile; allow a bounded cold boot
   // without resetting the DO or spending a content retry.
   override async fetch(request: Request): Promise<Response> {
+    const idleSleep = this.sleepAfter;
+    // The SDK arms its idle alarm before the port opens. Keep that alarm beyond
+    // the boot budget, then restore normal idle cleanup for the response stream.
+    this.sleepAfter = "150s";
     try {
       await this.startAndWaitForPorts({
         ports: [this.defaultPort],
@@ -42,6 +46,9 @@ export class PipelineContainer extends Container<Env> {
       });
     } catch (error) {
       throw new Error(`Failed to start container: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.sleepAfter = idleSleep;
+      this.renewActivityTimeout();
     }
     return super.fetch(request);
   }

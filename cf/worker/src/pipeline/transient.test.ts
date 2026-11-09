@@ -48,6 +48,9 @@ describe("isTransientCapacity", () => {
 
   it("keeps a cold port timeout out of the content retry budget", () => {
     expect(isTransientCapacity("pipeline container 500: Failed to start container: The container is not listening in the TCP address 10.0.0.1:8080")).toBe(true);
+    expect(isTransientCapacity("Error: Failed to start container: The container just exited")).toBe(true);
+    expect(isTransientCapacity("Error: Network connection lost.")).toBe(true);
+    expect(isTransientCapacity("Error: Failed to start container: The container is not running, consider calling start()")).toBe(true);
   });
 
   it("does NOT classify real feed/content failures as transient", () => {
