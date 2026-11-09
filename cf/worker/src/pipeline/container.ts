@@ -35,6 +35,9 @@ export class PipelineContainer extends Container<Env> {
   // SDK 0.1.1 waits outside blockConcurrencyWhile; allow a bounded cold boot
   // without resetting the DO or spending a content retry.
   override async fetch(request: Request): Promise<Response> {
+    // Shared feed shards may already be serving a long synchronous request.
+    // Do not queue another health probe in front of each warm request.
+    if ((await this.getState()).status === "healthy") return super.fetch(request);
     const idleSleep = this.sleepAfter;
     // The SDK arms its idle alarm before the port opens. Keep that alarm beyond
     // the boot budget, then restore normal idle cleanup for the response stream.
