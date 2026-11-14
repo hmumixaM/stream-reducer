@@ -7,16 +7,14 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import {
-  Check,
-  ChevronRight,
-  ExternalLink,
-  Film,
-  Plus,
-} from "lucide-react";
+import { Check, ChevronRight, ExternalLink, Film, Plus } from "lucide-react";
 import { api, type CollectionTrack, type Item } from "@/lib/api";
 import { useMe } from "@/lib/auth";
-import { PLATFORM_LABELS, PlatformBadge, StatusBadge } from "@/components/badges";
+import {
+  PLATFORM_LABELS,
+  PlatformBadge,
+  StatusBadge,
+} from "@/components/badges";
 import { Button, Card, Select } from "@/components/ui";
 import { CollectionBulletins } from "@/components/CollectionBulletins";
 import {
@@ -40,15 +38,22 @@ export function CollectionDetail() {
   const bulletinView = params.get("view") !== "videos";
   const selectedSection = params.get("section") || "";
   const selectedTrack = params.get("track_id") || "";
-  const setFilter = (name: string, value: string) => setParams((previous) => {
-    const next = new URLSearchParams(previous);
-    if (value) next.set(name, value); else next.delete(name);
-    if (name === "section") next.delete("track_id");
-    return next;
-  }, { replace: true });
+  const setFilter = (name: string, value: string) =>
+    setParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (value) next.set(name, value);
+        else next.delete(name);
+        if (name === "section") next.delete("track_id");
+        return next;
+      },
+      { replace: true },
+    );
   const queryClient = useQueryClient();
   const me = useMe();
-  const zh = me.data?.user?.preferred_language === "zh";
+  const zh = params.get("lang")
+    ? params.get("lang") === "zh"
+    : me.data?.user?.preferred_language === "zh";
   const collection = useQuery({
     queryKey: ["collection", slug],
     queryFn: () => api.getCollection(slug),
@@ -76,20 +81,33 @@ export function CollectionDetail() {
     );
   }
   if (!collection.data) {
-    return <EmptyState title="Collection not found" description="This collection is unavailable." />;
+    return (
+      <EmptyState
+        title="Collection not found"
+        description="This collection is unavailable."
+      />
+    );
   }
 
   const data = collection.data;
   const activeSection =
     data.sections.find((section) => section.slug === selectedSection) ??
     (bulletinView ? undefined : data.sections[0]);
-  const tracks = activeSection ? activeSection.tracks : data.sections.flatMap((section) => section.tracks);
+  const tracks = activeSection
+    ? activeSection.tracks
+    : data.sections.flatMap((section) => section.tracks);
 
   return (
-    <div className={bulletinView ? "bulletin-desk mx-auto max-w-5xl pb-14" : ""}>
+    <div
+      className={bulletinView ? "bulletin-desk mx-auto max-w-5xl pb-14" : ""}
+    >
       <PageHeader
         title={data.title}
-        subtitle={zh ? `${data.description} 共 ${data.item_count} 个视频，${data.ready_count} 篇概括可读。` : `${data.description} ${data.ready_count} of ${data.item_count} videos summarized.`}
+        subtitle={
+          zh
+            ? `${data.description} 共 ${data.item_count} 个视频，${data.ready_count} 篇概括可读。`
+            : `${data.description} ${data.ready_count} of ${data.item_count} videos summarized.`
+        }
         backTo="/collections"
         backLabel="Collections"
         actions={
@@ -102,12 +120,38 @@ export function CollectionDetail() {
         }
       />
 
+      <nav aria-label="Languages" className="mb-4 flex gap-3 text-sm">
+        <Link to={`/collections/${slug}?lang=en`}>English</Link>
+        <Link to={`/collections/${slug}?lang=zh`}>中文</Link>
+      </nav>
       <div className="desk-toolbar mb-5">
-        <div className="flex gap-1" role="group" aria-label={zh ? "Collection 视图" : "Collection view"}>
-          <button className={`desk-tab ${bulletinView ? "is-active" : ""}`} aria-pressed={bulletinView} onClick={() => setFilter("view", "bulletin")}>{zh ? "简报" : "Bulletin"}</button>
-          <button className={`desk-tab ${!bulletinView ? "is-active" : ""}`} aria-pressed={!bulletinView} onClick={() => setFilter("view", "videos")}>{zh ? "视频目录" : "Video directory"}</button>
+        <div
+          className="flex gap-1"
+          role="group"
+          aria-label={zh ? "Collection 视图" : "Collection view"}
+        >
+          <button
+            className={`desk-tab ${bulletinView ? "is-active" : ""}`}
+            aria-pressed={bulletinView}
+            onClick={() => setFilter("view", "bulletin")}
+          >
+            {zh ? "简报" : "Bulletin"}
+          </button>
+          <button
+            className={`desk-tab ${!bulletinView ? "is-active" : ""}`}
+            aria-pressed={!bulletinView}
+            onClick={() => setFilter("view", "videos")}
+          >
+            {zh ? "视频目录" : "Video directory"}
+          </button>
         </div>
-        {bulletinView && <p className="text-xs text-muted-foreground">{zh ? "从新到旧 · 简报与精炼概括" : "Newest first · Bulletins & summaries"}</p>}
+        {bulletinView && (
+          <p className="text-xs text-muted-foreground">
+            {zh
+              ? "从新到旧 · 简报与精炼概括"
+              : "Newest first · Bulletins & summaries"}
+          </p>
+        )}
       </div>
 
       {!bulletinView && data.cover_url ? (
@@ -124,7 +168,13 @@ export function CollectionDetail() {
       ) : null}
 
       <ChipRow>
-        {bulletinView && <FilterChip label={zh ? "全部分类" : "All categories"} active={!activeSection} onClick={() => setFilter("section", "")} />}
+        {bulletinView && (
+          <FilterChip
+            label={zh ? "全部分类" : "All categories"}
+            active={!activeSection}
+            onClick={() => setFilter("section", "")}
+          />
+        )}
         {data.sections.map((section) => (
           <FilterChip
             key={section.id}
@@ -135,16 +185,36 @@ export function CollectionDetail() {
         ))}
       </ChipRow>
 
-      {bulletinView ? <>
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">{zh ? "先读概览与要点，再展开精炼概括。" : "Start with the overview and key ideas, then read deeper."}</p>
-          <Select value={selectedTrack} onChange={(event) => setFilter("track_id", event.target.value)} aria-label={zh ? "专题" : "Track"} className="w-full bg-transparent sm:w-auto sm:max-w-xs">
-            <option value="">{zh ? "全部专题" : "All tracks"}</option>
-            {tracks.map((track) => <option key={track.id} value={track.id}>{track.title}</option>)}
-          </Select>
-        </div>
-        <CollectionBulletins slug={slug} section={activeSection?.slug || ""} trackId={selectedTrack} />
-      </> : activeSection ? (
+      {bulletinView ? (
+        <>
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              {zh
+                ? "先读概览与要点，再展开精炼概括。"
+                : "Start with the overview and key ideas, then read deeper."}
+            </p>
+            <Select
+              value={selectedTrack}
+              onChange={(event) => setFilter("track_id", event.target.value)}
+              aria-label={zh ? "专题" : "Track"}
+              className="w-full bg-transparent sm:w-auto sm:max-w-xs"
+            >
+              <option value="">{zh ? "全部专题" : "All tracks"}</option>
+              {tracks.map((track) => (
+                <option key={track.id} value={track.id}>
+                  {track.title}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <CollectionBulletins
+            slug={slug}
+            section={activeSection?.slug || ""}
+            trackId={selectedTrack}
+            language={params.get("lang") || undefined}
+          />
+        </>
+      ) : activeSection ? (
         <section aria-labelledby={`collection-section-${activeSection.id}`}>
           <div className="mb-4">
             <h2
@@ -336,7 +406,12 @@ function CollectionItemCard({
               In your library
             </Button>
           ) : canAdd ? (
-            <Button size="sm" className="w-full" onClick={onAdd} disabled={adding}>
+            <Button
+              size="sm"
+              className="w-full"
+              onClick={onAdd}
+              disabled={adding}
+            >
               <Plus className="h-4 w-4" aria-hidden="true" />
               {adding ? "Adding…" : "Add to library"}
             </Button>

@@ -1,13 +1,20 @@
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 export const siteTitle = "Stream Reducer — Video & Podcast Summaries";
 export const siteDescription =
   "Read clear summaries of YouTube videos, Bilibili videos and podcasts. Explore key ideas, detailed notes and timestamped sources in English and Chinese.";
+let publicMetadataOwner = false;
+export const isPublicSeoPath = (path: string) => path === "/" || path === "/browse" || path === "/articles" || /^\/(?:items|bulletin|rss\/articles)\/\d+$/.test(path) || /^\/collections(?:\/[^/]+)?\/?$/.test(path);
+
 export function updateMetadata(
   title: string,
   description: string,
   canonical: string,
   index = false,
+  authoritative = false,
 ) {
+  // The Worker owns public canonical, language, and eligibility decisions.
+  // Legacy reader effects must not overwrite those after hydration.
+  if (!authoritative && publicMetadataOwner && isPublicSeoPath(window.location.pathname)) return;
   document.title = title;
   document.documentElement.lang =
     ((title + description).match(/[\u3400-\u9fff]/g)?.length || 0) > 20
@@ -65,4 +72,36 @@ export function useArticleMetadata(
       index,
     );
   }, [id, title, description, index]);
+}
+
+const publicHead = 'title,meta[name="description"],meta[name="robots"],meta[name="stream-reducer-seo"],meta[property^="og:"],meta[name^="twitter:"],link[rel="canonical"],link[rel="alternate"][hreflang],script#seo-schema';
+
+/** Keep the rendered document consistent with the same public Worker HTML.
+ * GET only: it does not request generation or use private API metadata.
+ */
+export function usePublicMetadata(pathname: string, search: string, enabled = true) {
+  const first = useRef(true);
+  useLayoutEffect(() => {
+    publicMetadataOwner = enabled;
+    if (!enabled) return;
+    const initial = first.current;
+    first.current = false;
+    if (isPublicSeoPath(pathname) && initial && document.head.querySelector('meta[name="stream-reducer-seo"]')) return;
+    document.head.querySelectorAll('link[rel="alternate"][hreflang],meta[name="stream-reducer-seo"],script#seo-schema').forEach(e => e.remove());
+    const target = new URL(pathname + search, window.location.origin);
+    updateMetadata(siteTitle, siteDescription, "https://reducer.xgoose.org" + pathname + search, false, true);
+    if (!isPublicSeoPath(pathname)) return;
+    const controller = new AbortController();
+    void fetch(target.href, { headers: { Accept: "text/html" }, signal: controller.signal })
+      .then(async response => {
+        if (!response.ok && response.status !== 404) throw new Error("Public metadata unavailable");
+        const html = new DOMParser().parseFromString(await response.text(), "text/html");
+        if (controller.signal.aborted || window.location.pathname + window.location.search !== pathname + search) return;
+        if (!html.head.querySelector('meta[name="stream-reducer-seo"]')) return;
+        document.head.querySelectorAll(publicHead).forEach(e => e.remove());
+        html.head.querySelectorAll(publicHead).forEach(e => document.head.appendChild(document.importNode(e, true)));
+        document.documentElement.lang = html.documentElement.lang || "en";
+      }).catch(() => { /* A failed read keeps this navigation safely noindex. */ });
+    return () => controller.abort();
+  }, [pathname, search, enabled]);
 }
