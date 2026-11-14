@@ -96,7 +96,7 @@ export function BulletinDetail() {
   const nativeEnglish = /^(en(?:[-_].+)?|english)$/i.test(bulletin.data?.source_language || "");
   const nativeChinese = isPredominantlyChinese(bulletin.data?.markdown || bulletin.data?.tldr || "");
   const requestedLanguage = params.get("lang");
-  const lang = requestedLanguage != null ? (requestedLanguage === "original" ? null : requestedLanguage) : preferred === "en" && !nativeEnglish ? "en" : zh && !nativeChinese ? "zh" : null;
+  const lang = requestedLanguage != null ? (requestedLanguage === "original" || (requestedLanguage === "en" && nativeEnglish) || (requestedLanguage === "zh" && nativeChinese) ? null : requestedLanguage) : preferred === "en" && !nativeEnglish ? "en" : zh && !nativeChinese ? "zh" : null;
   const setLang = navigation.setLanguage;
   const translations = bulletin.data?.content_translations ?? [];
   const translation = useQuery({

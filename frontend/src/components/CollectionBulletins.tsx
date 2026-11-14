@@ -67,7 +67,7 @@ export function CollectionBulletins({
   const context = new URLSearchParams({ collection: slug });
   if (section) context.set("section", section);
   if (trackId) context.set("track_id", trackId);
-  if (language) context.set("lang", language);
+  if (language) context.set("lang", language === "en" ? "original" : language);
   if (feed.isLoading)
     return (
       <div
@@ -122,7 +122,7 @@ export function CollectionBulletins({
                 href={
                   me.data?.user
                     ? `/bulletin/${item.id}?${context}`
-                    : `/items/${item.id}${language ? `?lang=${language}` : ""}`
+                    : `/items/${item.id}${language ? `?lang=${language === "en" ? "original" : language}` : ""}`
                 }
               />
             ))}

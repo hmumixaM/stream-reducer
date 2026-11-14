@@ -179,6 +179,16 @@ describe("complete public HTML and article access", () => {
   });
   it("publishes only completed public collection members with localized links and discovery", async () => {
     const s = setup();
+    const queries = [];
+    const prepare = s.DB.prepare;
+    s.DB.prepare = sql => {
+      const statement = prepare(sql);
+      const bind = statement.bind;
+      const query = { sql, args: [] };
+      queries.push(query);
+      statement.bind = (...args) => { query.args = args; bind.apply(statement, args); return statement; };
+      return statement;
+    };
     s.item(1, "2026-10-01");
     s.item(2, "2026-10-02");
     s.item(3, "2026-10-03");
@@ -246,6 +256,10 @@ describe("complete public HTML and article access", () => {
     expect(items).toContain("/items/1?lang=zh");
     expect(items).not.toContain("/items/2");
     expect(items).not.toContain("/items/3");
+    for (const query of queries.filter(q => q.sql.includes("collection") && q.sql.includes("JOIN summary"))) {
+      const plan = s.db.prepare("EXPLAIN QUERY PLAN " + query.sql).all(...query.args);
+      expect(plan.map(row => row.detail).join(" ")).toContain("ix_summary_public_item");
+    }
   });
   it("gives stored additional languages their own canonical without indexing missing editions", async () => {
     const s = setup();
@@ -263,6 +277,24 @@ describe("complete public HTML and article access", () => {
     expect(page.body).toContain("Un résumé en français");
     expect(pageHead(page)).toContain('hreflang="fr"');
     expect(pageHead(page)).not.toContain('hreflang="de"');
+  });
+  it.each(["en", "en-orig", "en_US", "en-AU"])("keeps source transcripts with the existing %s alias", async language => {
+    const s = setup(); s.item(1, "2026-10-01");
+    s.db.prepare("INSERT INTO transcript(item_id,language,source,text,segments) VALUES(1,?,'native','Retained source evidence','[]')").run(language);
+    const page = await publicPage(s.env, new URL("https://reducer.xgoose.org/items/1"));
+    expect(page.supplemental).toContain("Retained source evidence");
+    expect(page.markdown).toContain("Retained source evidence");
+  });
+  it("keeps a short Chinese original canonical separate from its stored English edition", async () => {
+    const s = setup(); s.item(1, "2026-10-01");
+    s.db.prepare("UPDATE summary SET markdown=? WHERE item_id=1").run("这是中文原文摘要，讨论人工智能的应用、研究结论、实际限制与原始证据。");
+    s.db.exec(`INSERT INTO item_translation(item_id,lang,status,markdown,structured) VALUES(1,'en','done','English edition of the original evidence.','{}');`);
+    const original = await publicPage(s.env, new URL("https://reducer.xgoose.org/items/1?lang=zh"));
+    expect(original.language).toBe("zh-CN"); expect(original.canonical).toBe("https://reducer.xgoose.org/items/1");
+    const translated = await publicPage(s.env, new URL("https://reducer.xgoose.org/items/1?lang=en"));
+    expect(translated.language).toBe("en"); expect(translated.canonical).toBe("https://reducer.xgoose.org/items/1?lang=en");
+    const xml = await (await serveSeo(new Request("https://reducer.xgoose.org/sitemaps/items-1.xml"), s.env)).text();
+    expect(xml).toContain('/items/1?lang=en'); expect(xml).not.toContain('/items/1?lang=zh');
   });
   it("excludes pending/merged and stale editions from public discovery", async () => {
     const s = setup();

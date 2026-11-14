@@ -24,7 +24,7 @@ const ELIGIBLE =
   "i.status='done' AND s.item_id IS NOT NULL AND length(trim(s.markdown))>0";
 const readyCollections = `SELECT c.id,c.slug,c.title,c.description,c.source_url FROM collection c
   WHERE c.is_public=1 AND EXISTS(SELECT 1 FROM collection_item ci JOIN item i ON i.id=ci.item_id
-    JOIN summary s ON s.item_id=i.id WHERE ci.collection_id=c.id AND ${ELIGIBLE}) ORDER BY c.created_at DESC,c.id DESC LIMIT 200`;
+    JOIN summary s INDEXED BY ix_summary_public_item ON s.item_id=i.id WHERE ci.collection_id=c.id AND ${ELIGIBLE}) ORDER BY c.created_at DESC,c.id DESC LIMIT 200`;
 export async function publicCollectionsPage(
   env: Env,
   url: URL,
@@ -57,7 +57,7 @@ export async function publicCollectionsPage(
       CASE WHEN json_valid(t.structured) THEN json_extract(t.structured,'$.headline') END zh_headline,
       CASE WHEN json_valid(t.structured) THEN json_extract(t.structured,'$.subhead') END zh_subhead,
       CASE WHEN t.item_id IS NOT NULL THEN 1 ELSE 0 END has_zh
-      FROM collection_item ci JOIN item i ON i.id=ci.item_id JOIN summary s ON s.item_id=i.id
+      FROM collection_item ci JOIN item i ON i.id=ci.item_id JOIN summary s INDEXED BY ix_summary_public_item ON s.item_id=i.id
       LEFT JOIN item_translation t ON t.item_id=i.id AND t.lang='zh' AND t.status='done' AND length(trim(t.markdown))>0
       WHERE ci.collection_id=? AND ${ELIGIBLE} ORDER BY ci.position,i.id LIMIT 60`,
       )
@@ -161,7 +161,7 @@ export async function collectionSitemap(env: Env): Promise<string[]> {
     SELECT ci.collection_id,t.item_id AS translated_id,
       ROW_NUMBER() OVER (PARTITION BY ci.collection_id ORDER BY ci.position,i.id) AS position
     FROM collection_item ci JOIN collection c ON c.id=ci.collection_id
-    JOIN item i ON i.id=ci.item_id JOIN summary s ON s.item_id=i.id
+    JOIN item i ON i.id=ci.item_id JOIN summary s INDEXED BY ix_summary_public_item ON s.item_id=i.id
     LEFT JOIN item_translation t ON t.item_id=i.id AND t.lang='zh' AND t.status='done' AND length(trim(t.markdown))>0
     WHERE c.is_public=1 AND ${ELIGIBLE})
     SELECT DISTINCT collection_id FROM visible WHERE position<=60 AND translated_id IS NOT NULL`,

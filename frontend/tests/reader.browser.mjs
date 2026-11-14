@@ -87,6 +87,9 @@ try {
   assert.equal(await partial.page.getByRole('region', { name: 'Program information' }).getByRole('link', { name: 'Research notes', exact: true }).count(), 1);
   assert.deepEqual(partial.writes, []);
   await partial.context.close();
+  await p.goto(base + '/bulletin/1?lang=en&view=notes');
+  await p.getByRole('heading', { name: 'Full original notes', exact: true }).waitFor();
+  assert.equal(await p.getByText('Preparing the full notes…', { exact: true }).count(), 0);
   await p.goto(base + '/bulletin/1?view=notes');
   await p.getByRole('heading', { name: 'Full original notes', exact: true }).waitFor();
   await p.getByRole('button', { name: '简体中文', exact: true }).click();

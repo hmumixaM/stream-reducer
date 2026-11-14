@@ -154,7 +154,7 @@ export async function mediaContent(
     parts.push({
       title: "Original transcript",
       text,
-      lang: transcript.language || options.originalLanguage,
+      lang: options.originalLanguage || transcript.language,
     });
   }
   const selected = options.language

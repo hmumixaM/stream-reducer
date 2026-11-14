@@ -1,10 +1,11 @@
+import { isPredominantlyChinese } from "./chinese";
 // Public language URLs are based only on stored content, never on browser locale.
 export type PublicLanguage =
   "en" | "zh" | "ja" | "ko" | "es" | "fr" | "de" | "ru";
 export function publicLanguage(
   value: string | null | undefined,
 ): PublicLanguage | undefined {
-  if (value === "en" || value === "en-US" || value === "en-GB") return "en";
+  if (/^(en(?:[-_].+)?|english)$/i.test(value || "")) return "en";
   if (value === "zh" || value === "zh-CN" || value === "zh-Hans") return "zh";
   if (["ja", "ko", "es", "fr", "de", "ru"].includes(value || ""))
     return value as PublicLanguage;
@@ -15,9 +16,7 @@ export function sourceLanguage(text: string): PublicLanguage {
   if (/[\uac00-\ud7af]/.test(text.slice(0, 3000))) return "ko";
   if ((text.slice(0, 3000).match(/[\u0400-\u04ff]/g)?.length || 0) > 100)
     return "ru";
-  return (text.slice(0, 3000).match(/[\u3400-\u9fff]/g)?.length || 0) > 300
-    ? "zh"
-    : "en";
+  return isPredominantlyChinese(text) ? "zh" : "en";
 }
 export function languagePlan(
   base: string,
