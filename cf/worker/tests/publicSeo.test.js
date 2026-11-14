@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { database } from "./sqlite.mjs";
-import { publicPage, serveSeo } from "../src/lib/seo";
+import { publicPage, pageHead, serveSeo } from "../src/lib/seo";
 import { publicArticlesRoutes } from "../src/routes/publicArticles";
 import { Hono } from "hono";
 import { sourceHash, READING_VERSION } from "../src/lib/readingSummary";
@@ -89,16 +89,37 @@ describe("complete public HTML and article access", () => {
     for (const text of [
       "Concise lead",
       "Grounded reading paragraph",
-      "完整中文笔记",
-      "中文引文",
       "Complete transcript",
       "0:12",
       "<img",
       "cover.jpg",
-      'lang="zh-CN"',
     ])
       expect(page.body + (page.supplemental || "")).toContain(text);
     expect(page.markdown).toContain("Complete transcript");
+    expect(page.supplemental).not.toContain("完整中文笔记");
+    const translated = await publicPage(
+      s.env,
+      new URL("https://reducer.xgoose.org/items/1?lang=zh&from=/browse"),
+    );
+    expect(translated.canonical).toBe(
+      "https://reducer.xgoose.org/items/1?lang=zh",
+    );
+    expect(translated.language).toBe("zh-CN");
+    expect(translated.body + translated.supplemental).toContain("完整中文笔记");
+    expect(translated.supplemental).toContain("中文引文");
+    expect(translated.supplemental).not.toContain("Complete transcript");
+    expect(pageHead(translated)).toContain(
+      'hreflang="en" href="https://reducer.xgoose.org/items/1"',
+    );
+    expect(pageHead(page)).toContain(
+      'hreflang="zh-Hans" href="https://reducer.xgoose.org/items/1?lang=zh"',
+    );
+    const unavailable = await publicPage(
+      s.env,
+      new URL("https://reducer.xgoose.org/items/1?lang=fr"),
+    );
+    expect(unavailable.index).toBe(false);
+    expect(unavailable.canonical).toBe("https://reducer.xgoose.org/items/1");
     s.db.exec("UPDATE reading_summary SET source_hash='stale'");
     expect(
       (await publicPage(s.env, new URL("https://reducer.xgoose.org/items/1")))
@@ -116,10 +137,21 @@ describe("complete public HTML and article access", () => {
     for (const t of [
       "An accurate summary",
       "Evidence explained",
-      "中文概括",
       "Full saved source text",
     ])
       expect(page.body + (page.supplemental || "")).toContain(t);
+    const translated = await publicPage(
+      s.env,
+      new URL("https://reducer.xgoose.org/rss/articles/1?lang=zh"),
+    );
+    expect(translated.index).toBe(true);
+    expect(translated.language).toBe("zh-CN");
+    expect(translated.canonical).toBe(
+      "https://reducer.xgoose.org/rss/articles/1?lang=zh",
+    );
+    expect(translated.body + translated.supplemental).toContain("中文概括");
+    expect(translated.supplemental).not.toContain("Full saved source text");
+    expect(pageHead(page)).toContain('hreflang="zh-Hans"');
     expect(page.body).not.toContain("private-r2-key");
     const app = new Hono().route("/api/public/articles", publicArticlesRoutes);
     const response = await app.request("/api/public/articles/1", {}, s.env);
@@ -144,6 +176,93 @@ describe("complete public HTML and article access", () => {
       (await app.request("/api/public/articles/1", { method: "PATCH" }, s.env))
         .status,
     ).toBe(404);
+  });
+  it("publishes only completed public collection members with localized links and discovery", async () => {
+    const s = setup();
+    s.item(1, "2026-10-01");
+    s.item(2, "2026-10-02");
+    s.item(3, "2026-10-03");
+    s.db.exec(`UPDATE item SET status='excluded' WHERE id=2;
+      UPDATE item SET status='queued' WHERE id=3;
+      INSERT INTO collection(id,slug,title,description,is_public) VALUES(1,'conference','AI & Conference','Useful talks',1),(2,'private','Private conference','Private text',0),(3,'empty','Upcoming conference','No talks yet',1);
+      INSERT INTO collection_item(collection_id,item_id,position) VALUES(1,1,0),(1,2,1),(1,3,2),(2,1,0);
+      INSERT INTO item_translation(item_id,lang,status,markdown,structured) VALUES(1,'zh','done','中文内容','{"headline":"中文演讲标题","subhead":"中文内容简介"}');`);
+    const en = await publicPage(
+      s.env,
+      new URL("https://reducer.xgoose.org/collections/conference"),
+    );
+    expect(en.index).toBe(true);
+    expect(en.body).toContain("/items/1");
+    expect(en.body).not.toContain("/items/2");
+    expect(en.body).not.toContain("/items/3");
+    expect(pageHead(en)).toContain("AI &amp; Conference");
+    const zh = await publicPage(
+      s.env,
+      new URL("https://reducer.xgoose.org/collections/conference?lang=zh"),
+    );
+    expect(zh.index).toBe(true);
+    expect(zh.body).toContain("中文演讲标题");
+    expect(zh.canonical).toBe(
+      "https://reducer.xgoose.org/collections/conference?lang=zh",
+    );
+    expect(zh.body).toContain("/items/1?lang=zh");
+    expect(
+      (
+        await publicPage(
+          s.env,
+          new URL("https://reducer.xgoose.org/collections/private"),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await publicPage(
+          s.env,
+          new URL("https://reducer.xgoose.org/collections/empty"),
+        )
+      ).index,
+    ).toBe(false);
+    const listing = await publicPage(
+      s.env,
+      new URL("https://reducer.xgoose.org/collections"),
+    );
+    expect(listing.body).toContain("/collections/conference");
+    expect(listing.body).not.toContain("Private text");
+    const xml = await (
+      await serveSeo(
+        new Request("https://reducer.xgoose.org/sitemaps/collections.xml"),
+        s.env,
+      )
+    ).text();
+    expect(xml).toContain("/collections/conference?lang=zh");
+    expect(xml).not.toContain("/collections/private");
+    expect(xml).not.toContain("/collections/empty");
+    const items = await (
+      await serveSeo(
+        new Request("https://reducer.xgoose.org/sitemaps/items-1.xml"),
+        s.env,
+      )
+    ).text();
+    expect(items).toContain("/items/1?lang=zh");
+    expect(items).not.toContain("/items/2");
+    expect(items).not.toContain("/items/3");
+  });
+  it("gives stored additional languages their own canonical without indexing missing editions", async () => {
+    const s = setup();
+    s.item(1, "2026-10-01");
+    s.db.exec(
+      `INSERT INTO item_translation(item_id,lang,status,markdown,structured) VALUES(1,'fr','done','Un résumé en français avec des sources.','{"headline":"Le développement des agents"}'),(1,'de','error','','{}');`,
+    );
+    const page = await publicPage(
+      s.env,
+      new URL("https://reducer.xgoose.org/items/1?lang=fr"),
+    );
+    expect(page.index).toBe(true);
+    expect(page.language).toBe("fr");
+    expect(page.canonical).toBe("https://reducer.xgoose.org/items/1?lang=fr");
+    expect(page.body).toContain("Un résumé en français");
+    expect(pageHead(page)).toContain('hreflang="fr"');
+    expect(pageHead(page)).not.toContain('hreflang="de"');
   });
   it("excludes pending/merged and stale editions from public discovery", async () => {
     const s = setup();
@@ -270,18 +389,40 @@ describe("complete public HTML and article access", () => {
       UPDATE item SET status='excluded' WHERE id=79;`);
     const queries = [];
     const prepare = s.DB.prepare.bind(s.DB);
-    s.DB.prepare = (sql) => { queries.push(sql); return prepare(sql); };
-    const browse = await publicPage(s.env, new URL("https://reducer.xgoose.org/browse?offset=24"));
-    const ids = [...browse.body.matchAll(/href="\/items\/(\d+)"/g)].map(m => Number(m[1]));
-    const expected = s.db.prepare(`SELECT i.id FROM item i JOIN summary s ON s.item_id=i.id
+    s.DB.prepare = (sql) => {
+      queries.push(sql);
+      return prepare(sql);
+    };
+    const browse = await publicPage(
+      s.env,
+      new URL("https://reducer.xgoose.org/browse?offset=24"),
+    );
+    const ids = [...browse.body.matchAll(/href="\/items\/(\d+)"/g)].map((m) =>
+      Number(m[1]),
+    );
+    const expected = s.db
+      .prepare(
+        `SELECT i.id FROM item i JOIN summary s ON s.item_id=i.id
       WHERE i.status='done' AND length(trim(s.markdown))>0
-      ORDER BY i.completed_at DESC,i.id DESC LIMIT 24 OFFSET 24`).all().map(r => r.id);
+      ORDER BY i.completed_at DESC,i.id DESC LIMIT 24 OFFSET 24`,
+      )
+      .all()
+      .map((r) => r.id);
     expect(ids).toEqual(expected);
     await publicPage(s.env, new URL("https://reducer.xgoose.org/"));
-    await serveSeo(new Request("https://reducer.xgoose.org/sitemap.xml"), s.env);
-    for (const sql of queries.filter(q => q.includes("ix_summary_public_item"))) {
+    await serveSeo(
+      new Request("https://reducer.xgoose.org/sitemap.xml"),
+      s.env,
+    );
+    for (const sql of queries.filter((q) =>
+      q.includes("ix_summary_public_item"),
+    )) {
       const args = Array((sql.match(/\?/g) || []).length).fill(24);
-      const plan = s.db.prepare("EXPLAIN QUERY PLAN " + sql).all(...args).map(r => r.detail).join("\n");
+      const plan = s.db
+        .prepare("EXPLAIN QUERY PLAN " + sql)
+        .all(...args)
+        .map((r) => r.detail)
+        .join("\n");
       expect(plan).toContain("ix_summary_public_item");
       if (sql.includes("ORDER BY i.completed_at")) {
         expect(plan).toContain("ix_item_status_completed");
@@ -293,13 +434,23 @@ describe("complete public HTML and article access", () => {
       // Eligibility is already recorded in the partial index. SQLite must not
       // evaluate trim(markdown) against every complete summary on each visit.
       const ops = s.db.prepare("EXPLAIN " + sql).all(...args);
-      expect(ops.filter(r => r.opcode === "Function" && String(r.p4).startsWith("length("))).toEqual([]);
+      expect(
+        ops.filter(
+          (r) => r.opcode === "Function" && String(r.p4).startsWith("length("),
+        ),
+      ).toEqual([]);
     }
     // Index entries follow edits, so newly empty/usable summaries stay correct.
-    s.db.exec("UPDATE summary SET markdown='' WHERE item_id=1; UPDATE summary SET markdown='Restored' WHERE item_id=80;");
-    const eligible = s.db.prepare("SELECT item_id FROM summary INDEXED BY ix_summary_public_item WHERE length(trim(markdown))>0").all().map(r => r.item_id);
+    s.db.exec(
+      "UPDATE summary SET markdown='' WHERE item_id=1; UPDATE summary SET markdown='Restored' WHERE item_id=80;",
+    );
+    const eligible = s.db
+      .prepare(
+        "SELECT item_id FROM summary INDEXED BY ix_summary_public_item WHERE length(trim(markdown))>0",
+      )
+      .all()
+      .map((r) => r.item_id);
     expect(eligible).not.toContain(1);
     expect(eligible).toContain(80);
   });
-
 });

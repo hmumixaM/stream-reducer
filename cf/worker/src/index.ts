@@ -86,7 +86,7 @@ app.get("/media/*", async (c) => {
   headers.set("cache-control", "private, max-age=3600");
   return new Response(object.body, { headers });
 });
-for (const path of ["/", "/browse", "/articles", "/rss/articles/:id", "/items/:id", "/bulletin/:id", "/robots.txt", "/llms.txt", "/sitemap.xml", "/sitemaps/:file"]) {
+for (const path of ["/", "/browse", "/collections", "/collections/:slug", "/articles", "/rss/articles/:id", "/items/:id", "/bulletin/:id", "/robots.txt", "/llms.txt", "/sitemap.xml", "/sitemaps/:file"]) {
   app.get(path, (c) => serveSeo(c.req.raw, c.env));
 }
 // Anything else: serve the built SPA (assets binding handles SPA fallback).

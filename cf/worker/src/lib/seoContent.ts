@@ -1,3 +1,4 @@
+import { publicLanguage, type PublicLanguage } from "./seoLanguages";
 import type { Env } from "../env";
 import {
   readCached,
@@ -43,6 +44,11 @@ export async function mediaContent(
     structured: string;
     markdown: string;
   },
+  options: {
+    language?: PublicLanguage;
+    originalLanguage?: PublicLanguage;
+    translations?: { lang: string; markdown: string; structured: string }[];
+  } = {},
 ) {
   const [reading, chinese, translations, transcript, bulletin] =
     await Promise.all([
@@ -54,11 +60,13 @@ export async function mediaContent(
       )
         .bind(item.id)
         .first<ReadingRow>(),
-      env.DB.prepare(
-        "SELECT lang,markdown,structured FROM item_translation WHERE item_id=? AND status='done' AND length(trim(markdown))>0 ORDER BY lang",
-      )
-        .bind(item.id)
-        .all<{ lang: string; markdown: string; structured: string }>(),
+      options.translations
+        ? Promise.resolve({ results: options.translations })
+        : env.DB.prepare(
+            "SELECT lang,markdown,structured FROM item_translation WHERE item_id=? AND status='done' AND length(trim(markdown))>0 ORDER BY lang",
+          )
+            .bind(item.id)
+            .all<{ lang: string; markdown: string; structured: string }>(),
       env.DB.prepare(
         "SELECT language,text,segments FROM transcript WHERE item_id=?",
       )
@@ -107,7 +115,12 @@ export async function mediaContent(
     });
   }
   const original = readingText(readCached(reading, hash).content);
-  if (original) parts.push({ title: "Reading summary", text: original });
+  if (original)
+    parts.push({
+      title: "Reading summary",
+      text: original,
+      lang: options.originalLanguage,
+    });
   const zh = readingText(readCached(chinese, hash).content);
   if (zh) parts.push({ title: "精炼阅读摘要", text: zh, lang: "zh-CN" });
   for (const t of translations.results)
@@ -119,7 +132,7 @@ export async function mediaContent(
       });
       parts.push(...sourceQuotes(t.structured, t.lang));
     }
-  parts.push(...sourceQuotes(item.structured));
+  parts.push(...sourceQuotes(item.structured, options.originalLanguage));
   if (transcript?.text?.trim()) {
     let text = transcript.text;
     try {
@@ -141,12 +154,15 @@ export async function mediaContent(
     parts.push({
       title: "Original transcript",
       text,
-      lang: transcript.language || undefined,
+      lang: transcript.language || options.originalLanguage,
     });
   }
+  const selected = options.language
+    ? parts.filter((p) => publicLanguage(p.lang) === options.language)
+    : parts;
   return {
-    html: parts.map((p) => section(p.title, p.text, p.lang)).join(""),
-    markdown: parts.map((p) => `## ${p.title}\n\n${p.text}`).join("\n\n"),
+    html: selected.map((p) => section(p.title, p.text, p.lang)).join(""),
+    markdown: selected.map((p) => `## ${p.title}\n\n${p.text}`).join("\n\n"),
   };
 }
 function sourceQuotes(

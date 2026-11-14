@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { FolderKanban, Film } from "lucide-react";
 import { api } from "@/lib/api";
@@ -11,6 +11,8 @@ import {
 } from "@/components/shell";
 
 export function Collections() {
+  const [params] = useSearchParams();
+  const zh = params.get("lang") === "zh";
   const collections = useQuery({
     queryKey: ["collections"],
     queryFn: api.listCollections,
@@ -19,10 +21,18 @@ export function Collections() {
   return (
     <div>
       <PageHeader
-        title="Collections"
-        subtitle="Curated event libraries, organized by their original categories and tracks."
+        title={zh ? "会议合集" : "Collections"}
+        subtitle={
+          zh
+            ? "精选会议演讲，按原始分类和主题整理。"
+            : "Curated event libraries, organized by their original categories and tracks."
+        }
       />
 
+      <nav aria-label="Languages" className="mb-4 flex gap-3 text-sm">
+        <Link to="/collections">English</Link>
+        <Link to="/collections?lang=zh">中文</Link>
+      </nav>
       {collections.isLoading ? (
         <SkeletonGrid count={4} />
       ) : collections.isError ? (
@@ -33,7 +43,10 @@ export function Collections() {
       ) : collections.data?.length ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {collections.data.map((collection) => (
-            <Link key={collection.id} to={`/collections/${collection.slug}`}>
+            <Link
+              key={collection.id}
+              to={`/collections/${collection.slug}${zh ? "?lang=zh" : ""}`}
+            >
               <Card
                 interactive
                 className="group flex h-full flex-col overflow-hidden"

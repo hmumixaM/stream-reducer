@@ -1,3 +1,10 @@
+import { publicCollectionsPage, collectionSitemap } from "./seoCollections";
+import {
+  languagePlan,
+  languageNames,
+  publicLanguage,
+  sourceLanguage,
+} from "./seoLanguages";
 import { POPULAR_POOL_SQL } from "./popularPicks";
 import { mediaContent, section } from "./seoContent";
 import {
@@ -61,6 +68,7 @@ export interface SeoPage {
   schema?: unknown;
   image?: string;
   language?: string;
+  alternates?: { lang: string; url: string }[];
 }
 const searchForm = `<form action="/browse" method="get" role="search"><label for="public-search">Search public summaries</label><div class="flex flex-col gap-3 sm:flex-row mt-3"><input class="flex-1 min-w-0 rounded-md border bg-background px-4 py-3" id="public-search" name="q" type="search" placeholder="Search videos, podcasts, ideas…"/><button class="rounded-md bg-primary text-primary-foreground px-6 py-3" type="submit">Search</button></div></form>`;
 const homeIntro = `<h1 class="text-4xl md:text-5xl font-semibold tracking-tight mb-5">Less watching. More understanding.</h1><p class="text-lg text-muted-foreground max-w-2xl mb-3">Turn long videos and podcasts into clear, source-linked reading. Start with the key ideas, go deeper with detailed notes, and return to the exact moment in the original.</p>${searchForm}<nav class="flex flex-wrap gap-5 my-6"><a class="underline" href="/browse">Browse all summaries</a><a class="underline" href="/articles">Read RSS &amp; Substack articles</a><a class="underline" href="/collections">Explore collections</a><a class="underline" href="/login">Sign in</a></nav><p class="text-sm text-muted-foreground">YouTube, Bilibili, Apple Podcasts &amp; Xiaoyuzhou. Read public summaries without an account; sign in to save content and follow sources.</p>`;
@@ -81,6 +89,12 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
     index: false,
     status: 200,
   };
+  const collectionPage = await publicCollectionsPage(env, url, page);
+  if (collectionPage) {
+    collectionPage.body =
+      languageNavigation(collectionPage.alternates) + collectionPage.body;
+    return collectionPage;
+  }
   if (url.pathname === "/articles") {
     const q = (url.searchParams.get("q") || "").trim().slice(0, 200);
     const offset = Math.max(
@@ -109,17 +123,30 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
       };
     const { article, editions } = result;
     const body = await publicArticleBody(env, article);
-    const original = editions.find((e) => e.lang === "original") || editions[0];
+    const source = editions.find((e) => e.lang === "original") || editions[0];
+    const sourceLang = sourceLanguage(JSON.stringify(source?.content || {}));
+    const locale = languagePlan(
+      page.canonical,
+      sourceLang,
+      editions.map((e) => e.lang),
+      url.searchParams.get("lang"),
+    );
+    const original =
+      locale.selected === sourceLang
+        ? source
+        : editions.find((e) => e.lang === locale.selected) || source;
+    page.canonical = locale.canonical;
+    page.language = locale.language;
+    page.alternates = locale.alternates;
     page.title = `${original?.content.headline || article.title} | Stream Reducer`;
     page.description = plainText(
       original?.content.intro || article.title,
     ).slice(0, 180);
-    page.index = editions.length > 0;
-    page.language = detectLanguage(original?.content.intro || article.title);
+    page.index = editions.length > 0 && !locale.missing;
     page.markdown = `# ${article.title}\n\nSource: ${safeSource(article.url)}\nAuthor: ${article.author || ""}\nCanonical: ${page.canonical}\n\n`;
     page.body = `<nav><a href="/">Stream Reducer</a> / <a href="/articles">Articles</a></nav><article><h1>${escapeHtml(original?.content.headline || article.title)}</h1><p>${escapeHtml(article.author)}</p><p>AI-assisted summary of <a href="${escapeHtml(safeSource(article.url))}">${escapeHtml(article.title)} — original source</a>.</p>${article.published_at ? `<time datetime="${escapeHtml(article.published_at)}">${escapeHtml(article.published_at.slice(0, 10))}</time>` : ""}`;
     page.supplemental = "";
-    for (const e of editions) {
+    for (const e of original ? [original] : []) {
       const c = e.content;
       const text = [
         c.headline,
@@ -141,7 +168,7 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
       );
       page.markdown += `## Article summary — ${e.lang}\n\n${text}\n\n`;
     }
-    if (body?.text) {
+    if (body?.text && locale.selected === sourceLang) {
       page.supplemental += section(
         article.completeness === "full"
           ? "Saved original article"
@@ -152,6 +179,7 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
       page.markdown += `## Saved original (${article.completeness})\n\n${body.text}`;
     }
     page.body += "</article>";
+    page.body = languageNavigation(page.alternates) + page.body;
     page.schema = {
       "@context": "https://schema.org",
       "@type": "Article",
@@ -190,7 +218,7 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
     };
   }
   if (match) {
-    const item = await env.DB.prepare(
+    let item = await env.DB.prepare(
       `SELECT i.*, s.markdown, s.structured FROM item i LEFT JOIN summary s ON s.item_id=i.id WHERE i.id=? AND i.status != 'excluded'`,
     )
       .bind(Number(match[1]))
@@ -206,12 +234,46 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
       page.title = `${item.title || "Summary processing"} | Stream Reducer`;
       return page;
     }
-    page.language =
-      (item.markdown.slice(0, 3000).match(/[\u3400-\u9fff]/g)?.length || 0) >
-      300
-        ? "zh-CN"
-        : "en";
-    page.index = true;
+    const sourceItem = item;
+    const sourceLang = sourceLanguage(item.markdown);
+    const translations = await env.DB.prepare(
+      "SELECT lang,markdown,structured FROM item_translation WHERE item_id=? AND status='done' AND length(trim(markdown))>0 ORDER BY lang",
+    )
+      .bind(item.id)
+      .all<{ lang: string; markdown: string; structured: string }>();
+    const locale = languagePlan(
+      page.canonical,
+      sourceLang,
+      translations.results.map((t) => t.lang),
+      url.searchParams.get("lang"),
+    );
+    const translated = translations.results.find(
+      (t) =>
+        publicLanguage(t.lang) === locale.selected &&
+        locale.selected !== sourceLang,
+    );
+    if (translated) {
+      let metadata: Record<string, unknown> = {};
+      try {
+        metadata = JSON.parse(translated.structured) || {};
+      } catch {
+        /* legacy notes */
+      }
+      item = {
+        ...item,
+        markdown: translated.markdown,
+        structured: translated.structured,
+        headline:
+          typeof metadata.headline === "string"
+            ? metadata.headline
+            : item.headline,
+        subhead: typeof metadata.subhead === "string" ? metadata.subhead : null,
+      };
+    }
+    page.canonical = locale.canonical;
+    page.language = locale.language;
+    page.alternates = locale.alternates;
+    page.index = !locale.missing;
     page.title = `${item.headline || item.title} | Stream Reducer`;
     page.description = plainText(item.subhead || item.markdown).slice(0, 180);
     page.image = safeImage(item.thumbnail);
@@ -251,7 +313,12 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
           "</h1>",
           `</h1><a class="source-cover" href="${escapeHtml(safeSource(item.source_url))}"><img src="${escapeHtml(page.image)}" alt="${escapeHtml(item.title)} — ${escapeHtml(item.author || item.platform)}" width="160" height="90" loading="eager" decoding="async"/></a></div>`,
         );
-    const extra = await mediaContent(env, item);
+    const extra = await mediaContent(env, sourceItem, {
+      language: locale.selected,
+      originalLanguage: sourceLang,
+      translations: translations.results,
+    });
+    page.body = languageNavigation(page.alternates) + page.body;
     page.supplemental = extra.html;
     page.markdown += "\n\n" + extra.markdown;
     page.schema = {
@@ -352,8 +419,14 @@ function safeImage(value: string | null) {
     return undefined;
   }
 }
+function languageNavigation(alternates?: { lang: string; url: string }[]) {
+  const links = (alternates || []).filter((a) => a.lang !== "x-default");
+  return links.length > 1
+    ? `<nav aria-label="Languages">${links.map((a) => `<a href="${escapeHtml(a.url)}" hreflang="${escapeHtml(a.lang)}">${languageNames[a.lang] || escapeHtml(a.lang)}</a>`).join(" · ")}</nav>`
+    : "";
+}
 export function pageHead(page: SeoPage) {
-  return `<title>${escapeHtml(page.title)}</title><meta name="description" content="${escapeHtml(page.description)}"><meta name="robots" content="${page.index ? "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" : "noindex, follow"}"><link rel="canonical" href="${escapeHtml(page.canonical)}"><meta property="og:site_name" content="Stream Reducer"><meta property="og:type" content="${page.schema && (page.schema as Record<string, unknown>)["@type"] === "Article" ? "article" : "website"}"><meta property="og:title" content="${escapeHtml(page.title)}"><meta property="og:description" content="${escapeHtml(page.description)}"><meta property="og:url" content="${escapeHtml(page.canonical)}"><meta name="twitter:card" content="${page.image ? "summary_large_image" : "summary"}">${page.image ? `<meta property="og:image" content="${escapeHtml(page.image)}">` : ""}${page.schema ? `<script id="seo-schema" type="application/ld+json">${jsonLd(page.schema)}</script>` : ""}`;
+  return `<title>${escapeHtml(page.title)}</title><meta name="description" content="${escapeHtml(page.description)}"><meta name="robots" content="${page.index ? "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" : "noindex, follow"}"><link rel="canonical" href="${escapeHtml(page.canonical)}">${(page.alternates || []).map((a) => `<link rel="alternate" hreflang="${escapeHtml(a.lang)}" href="${escapeHtml(a.url)}">`).join("")}<meta property="og:site_name" content="Stream Reducer"><meta property="og:type" content="${page.schema && (page.schema as Record<string, unknown>)["@type"] === "Article" ? "article" : "website"}"><meta property="og:title" content="${escapeHtml(page.title)}"><meta property="og:description" content="${escapeHtml(page.description)}"><meta property="og:url" content="${escapeHtml(page.canonical)}"><meta name="twitter:card" content="${page.image ? "summary_large_image" : "summary"}">${page.image ? `<meta property="og:image" content="${escapeHtml(page.image)}">` : ""}${page.schema ? `<script id="seo-schema" type="application/ld+json">${jsonLd(page.schema)}</script>` : ""}`;
 }
 export async function serveSeo(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -394,12 +467,20 @@ export async function serveSeo(request: Request, env: Env): Promise<Response> {
     );
   if (
     url.pathname === "/sitemap.xml" ||
+    url.pathname === "/sitemaps/collections.xml" ||
     /^\/sitemaps\/(?:items|articles)-\d+\.xml$/.test(url.pathname)
   ) {
     const headers = {
       "content-type": "application/xml; charset=utf-8",
       "cache-control": "public, max-age=900",
     };
+    if (url.pathname === "/sitemaps/collections.xml") {
+      const paths = await collectionSitemap(env);
+      return new Response(
+        `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${paths.map((p) => `<url><loc>${escapeHtml(ORIGIN + p)}</loc></url>`).join("")}</urlset>`,
+        { headers },
+      );
+    }
     if (url.pathname === "/sitemap.xml") {
       const count = await env.DB.prepare(
         `SELECT count(*) AS total FROM item i JOIN summary s INDEXED BY ix_summary_public_item ON s.item_id=i.id WHERE ${ELIGIBLE}`,
@@ -410,7 +491,7 @@ export async function serveSeo(request: Request, env: Env): Promise<Response> {
       const articlePages = Math.ceil((articleCount?.total || 0) / PAGE_SIZE);
       const pages = Math.max(1, Math.ceil((count?.total || 0) / PAGE_SIZE));
       return new Response(
-        `<?xml version="1.0" encoding="UTF-8"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${Array.from({ length: pages }, (_, i) => `<sitemap><loc>${ORIGIN}/sitemaps/items-${i + 1}.xml</loc></sitemap>`).join("")}${Array.from({ length: articlePages }, (_, i) => `<sitemap><loc>${ORIGIN}/sitemaps/articles-${i + 1}.xml</loc></sitemap>`).join("")}</sitemapindex>`,
+        `<?xml version="1.0" encoding="UTF-8"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${Array.from({ length: pages }, (_, i) => `<sitemap><loc>${ORIGIN}/sitemaps/items-${i + 1}.xml</loc></sitemap>`).join("")}${Array.from({ length: articlePages }, (_, i) => `<sitemap><loc>${ORIGIN}/sitemaps/articles-${i + 1}.xml</loc></sitemap>`).join("")}<sitemap><loc>${ORIGIN}/sitemaps/collections.xml</loc></sitemap></sitemapindex>`,
         { headers },
       );
     }
@@ -427,11 +508,64 @@ export async function serveSeo(request: Request, env: Env): Promise<Response> {
       .all<{ id: number; thumbnail?: string; title?: string }>();
     if (page > 1 && !rows.results.length)
       return new Response("Not found", { status: 404 });
+    const localized: string[] = [];
+    if (rows.results.length) {
+      const ids = JSON.stringify(rows.results.map((r) => r.id));
+      if (!articles) {
+        const variants = await env.DB.prepare(
+          `SELECT t.item_id,t.lang,substr(s.markdown,1,3000) source_sample FROM item_translation t
+          JOIN item i ON i.id=t.item_id JOIN summary s ON s.item_id=i.id
+          WHERE t.item_id IN (SELECT value FROM json_each(?)) AND t.status='done' AND length(trim(t.markdown))>0 AND ${ELIGIBLE}`,
+        )
+          .bind(ids)
+          .all<{ item_id: number; lang: string; source_sample: string }>();
+        for (const t of variants.results) {
+          const language = publicLanguage(t.lang);
+          if (language && language !== sourceLanguage(t.source_sample))
+            localized.push(`/items/${t.item_id}?lang=${language}`);
+        }
+      } else {
+        const variants = await env.DB.prepare(
+          `SELECT e.article_id,e.lang,e.content FROM rss_edition e JOIN rss_article a ON a.id=e.article_id
+          WHERE e.article_id IN (SELECT value FROM json_each(?)) AND e.body_hash=a.body_hash ORDER BY e.lang`,
+        )
+          .bind(ids)
+          .all<{ article_id: number; lang: string; content: string }>();
+        const sources = new Map<number, string>();
+        for (const t of variants.results) {
+          try {
+            const content = JSON.parse(t.content);
+            if (
+              typeof content?.headline === "string" &&
+              (!sources.has(t.article_id) || t.lang === "original")
+            )
+              sources.set(
+                t.article_id,
+                sourceLanguage(JSON.stringify(content)),
+              );
+          } catch {
+            /* Malformed legacy editions are not advertised. */
+          }
+        }
+        for (const t of variants.results) {
+          const language = publicLanguage(t.lang);
+          let valid = false;
+          try {
+            valid = typeof JSON.parse(t.content)?.headline === "string";
+          } catch {
+            /* legacy */
+          }
+          if (valid && language && language !== sources.get(t.article_id))
+            localized.push(`/rss/articles/${t.article_id}?lang=${language}`);
+        }
+      }
+    }
     const paths = [
       ...(page === 1 ? (articles ? ["/articles"] : ["/", "/browse"]) : []),
       ...rows.results.map(
         (i) => `${articles ? "/rss/articles" : "/items"}/${i.id}`,
       ),
+      ...new Set(localized),
     ];
     return new Response(
       `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">${paths
@@ -440,7 +574,7 @@ export async function serveSeo(request: Request, env: Env): Promise<Response> {
             ? rows.results.find((i) => path === `/items/${i.id}`)
             : undefined;
           const image = safeImage(entry?.thumbnail || null);
-          return `<url><loc>${ORIGIN}${path}</loc>${image ? `<image:image><image:loc>${escapeHtml(image)}</image:loc></image:image>` : ""}</url>`;
+          return `<url><loc>${escapeHtml(ORIGIN + path)}</loc>${image ? `<image:image><image:loc>${escapeHtml(image)}</image:loc></image:image>` : ""}</url>`;
         })
         .join("")}</urlset>`,
       { headers },
