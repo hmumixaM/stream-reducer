@@ -4,6 +4,7 @@ import {
   languageNames,
   publicLanguage,
   sourceLanguage,
+  type SourceLanguage,
 } from "./seoLanguages";
 import { POPULAR_POOL_SQL } from "./popularPicks";
 import { mediaContent, section } from "./seoContent";
@@ -124,7 +125,11 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
     const { article, editions } = result;
     const body = await publicArticleBody(env, article);
     const source = editions.find((e) => e.lang === "original") || editions[0];
-    const sourceLang = sourceLanguage(JSON.stringify(source?.content || {}));
+    const sourceLang = sourceLanguage(
+      JSON.stringify(source?.content || {}),
+      source?.lang,
+      editions.map((e) => e.lang),
+    );
     const locale = languagePlan(
       page.canonical,
       sourceLang,
@@ -161,7 +166,7 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
         `Article summary — ${e.lang}`,
         text,
         e.lang === "original"
-          ? detectLanguage(text)
+          ? locale.language
           : e.lang === "zh"
             ? "zh-CN"
             : e.lang,
@@ -174,7 +179,7 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
           ? "Saved original article"
           : "Saved source excerpt",
         body.text,
-        detectLanguage(body.text),
+        locale.language,
       );
       page.markdown += `## Saved original (${article.completeness})\n\n${body.text}`;
     }
@@ -235,12 +240,21 @@ export async function publicPage(env: Env, url: URL): Promise<SeoPage> {
       return page;
     }
     const sourceItem = item;
-    const sourceLang = sourceLanguage(item.markdown);
     const translations = await env.DB.prepare(
       "SELECT lang,markdown,structured FROM item_translation WHERE item_id=? AND status='done' AND length(trim(markdown))>0 ORDER BY lang",
     )
       .bind(item.id)
       .all<{ lang: string; markdown: string; structured: string }>();
+    const transcript = await env.DB.prepare(
+      "SELECT language FROM transcript WHERE item_id=?",
+    )
+      .bind(item.id)
+      .first<{ language: string | null }>();
+    const sourceLang = sourceLanguage(
+      item.markdown,
+      transcript?.language,
+      translations.results.map((t) => t.lang),
+    );
     const locale = languagePlan(
       page.canonical,
       sourceLang,
@@ -513,15 +527,31 @@ export async function serveSeo(request: Request, env: Env): Promise<Response> {
       const ids = JSON.stringify(rows.results.map((r) => r.id));
       if (!articles) {
         const variants = await env.DB.prepare(
-          `SELECT t.item_id,t.lang,substr(s.markdown,1,3000) source_sample FROM item_translation t
+          `SELECT t.item_id,t.lang,substr(s.markdown,1,3000) source_sample,tr.language source_language,
+          EXISTS(SELECT 1 FROM item_translation en WHERE en.item_id=t.item_id AND en.lang='en' AND en.status='done' AND length(trim(en.markdown))>0) has_english FROM item_translation t
           JOIN item i ON i.id=t.item_id JOIN summary s ON s.item_id=i.id
+          LEFT JOIN transcript tr ON tr.item_id=i.id
           WHERE t.item_id IN (SELECT value FROM json_each(?)) AND t.status='done' AND length(trim(t.markdown))>0 AND ${ELIGIBLE}`,
         )
           .bind(ids)
-          .all<{ item_id: number; lang: string; source_sample: string }>();
+          .all<{
+            item_id: number;
+            lang: string;
+            source_sample: string;
+            source_language: string | null;
+            has_english: number;
+          }>();
         for (const t of variants.results) {
           const language = publicLanguage(t.lang);
-          if (language && language !== sourceLanguage(t.source_sample))
+          if (
+            language &&
+            language !==
+              sourceLanguage(
+                t.source_sample,
+                t.source_language,
+                t.has_english ? ["en"] : [],
+              )
+          )
             localized.push(`/items/${t.item_id}?lang=${language}`);
         }
       } else {
@@ -531,31 +561,35 @@ export async function serveSeo(request: Request, env: Env): Promise<Response> {
         )
           .bind(ids)
           .all<{ article_id: number; lang: string; content: string }>();
-        const sources = new Map<number, string>();
-        for (const t of variants.results) {
+        const sources = new Map<number, SourceLanguage>();
+        const languages = new Map<number, string[]>();
+        const validEditions = variants.results.flatMap((t) => {
           try {
             const content = JSON.parse(t.content);
-            if (
-              typeof content?.headline === "string" &&
-              (!sources.has(t.article_id) || t.lang === "original")
-            )
-              sources.set(
-                t.article_id,
-                sourceLanguage(JSON.stringify(content)),
-              );
+            if (typeof content?.headline !== "string") return [];
+            languages.set(t.article_id, [
+              ...(languages.get(t.article_id) || []),
+              t.lang,
+            ]);
+            return [{ ...t, content }];
           } catch {
-            /* Malformed legacy editions are not advertised. */
+            return [];
           }
+        });
+        for (const t of validEditions) {
+          if (!sources.has(t.article_id) || t.lang === "original")
+            sources.set(
+              t.article_id,
+              sourceLanguage(
+                JSON.stringify(t.content),
+                t.lang,
+                languages.get(t.article_id),
+              ),
+            );
         }
-        for (const t of variants.results) {
+        for (const t of validEditions) {
           const language = publicLanguage(t.lang);
-          let valid = false;
-          try {
-            valid = typeof JSON.parse(t.content)?.headline === "string";
-          } catch {
-            /* legacy */
-          }
-          if (valid && language && language !== sources.get(t.article_id))
+          if (language && language !== sources.get(t.article_id))
             localized.push(`/rss/articles/${t.article_id}?lang=${language}`);
         }
       }
@@ -618,10 +652,4 @@ export async function serveSeo(request: Request, env: Env): Promise<Response> {
   headers.set("cache-control", "public, max-age=0, s-maxage=300");
   headers.set("x-robots-tag", page.index ? "index, follow" : "noindex, follow");
   return new Response(html.body, { status: page.status, headers });
-}
-
-function detectLanguage(text: string) {
-  return (text.slice(0, 3000).match(/[\u3400-\u9fff]/g)?.length || 0) > 40
-    ? "zh-CN"
-    : "en";
 }

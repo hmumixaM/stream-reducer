@@ -1,4 +1,4 @@
-import { publicLanguage, type PublicLanguage } from "./seoLanguages";
+import { publicLanguage, type SourceLanguage } from "./seoLanguages";
 import type { Env } from "../env";
 import {
   readCached,
@@ -45,8 +45,8 @@ export async function mediaContent(
     markdown: string;
   },
   options: {
-    language?: PublicLanguage;
-    originalLanguage?: PublicLanguage;
+    language?: SourceLanguage;
+    originalLanguage?: SourceLanguage;
     translations?: { lang: string; markdown: string; structured: string }[];
   } = {},
 ) {
@@ -158,7 +158,11 @@ export async function mediaContent(
     });
   }
   const selected = options.language
-    ? parts.filter((p) => publicLanguage(p.lang) === options.language)
+    ? parts.filter(
+        (p) =>
+          (p.lang === "und" ? "und" : publicLanguage(p.lang)) ===
+          options.language,
+      )
     : parts;
   return {
     html: selected.map((p) => section(p.title, p.text, p.lang)).join(""),
