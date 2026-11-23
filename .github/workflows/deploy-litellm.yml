@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "xgoose-litellm/**"
+      - "!xgoose-litellm/oracle/**"
       - ".github/workflows/deploy-litellm.yml"
   workflow_dispatch:
 

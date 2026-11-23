@@ -34,6 +34,7 @@ model_list:
       api_base: http://vertex-relay:8080/hosted/openai/v1
       api_key: os.environ/HOSTED_RELAY_KEY
       max_retries: 0
+      num_retries: 0
       reasoning_effort: none
   - model_name: gpt-6.1-sol
     litellm_params:
@@ -41,6 +42,7 @@ model_list:
       api_base: http://vertex-relay:8080/hosted/openai/v1
       api_key: os.environ/HOSTED_RELAY_KEY
       max_retries: 0
+      num_retries: 0
       reasoning_effort: medium
   - model_name: gpt-6.1-terra
     litellm_params:
@@ -48,6 +50,7 @@ model_list:
       api_base: http://vertex-relay:8080/hosted/openai/v1
       api_key: os.environ/HOSTED_RELAY_KEY
       max_retries: 0
+      num_retries: 0
       reasoning_effort: medium
   - model_name: gpt-6-astra
     litellm_params:
@@ -55,6 +58,7 @@ model_list:
       api_base: http://vertex-relay:8080/hosted/openai/v1
       api_key: os.environ/HOSTED_RELAY_KEY
       max_retries: 0
+      num_retries: 0
       reasoning_effort: medium
   - model_name: gpt-6.2-astra
     litellm_params:
@@ -62,6 +66,7 @@ model_list:
       api_base: http://vertex-relay:8080/hosted/openai/v1
       api_key: os.environ/HOSTED_RELAY_KEY
       max_retries: 0
+      num_retries: 0
       reasoning_effort: medium
   - model_name: claude-haiku-5-5
     litellm_params:
@@ -69,6 +74,7 @@ model_list:
       api_base: http://vertex-relay:8080/hosted/anthropic
       api_key: os.environ/HOSTED_RELAY_KEY
       max_retries: 0
+      num_retries: 0
       reasoning_effort: medium
   - model_name: claude-sonnet-5-5
     litellm_params:
@@ -76,6 +82,7 @@ model_list:
       api_base: http://vertex-relay:8080/hosted/anthropic
       api_key: os.environ/HOSTED_RELAY_KEY
       max_retries: 0
+      num_retries: 0
       reasoning_effort: medium
 litellm_settings:
   # A client must never override the fixed provider targets in this file.
