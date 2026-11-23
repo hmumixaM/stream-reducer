@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import google.auth
 from google.auth.transport.requests import Request
 import requests
+from hosted_broker import forward_hosted, hosted_route
 
 MAX_BODY = 8 * 1024 * 1024
 MODELS = {"google/gemini-3.8-flash", "google/gemini-3.5-flash"}
@@ -63,6 +64,7 @@ class VertexRelay(ThreadingHTTPServer):
         self.rightcode_key = rightcode_key
         self.refresh_lock = threading.Lock()
         self.slots = threading.BoundedSemaphore(16)
+        self.hosted_slots = threading.BoundedSemaphore(6)
 
     def access_token(self):
         with self.refresh_lock:
@@ -93,6 +95,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def error(self, status, message):
         body = json.dumps({"error": {"message": message}}).encode()
+        self.write_json(status, body)
+
+    def hosted_error(self, status, code):
+        body = json.dumps({"type": "error", "error": {"code": code, "type": code, "message": "Provider request failed"}}).encode()
+        self.write_json(status, body)
+
+    def write_json(self, status, body):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -105,6 +114,8 @@ class Handler(BaseHTTPRequestHandler):
         self.error(404, "not found")
 
     def do_POST(self):
+        if route := hosted_route(self.path):
+            return forward_hosted(self, route)
         if self.path not in {"/v1/chat/completions", "/rightcode/v1/chat/completions"}:
             return self.error(404, "not found")
         rightcode = self.path == "/rightcode/v1/chat/completions"

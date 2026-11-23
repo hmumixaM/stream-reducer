@@ -5,6 +5,19 @@ the on-demand Cloudflare LiteLLM gateway. The two Vertex aliases in that older
 gateway also delegate to Oracle so its LiteLLM process no longer receives ADC.
 Other legacy models and the disabled-user check remain in the older gateway.
 
+The same Oracle process can accept xgoose Hosted inference through a separate
+bearer and Cloudflare Access service identity. Each bearer sees and invokes its
+own model IDs. The OpenAI and Anthropic provider keys live in the relay's restricted
+`relay.env`. The gateway and relay share a distinct `HOSTED_RELAY_KEY` for the
+fixed Hosted provider routes. The Hosted gateway bearer is `XGOOSE_HOSTED_KEY`
+in the gateway's `.env`. Neither credential grants access to the Google ADC.
+
+The shared LiteLLM process has a 1.5 vCPU and 4 GiB memory cap. The relay grants
+six concurrent Hosted slots separately from the Stream Reducer pool. Validate
+both catalogue namespaces and verify a real streaming response through Access
+before enabling xgoose traffic. Keep the previous compose inputs available for
+rollback.
+
 ## Security boundaries
 
 ```text

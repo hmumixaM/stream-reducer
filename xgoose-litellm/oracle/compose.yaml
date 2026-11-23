@@ -8,6 +8,7 @@ services:
     env_file: .env
     environment:
       HOME: /tmp
+      PYTHONPATH: /app
       XDG_CACHE_HOME: /tmp/cache
       PYTHONDONTWRITEBYTECODE: "1"
       LITELLM_LOG: WARNING
@@ -15,6 +16,7 @@ services:
       LITELLM_TELEMETRY: "False"
     volumes:
       - ./config.yaml:/app/config.yaml:ro,Z
+      - ./gateway_auth.py:/app/gateway_auth.py:ro,Z
     networks: [gateway, vertex]
     depends_on:
       vertex-relay:
@@ -26,8 +28,9 @@ services:
     ulimits:
       core: {soft: 0, hard: 0}
     pids_limit: 256
-    mem_limit: 3g
-    cpus: "0.5"
+    mem_limit: 4g
+    memswap_limit: 6g
+    cpus: "1.5"
     cpu_shares: 512
     restart: unless-stopped
     logging:
@@ -71,6 +74,7 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ./vertex_broker.py:/app/vertex_broker.py:ro,Z
+      - ./hosted_broker.py:/app/hosted_broker.py:ro,Z
       - ./secrets/vertex-adc.json:/run/secrets/vertex-adc.json:ro,Z
     networks: [vertex, vertex-egress]
     read_only: true
@@ -80,7 +84,7 @@ services:
     ulimits:
       core: {soft: 0, hard: 0}
     pids_limit: 64
-    mem_limit: 256m
+    mem_limit: 512m
     cpus: "0.5"
     restart: unless-stopped
     logging:

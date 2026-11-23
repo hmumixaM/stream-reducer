@@ -1,4 +1,4 @@
-# Stream Reducer only. No calls to the Cloudflare LiteLLM deployment.
+# Shared Oracle gateway. Provider credentials are held only by the private relay.
 model_list:
   - model_name: gemini-3.8-flash
     litellm_params:
@@ -28,6 +28,55 @@ model_list:
       api_key: os.environ/VERTEX_RELAY_KEY
       input_cost_per_token: 0.000002
       output_cost_per_token: 0.000002
+  - model_name: luna
+    litellm_params:
+      model: openai/gpt-6-luna
+      api_base: http://vertex-relay:8080/hosted/openai/v1
+      api_key: os.environ/HOSTED_RELAY_KEY
+      max_retries: 0
+      reasoning_effort: none
+  - model_name: gpt-6.1-sol
+    litellm_params:
+      model: openai/gpt-6.1-sol
+      api_base: http://vertex-relay:8080/hosted/openai/v1
+      api_key: os.environ/HOSTED_RELAY_KEY
+      max_retries: 0
+      reasoning_effort: medium
+  - model_name: gpt-6.1-terra
+    litellm_params:
+      model: openai/gpt-6.1-terra
+      api_base: http://vertex-relay:8080/hosted/openai/v1
+      api_key: os.environ/HOSTED_RELAY_KEY
+      max_retries: 0
+      reasoning_effort: medium
+  - model_name: gpt-6-astra
+    litellm_params:
+      model: openai/gpt-6-astra
+      api_base: http://vertex-relay:8080/hosted/openai/v1
+      api_key: os.environ/HOSTED_RELAY_KEY
+      max_retries: 0
+      reasoning_effort: medium
+  - model_name: gpt-6.2-astra
+    litellm_params:
+      model: openai/gpt-6.2-astra
+      api_base: http://vertex-relay:8080/hosted/openai/v1
+      api_key: os.environ/HOSTED_RELAY_KEY
+      max_retries: 0
+      reasoning_effort: medium
+  - model_name: claude-haiku-5-5
+    litellm_params:
+      model: anthropic/claude-haiku-5-5
+      api_base: http://vertex-relay:8080/hosted/anthropic
+      api_key: os.environ/HOSTED_RELAY_KEY
+      max_retries: 0
+      reasoning_effort: medium
+  - model_name: claude-sonnet-5-5
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5
+      api_base: http://vertex-relay:8080/hosted/anthropic
+      api_key: os.environ/HOSTED_RELAY_KEY
+      max_retries: 0
+      reasoning_effort: medium
 litellm_settings:
   # A client must never override the fixed provider targets in this file.
   drop_params: true
@@ -42,4 +91,7 @@ router_settings:
   cooldown_time: 30
 general_settings:
   allow_client_side_credentials: false
-  master_key: os.environ/LITELLM_MASTER_KEY
+  custom_auth: gateway_auth.authenticate
+  custom_auth_run_common_checks: false
+  disable_spend_logs: true
+  disable_error_logs: true
