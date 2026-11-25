@@ -121,7 +121,7 @@ passages retain timestamps so readers can check the underlying material.
 
 **Cloudflare is the current hosted edition.** Follow the [deployment guide](cf/README.md)
 for resource creation, secrets, database migrations, and GitHub Actions setup.
-The [deploy workflow](.github/workflows/deploy-cloudflare.yml) builds the SPA,
+The [deploy workflow](.github/workflows/main-deploy-cloudflare.yml) builds the SPA,
 applies D1 migrations, and deploys the Worker and pipeline container on relevant
 pushes to `main`.
 

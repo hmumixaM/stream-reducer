@@ -18,7 +18,7 @@ on:
       - "cf/**"
       - "frontend/**"
       - "app/**"
-      - ".github/workflows/deploy-cloudflare.yml"
+      - ".github/workflows/main-deploy-cloudflare.yml"
   workflow_dispatch:
 
 concurrency:
@@ -27,6 +27,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

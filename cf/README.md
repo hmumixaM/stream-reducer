@@ -117,7 +117,7 @@ npx wrangler d1 migrations apply stream_reduce --remote
 
 ## Deploy with GitHub Actions
 
-Production deploys use the [GitHub Actions workflow](../.github/workflows/deploy-cloudflare.yml).
+Production deploys use the [GitHub Actions workflow](../.github/workflows/main-deploy-cloudflare.yml).
 
 The workflow runs automatically on pushes to `main` that touch `cf/**`,
 `frontend/**`, `app/**`, or the workflow file itself. It can also be started
