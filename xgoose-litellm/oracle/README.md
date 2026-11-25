@@ -7,8 +7,8 @@ Other legacy models and the disabled-user check remain in the older gateway.
 
 The same Oracle process can accept xgoose Hosted inference through a separate
 bearer and Cloudflare Access service identity. Each bearer sees and invokes its
-own model IDs. The OpenAI and Anthropic provider keys live in the relay's restricted
-`relay.env`. The gateway and relay share a distinct `HOSTED_RELAY_KEY` for the
+own model IDs. The OpenAI, Anthropic, DeepSeek and Yeta provider keys live in
+the relay's restricted `relay.env`. The gateway and relay share a distinct `HOSTED_RELAY_KEY` for the
 fixed Hosted provider routes. The Hosted gateway bearer is `XGOOSE_HOSTED_KEY`
 in the gateway's `.env`. Neither credential grants access to the Google ADC.
 
@@ -62,8 +62,8 @@ there. Create these files privately, never through terminal arguments or Git:
 
 | File | Contents | Ownership / mode |
 | --- | --- | --- |
-| `.env` | `LITELLM_MASTER_KEY`, `VERTEX_RELAY_KEY` | root / 0600 |
-| `relay.env` | `VERTEX_RELAY_KEY`, `RIGHTCODE_API_KEY` | root / 0600 |
+| `.env` | `LITELLM_MASTER_KEY`, `VERTEX_RELAY_KEY`, `XGOOSE_HOSTED_KEY`, `HOSTED_RELAY_KEY` | root / 0600 |
+| `relay.env` | `VERTEX_RELAY_KEY`, `RIGHTCODE_API_KEY`, `HOSTED_RELAY_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `YETA_API_KEY` | root / 0600 |
 | `secrets/vertex-adc.json` | Google ADC | 65531:65531 / 0400 |
 | `secrets/tunnel-token` | Tunnel connector token | 65532:65532 / 0400 |
 

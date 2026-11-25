@@ -12,6 +12,8 @@ ROUTES = {
     "/hosted/openai/v1/chat/completions": ("https://api.openai.com/v1/chat/completions", OPENAI_MODELS, "OPENAI_API_KEY"),
     "/hosted/openai/v1/responses": ("https://api.openai.com/v1/responses", OPENAI_MODELS, "OPENAI_API_KEY"),
     "/hosted/anthropic/v1/messages": ("https://api.anthropic.com/v1/messages", ANTHROPIC_MODELS, "ANTHROPIC_API_KEY"),
+    "/hosted/deepseek/chat/completions": ("https://api.deepseek.com/chat/completions", {"deepseek-flash"}, "DEEPSEEK_API_KEY"),
+    "/hosted/yeta/v1/responses": ("https://platform.yeta.ai/v1/responses", {"deepseek-v4.1-flash-uncensored"}, "YETA_API_KEY"),
 }
 MAX_HOSTED_BODY = 16_000_000
 ERROR_CODES = {

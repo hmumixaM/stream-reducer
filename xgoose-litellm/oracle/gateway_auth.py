@@ -6,7 +6,10 @@ from fastapi import HTTPException, Request
 from litellm.proxy._types import UserAPIKeyAuth
 
 REDUCER_MODELS = {"gemini-3.8-flash", "gemini-3.8-flash-rightcode", "gemini-3.7-flash", "gemini-3.5-flash-vertex"}
-HOSTED_MODELS = {"luna", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6.2-astra", "claude-haiku-5-5", "claude-sonnet-5-5"}
+HOSTED_MODELS = {
+    "luna", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6.2-astra",
+    "claude-haiku-5-5", "claude-sonnet-5-5", "deepseek-flash", "deepseek-purge",
+}
 HOSTED_FIELDS = {
     "model", "messages", "tools", "tool_choice", "stream", "stream_options",
     "max_tokens", "parallel_tool_calls", "temperature", "top_p", "user", "reasoning_effort",

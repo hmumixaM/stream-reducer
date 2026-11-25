@@ -15,6 +15,9 @@ class Credentials:
 
 class Response:
     status_code = 200
+    ok = True
+    is_redirect = False
+    headers = {"Content-Type": "application/json"}
     def __enter__(self):
         return self
     def __exit__(self, *_args):
@@ -108,6 +111,32 @@ class RelayTests(unittest.TestCase):
             self.assertIn(b"Provider request failed", body)
         finally:
             post.return_value.status_code = 200
+
+    @patch.dict("os.environ", {
+        "HOSTED_RELAY_KEY": "hosted-relay-test-key",
+        "DEEPSEEK_API_KEY": "dummy-deepseek",
+        "YETA_API_KEY": "dummy-yeta",
+    })
+    @patch("hosted_broker.requests.Session.post", return_value=Response())
+    def test_deepseek_routes_use_their_own_fixed_provider_and_key(self, post):
+        routes = [
+            ("/hosted/deepseek/chat/completions", "deepseek-flash",
+             "https://api.deepseek.com/chat/completions", "dummy-deepseek"),
+            ("/hosted/yeta/v1/responses", "deepseek-v4.1-flash-uncensored",
+             "https://platform.yeta.ai/v1/responses", "dummy-yeta"),
+        ]
+        for path, model, target, key in routes:
+            with self.subTest(model=model):
+                post.reset_mock()
+                self.assertEqual(self.request(path=path, payload={"model": model})[0], 401)
+                self.assertEqual(self.request(path=path, key="hosted-relay-test-key", payload={"model": "other"})[0], 400)
+                post.assert_not_called()
+                status, body = self.request(path=path, key="hosted-relay-test-key", payload={"model": model})
+                self.assertEqual(status, 200)
+                self.assertIn(b'"ok"', body)
+                self.assertEqual(post.call_args.args, (target,))
+                self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer " + key)
+                self.assertFalse(post.call_args.kwargs["allow_redirects"])
 
 
 if __name__ == "__main__":

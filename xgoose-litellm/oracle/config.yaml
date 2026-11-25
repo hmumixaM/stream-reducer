@@ -84,6 +84,24 @@ model_list:
       max_retries: 0
       num_retries: 0
       reasoning_effort: medium
+  - model_name: deepseek-flash
+    litellm_params:
+      model: deepseek/deepseek-flash
+      api_base: http://vertex-relay:8080/hosted/deepseek
+      api_key: os.environ/HOSTED_RELAY_KEY
+      max_retries: 0
+      num_retries: 0
+      reasoning_effort: none
+  - model_name: deepseek-purge
+    model_info:
+      supports_reasoning: true
+    litellm_params:
+      model: openai/responses/deepseek-v4.1-flash-uncensored
+      api_base: http://vertex-relay:8080/hosted/yeta/v1
+      api_key: os.environ/HOSTED_RELAY_KEY
+      max_retries: 0
+      num_retries: 0
+      reasoning_effort: none
 litellm_settings:
   # A client must never override the fixed provider targets in this file.
   drop_params: true
