@@ -1,0 +1,9 @@
+# Keep this path disabled in GitHub Actions so older refs cannot reactivate it.
+name: Retired deploy cloudflare
+on: workflow_call
+jobs:
+  retired:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
